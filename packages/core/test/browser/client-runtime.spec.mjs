@@ -120,10 +120,8 @@ test.describe('navigation fetching', () => {
     expect(flightRequests[0]).toContain('/users');
   });
 
-  // React runs async transitions concurrently, so two overlapping navigations are two live fetches with no
-  // ordering between them. Nothing about the slow one makes it stale on arrival except the newer one having
-  // started — so without a sequence check it repaints the page the user already left, under the URL of the
-  // page they asked for. A slow connection and an impatient user is the whole reproduction.
+  // The Navigation API aborts the first event's signal when the second navigation takes over. The old
+  // response must not repaint the page the user already left, under the URL of the page they asked for.
   test('a superseded navigation does not repaint after the one that replaced it', async ({ page }) => {
     await page.goto('/');
     await expect(page.getByText('(hydrated ✓)')).toBeVisible();
@@ -137,6 +135,14 @@ test.describe('navigation fetching', () => {
       // The client is expected to have hung up on this by now, which is what makes `continue` throw.
       await route.continue().catch(() => {});
     });
+    await page.evaluate(() => {
+      window.__rshonoNavigationAborts = 0;
+      window.navigation.addEventListener('navigate', (event) => {
+        if (new URL(event.destination.url).pathname === '/users') {
+          event.signal.addEventListener('abort', () => window.__rshonoNavigationAborts++);
+        }
+      });
+    });
 
     await page.getByRole('link', { name: 'Users', exact: true }).click();
     await expect(page).toHaveURL('/users');
@@ -145,6 +151,7 @@ test.describe('navigation fetching', () => {
     await page.getByRole('link', { name: 'Sign Up', exact: true }).click();
     await expect(page).toHaveURL('/signup');
     await expect(page.getByRole('heading', { name: 'Sign Up' })).toBeVisible();
+    await expect.poll(() => page.evaluate(() => window.__rshonoNavigationAborts)).toBe(1);
 
     release();
     await page.waitForTimeout(400); // long enough for a stale payload to have been applied
@@ -177,6 +184,49 @@ test.describe('useNavigation', () => {
 
     await expect(page.locator('[data-nav="pathname"]')).toHaveText('/profile/1');
     expect(await documentId(page)).toBe(before);
+  });
+
+  test('router operations use Navigation API without calling History API methods', async ({ page }) => {
+    await page.goto('/profile/1');
+
+    await page.evaluate(() => {
+      window.__rshonoHistoryProbe = { pushState: 0, replaceState: 0, back: 0, forward: 0 };
+      for (const name of ['pushState', 'replaceState', 'back', 'forward']) {
+        const original = history[name];
+        history[name] = function (...args) {
+          window.__rshonoHistoryProbe[name]++;
+          return original.apply(this, args);
+        };
+      }
+    });
+
+    await page.getByRole('button', { name: "push('?tab=activity')" }).click();
+    await expect(page).toHaveURL('/profile/1?tab=activity');
+    await page.getByRole('button', { name: 'back()' }).click();
+    await expect(page).toHaveURL('/profile/1');
+    await page.getByRole('button', { name: 'forward()' }).click();
+    await expect(page).toHaveURL('/profile/1?tab=activity');
+    await page.getByRole('button', { name: 'refresh()' }).click();
+    await expect(page.locator('[data-nav="query-tab"]')).toHaveText('activity');
+
+    await expect
+      .poll(() => page.evaluate(() => window.__rshonoHistoryProbe))
+      .toEqual({
+        pushState: 0,
+        replaceState: 0,
+        back: 0,
+        forward: 0,
+      });
+  });
+
+  test('a browser reload remains a full document navigation', async ({ page }) => {
+    await page.goto('/');
+    const before = await markDocument(page);
+
+    await page.reload();
+    await page.waitForLoadState('load');
+
+    expect(await documentId(page)).not.toBe(before);
   });
 
   // A traversal is the browser's own operation, so `back()` / `forward()` only ask for it and the runtime
