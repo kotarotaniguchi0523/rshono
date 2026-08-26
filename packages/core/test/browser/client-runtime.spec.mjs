@@ -28,6 +28,30 @@ test.describe('hydration', () => {
 });
 
 test.describe('soft navigation', () => {
+  test('a same-origin link uses Navigation API without calling History API methods', async ({ page }) => {
+    await page.goto('/');
+
+    await page.evaluate(() => {
+      window.__rshonoNavigationProbe = { navigate: 0, history: 0 };
+      window.navigation.addEventListener('navigate', () => window.__rshonoNavigationProbe.navigate++);
+
+      const pushState = history.pushState;
+      const replaceState = history.replaceState;
+      history.pushState = function (...args) {
+        window.__rshonoNavigationProbe.history++;
+        return pushState.apply(this, args);
+      };
+      history.replaceState = function (...args) {
+        window.__rshonoNavigationProbe.history++;
+        return replaceState.apply(this, args);
+      };
+    });
+
+    await page.getByRole('link', { name: 'Users', exact: true }).click();
+    await expect(page).toHaveURL('/users');
+    await expect.poll(() => page.evaluate(() => window.__rshonoNavigationProbe)).toEqual({ navigate: 1, history: 0 });
+  });
+
   test('a link click swaps the page without reloading the document', async ({ page }) => {
     await page.goto('/');
     const before = await markDocument(page);
@@ -156,9 +180,9 @@ test.describe('useNavigation', () => {
   });
 
   // A traversal is the browser's own operation, so `back()` / `forward()` only ask for it and the runtime
-  // picks the entry up through `popstate`. Two things have to come out of that. The readout is rendered from
-  // the payload's `href`, not from `location`, so it only changes if a new payload was fetched and applied —
-  // and the document id only survives if that happened in place, without a browser load.
+  // picks the entry up through Navigation API's `navigate` event. Two things have to come out of that. The
+  // readout is rendered from the payload's `href`, not from `location`, so it only changes if a new payload
+  // was fetched and applied — and the document id only survives if that happened in place, without a browser load.
   test('router.back and router.forward traverse history as soft navigations', async ({ page }) => {
     await page.goto('/profile/1');
     await expect(page.locator('[data-nav="query-tab"]')).toHaveText('(none)');
@@ -223,9 +247,8 @@ test.describe('boundaries', () => {
 });
 
 test.describe('scroll on navigation', () => {
-  // The framework's own scroll memory is gone: `history.scrollRestoration` is `auto`, so a traversal is
-  // the browser's to restore and this asserts only the part that is still ours — a push starts at the
-  // top, because `pushState` is not a navigation and nothing else resets the offset.
+  // Traversal restoration belongs to Navigation API. Pushes use its manual mode so the RSC payload can commit
+  // before rshono applies the fragment/top scroll in a layout effect.
   test('a new navigation starts at the top', async ({ page }) => {
     await page.setViewportSize({ width: 500, height: 400 });
     await page.goto('/users');

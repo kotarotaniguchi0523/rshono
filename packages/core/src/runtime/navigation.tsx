@@ -7,7 +7,7 @@ import { createContext, useContext, useMemo, type ReactNode } from 'react';
  *
  * Every action is a **soft** navigation: the page's flight payload is fetched and applied in place, so
  * client component state outside the changed subtree survives. Off-site hrefs — and a traversal that leaves
- * the app — fall back to a full load.
+ * the app — continue as full document navigations.
  *
  * @example
  * ```tsx
