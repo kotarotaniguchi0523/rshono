@@ -154,6 +154,8 @@ async function main() {
 
   const initialPayload = await createFromReadableStream<RscPayload>(flightStream);
 
+  // The Navigation API result rejects for both superseded and failed navigations. The event handler below
+  // classifies those failures; callers only need to prevent an unhandled rejection here.
   function observeNavigation(result: NavigationResult): void {
     void result.finished?.catch(() => {});
   }
@@ -249,8 +251,9 @@ async function main() {
                 }
                 resolve();
               } catch (error) {
-                // A superseded transition rejects through the Navigation API. Its replacement owns the screen;
-                // only an actual render/fetch failure should reach `navigateerror` as a reload-worthy error.
+                // A superseded transition is not an error for the app: its replacement owns the screen. Control
+                // digests are handled here because redirect/notFound must choose their own navigation; only an
+                // actual render/fetch failure is rejected for `navigateerror` to reload the document.
                 if (event.signal.aborted) {
                   reject(new DOMException('Navigation was aborted', 'AbortError'));
                 } else if (handleControlDigest(error)) {
@@ -378,6 +381,8 @@ function listenNavigation(onNavigation: (event: NavigateEvent) => Promise<void>)
   };
   window.navigation.addEventListener('navigate', onNavigate);
 
+  // The handler above consumes aborts and control digests. Any error reaching this event is therefore an
+  // unhandled navigation failure, for which the old History API path reloaded the document in its catch block.
   const onNavigateError = (event: Event) => {
     const error = (event as Event & { error?: unknown }).error;
     if (!isAbortError(error)) window.location.reload();
