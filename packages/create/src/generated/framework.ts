@@ -14,11 +14,11 @@ export const NODE_ENGINE = '>=22.18.0';
  * React's RSC internals are coupled across builds, and a generated app has no workspace overrides.
  */
 export const FRAMEWORK_DEPS = {
-  hono: '^4.13.5',
+  hono: '^4.13.7',
   react: '19.2.8',
   'react-dom': '19.2.8',
   typescript: '^7.0.2',
-  '@types/node': '^26.4.0',
+  '@types/node': '^26.5.1',
   '@types/react': '^19.2.18',
 } as const;
 
