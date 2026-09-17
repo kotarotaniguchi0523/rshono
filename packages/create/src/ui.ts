@@ -46,7 +46,7 @@ export function summary(answers: Answers): string {
 }
 
 /** A cancelled prompt ends the run, rather than falling through to a default the user did not pick. */
-export function unwrap<T>(value: T | symbol): T {
+export function unwrap<T>(value: T | typeof prompts.CANCEL_SYMBOL): T {
   if (prompts.isCancel(value)) {
     prompts.cancel('Cancelled — nothing was written.');
     process.exit(130);
