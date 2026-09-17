@@ -9,6 +9,15 @@ from a maintainer's machine with `pnpm release` — see CONTRIBUTING.md.
 Releases before `1.0.0-rc.14` predate this file and are not reconstructed here; `git log` is the record for
 those.
 
+## Unreleased
+
+## 1.0.0-rc.21
+
+- **`@rspack/core` 2.2.2 → 2.2.6.** Four patch releases on the pin rc.19 moved to, taken in one commit across
+  the manifests, the overrides and the lockfile as always. Upstream is bug fixes, performance work and new
+  cache internals; nothing in the framework moved. The `minimumReleaseAgeExclude` entries follow the pin to
+  2.2.6, since the releases are younger than pnpm's cooling-off window.
+
 ## 1.0.0-rc.20
 
 A sustained review of `packages/core` since rc.19 — the request path and its error paths, the four deploy
