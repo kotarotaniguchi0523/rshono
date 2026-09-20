@@ -57,6 +57,13 @@ const flightStream = readFlightPayload();
  */
 const documentUrl = (): string => location.pathname + location.search;
 
+/**
+ * The document URL the payload on screen was rendered for — see {@link documentUrl}. A fragment-only
+ * traversal leaves it unchanged, which is how the `popstate` listener knows there is nothing to fetch.
+ * Updated in the layout effect that commits a payload.
+ */
+let renderedUrl = documentUrl();
+
 /** Guarantees somewhere to attach the fatal overlay: the root container is `document`, so a teardown can take `<body>` with it. */
 function overlayHost(): HTMLElement {
   if (!document.documentElement) document.appendChild(document.createElement('html'));
@@ -198,6 +205,107 @@ function requestPayload(href: string, signal?: AbortSignal): Promise<RscPayload>
 const canSoftNavigate = typeof navigation !== 'undefined' && typeof NavigateEvent !== 'undefined' && 'sourceElement' in NavigateEvent.prototype;
 
 /**
+ * The runtime owns a soft navigation's scroll, so the browser's own restoration has to be off: left on, a
+ * traversal restores the destination's offset against the outgoing tree before the payload for that entry
+ * has even been asked for, and the incoming tree overwrites it. `manual` only concerns the entries this
+ * document creates — a navigation to another document creates its own entry `auto` — and it also turns the
+ * browser's reload restoration off, which {@link readStoredScrollPositions} and the first layout effect put
+ * back.
+ *
+ * Gated on the soft router: below the Navigation API floor every navigation is a real document load, which
+ * a server-rendered app answers correctly and the browser restores correctly, and taking that over without
+ * a router to repaint the entry would strand the visitor at the top.
+ */
+if (canSoftNavigate) {
+  try {
+    history.scrollRestoration = 'manual';
+  } catch {
+    // A preference, not a requirement: where it cannot be set, the browser's restoration and the runtime's
+    // own can race on a traversal, and the runtime's runs at commit, after.
+  }
+}
+
+/** A scroll offset, in the coordinates `window.scrollTo` takes and `window.scrollX`/`window.scrollY` return. */
+type ScrollPoint = { x: number; y: number };
+
+/**
+ * Where each history entry of this document was left, keyed by its Navigation API key. In memory for the
+ * document's life; {@link persistScrollPositions} also writes it to `sessionStorage` so a reload — which
+ * the `manual` mode above stops the browser restoring — lands where the last document was left.
+ */
+const scrollPositions = new Map<string, ScrollPoint>();
+
+/** The `sessionStorage` key holding {@link scrollPositions}. */
+const SCROLL_STORAGE_KEY = 'rshono:scroll';
+
+/** How many entries are kept in that snapshot; the oldest falls out first — `Map` iteration order. */
+const SCROLL_STORAGE_LIMIT = 50;
+
+/** The key of the history entry being shown, or `undefined` where the soft router does not exist. */
+function currentEntryKey(): string | undefined {
+  return canSoftNavigate ? navigation.currentEntry?.key : undefined;
+}
+
+/**
+ * Records where the outgoing entry is being left. Read at `navigate` time — before the browser commits the
+ * new entry — and at `pagehide`, so whatever the navigation turns out to be, the entry it leaves has a
+ * position to come back to.
+ */
+function rememberCurrentScroll(): void {
+  const key = currentEntryKey();
+  if (key) scrollPositions.set(key, { x: window.scrollX, y: window.scrollY });
+}
+
+/** The position `key` was left at, or `undefined` when this document never saw it. */
+function scrollPointFor(key: string | undefined): ScrollPoint | undefined {
+  return key === undefined ? undefined : scrollPositions.get(key);
+}
+
+/**
+ * Reads the last document's snapshot back into {@link scrollPositions}. Called once, on startup, before the
+ * first payload commits: the in-memory map alone would lose every entry the moment the document is replaced.
+ */
+function readStoredScrollPositions(): void {
+  try {
+    const raw = sessionStorage.getItem(SCROLL_STORAGE_KEY);
+    if (!raw) return;
+    for (const [key, point] of Object.entries(JSON.parse(raw) as Record<string, ScrollPoint>)) {
+      if (Number.isFinite(point?.x) && Number.isFinite(point?.y)) scrollPositions.set(key, point);
+    }
+  } catch {
+    // Blocked site data, or a snapshot written by a different version. Either way there is nothing to restore,
+    // and the page is still correct without it.
+  }
+}
+
+/** Writes {@link scrollPositions} out, oldest first, bounded — see {@link SCROLL_STORAGE_LIMIT}. */
+function persistScrollPositions(): void {
+  try {
+    while (scrollPositions.size > SCROLL_STORAGE_LIMIT) {
+      const oldest = scrollPositions.keys().next().value;
+      if (oldest === undefined) break;
+      scrollPositions.delete(oldest);
+    }
+    sessionStorage.setItem(SCROLL_STORAGE_KEY, JSON.stringify(Object.fromEntries(scrollPositions)));
+  } catch {
+    // Blocked site data: the in-memory map still carries this document's navigations.
+  }
+}
+
+/**
+ * The snapshot starts with the document, not with hydration: the page is visible and clickable while the
+ * initial payload streams, and a reload or a navigation away in that window would otherwise lose the offset
+ * now that `manual` has stopped the browser restoring it. Nothing here depends on the router being mounted,
+ * so it does not wait for {@link listenNavigation}.
+ */
+if (canSoftNavigate) {
+  window.addEventListener('pagehide', () => {
+    rememberCurrentScroll();
+    persistScrollPositions();
+  });
+}
+
+/**
  * Drops a navigation's result promises. Both reject when a navigation is superseded or cancelled — routine
  * here, since a second click is meant to abandon the first — and unhandled they would be reported as faults.
  */
@@ -333,11 +441,71 @@ function handleControlDigest(error: unknown, { hard = false }: { hard?: boolean 
 }
 
 /**
+ * Scrolls the document to its start.
+ *
+ * The options form rather than `scrollTo(0, 0)`: the two-argument call is `auto`, which follows a
+ * `scroll-behavior` the app may have set on `html`, and a soft navigation that animates its own reset reads
+ * as a glitch rather than a page change.
+ */
+function scrollToTop(): void {
+  window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+}
+
+/** Puts a saved offset back. Instant for the same reason {@link scrollToTop} passes it. */
+function scrollToPoint(point: ScrollPoint): void {
+  window.scrollTo({ top: point.y, left: point.x, behavior: 'instant' });
+}
+
+/**
+ * Scrolls to a fragment's target the way the browser's own fragment jump does.
+ *
+ * `scrollIntoView` is the algorithm that honours `scroll-padding-top` on the scrolling box and
+ * `scroll-margin-top` on the target, which `window.scrollTo` does not. The lookup follows the browser's
+ * "find a potential indicated element": the id first, then the name. A malformed percent-escape falls back
+ * to the literal fragment, and a fragment nothing matches gets the top of the document — what a browser
+ * gives a missing anchor on a real load.
+ */
+function jumpToAnchor(hash: string): void {
+  const raw = hash.startsWith('#') ? hash.slice(1) : hash;
+  // No special case for `#top`: the browser only treats it as the top of the document when no element
+  // matches, and the fallback below is that top.
+  if (raw === '') {
+    scrollToTop();
+    return;
+  }
+  let id = raw;
+  try {
+    id = decodeURIComponent(raw);
+  } catch {
+    // Malformed escape — the literal fragment is the better guess at the id than nothing.
+  }
+  const target = document.getElementById(id) ?? document.getElementsByName(id)[0];
+  if (target) target.scrollIntoView();
+  else scrollToTop();
+}
+
+/**
+ * Moves focus the way the browser's `focusReset: 'after-transition'` does: the first `autofocus` element,
+ * else the document body. A traversal is no longer intercepted, so the browser performs no focus reset for
+ * it; without this, Back would leave focus on the link that was clicked on the page being left, and the next
+ * Tab would resume there. `preventScroll` because the traversal's own offset has just been restored.
+ */
+function resetFocus(): void {
+  const autofocus = document.querySelector<HTMLElement>('[autofocus]');
+  if (autofocus) autofocus.focus({ preventScroll: true });
+  else document.body.focus({ preventScroll: true });
+}
+
+/**
  * Puts a payload on screen, resolving once React has committed it. Replaced by `BrowserRoot`'s own on mount;
  * the default covers the window before hydration, where `setServerCallback` is already registered but there
  * is no root to update — a reload is the honest answer, and nothing after it needs to run.
+ *
+ * `afterCommit`, when given, runs in the same layout effect that releases the commit: after the new tree is
+ * in the DOM and before the browser paints, which is the only moment a `#hash` target exists and the
+ * pre-scroll position has not been shown.
  */
-let setPayload: (payload: RscPayload) => Promise<void> = () => {
+let setPayload: (payload: RscPayload, afterCommit?: () => void) => Promise<void> = () => {
   window.location.reload();
   return new Promise<void>(() => {});
 };
@@ -348,14 +516,34 @@ let startNav: (run: () => void | Promise<void>) => void = (run) => {
 };
 
 /**
+ * The navigation whose payload is allowed to settle the screen. React runs async work concurrently, so two
+ * navigations are two live fetches with no ordering between them; without this a slow first response landing
+ * after a fast second one repaints the page the user already left. The Navigation API aborts an intercepted
+ * navigation when a newer one starts, but a traversal has no `event.signal` to watch — `popstate` arrives
+ * after the browser has already committed it — so ordering is the runtime's own for those.
+ */
+let currentNavigation = 0;
+
+/** The in-flight navigation's fetch, so a newer one can stop paying for it. */
+let navigationFetch: AbortController | null = null;
+
+/**
  * Fetches the payload for `url` and puts it on screen.
  *
- * Resolves once React has **committed** it rather than when the fetch lands: an intercepted navigation
- * scrolls and moves focus when this promise settles, and a `#hash` target does not exist until the new tree
- * does. Rejects only on a genuine failure — being superseded is not one, and resolves quietly, because the
- * navigation that replaced this one owns the screen from then on.
+ * Resolves once React has **committed** it rather than when the fetch lands: `afterCommit` runs at that
+ * point, and a `#hash` target does not exist until the new tree does. Rejects only on a genuine failure —
+ * being superseded is not one, and resolves quietly, because the navigation that replaced this one owns the
+ * screen from then on.
  */
-function loadPayload(url: string, signal?: AbortSignal): Promise<void> {
+function loadPayload(url: string, signal?: AbortSignal, afterCommit?: () => void): Promise<void> {
+  // This navigation's place in the queue, and its own abort switch: a fetch is abandoned by whichever comes
+  // first, the browser superseding it (an intercepted navigation carries `event.signal`) or a newer runtime
+  // fetch starting (a traversal, an action, a dev refresh).
+  const navigation = ++currentNavigation;
+  navigationFetch?.abort();
+  const controller = (navigationFetch = new AbortController());
+  const abort = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
+
   // Deliberately not awaited inside the transition: the scope ends once the payload is handed to React, and
   // React holds `pending` until the update it scheduled commits. Awaiting the commit *inside* the scope would
   // work too, but only because React happens not to gate a commit on its async scope settling — an internal
@@ -363,15 +551,15 @@ function loadPayload(url: string, signal?: AbortSignal): Promise<void> {
   let committed: Promise<void> | undefined;
 
   const run = async () => {
-    const payload = await requestPayload(url, signal);
-    // The browser aborts a navigation the moment a newer one starts. Checked again after the await because
-    // the fetch may already have resolved by then, and applying it would repaint a page the user has left.
-    if (signal?.aborted) return;
+    const payload = await requestPayload(url, abort);
+    // Checked again after the await because the fetch may already have resolved by then, and applying it
+    // would repaint a page the user has left.
+    if (abort.aborted || navigation !== currentNavigation) return;
     if (payload.redirect) {
       push(payload.redirect);
       return;
     }
-    committed = setPayload(payload);
+    committed = setPayload(payload, afterCommit);
   };
 
   // `startTransition` runs the work but hands nothing back, so the promise carrying a failure is caught here
@@ -385,7 +573,7 @@ function loadPayload(url: string, signal?: AbortSignal): Promise<void> {
     (error: unknown) => {
       // Checked before the error is read: an abort is this navigation being replaced, and the one that
       // replaced it owns the outcome.
-      if (signal?.aborted || handleControlDigest(error)) return;
+      if (abort.aborted || navigation !== currentNavigation || handleControlDigest(error)) return;
       throw error;
     },
   );
@@ -449,25 +637,80 @@ function listenNavigation(): () => void {
       bypassRouter = false;
       return;
     }
+
+    // Whatever the browser is about to do with this navigation, the entry it is leaving is about to lose the
+    // offset it was at, and nothing else in this document will put it back. Saved before the branches below
+    // return, so a fragment the browser performs itself is covered too.
+    rememberCurrentScroll();
+
     if (!event.canIntercept || leaveToBrowser(event)) return;
 
-    // A push or a traversal lands on a new page, so the browser resets the scroll offset — or restores the
-    // one it remembers — and moves focus, which is what makes a soft navigation announce itself to a screen
-    // reader. A replace or a refresh stays where it is, so neither should move. Both wait on the handler,
-    // which is the point of resolving it at commit rather than at fetch.
+    // A traversal is repainted by the `popstate` listener below, not intercepted. `intercept`ing one is what
+    // makes WebKit stall the rendered viewport for about three seconds on a back swipe
+    // (bugs.webkit.org/319414): the view gesture's snapshot is only removed once the navigation finishes, and
+    // React's root attaches the wheel listener the bug also needs. Letting the traversal through means the
+    // browser commits the entry straight away, and the runtime puts the payload on screen when it arrives.
+    if (event.navigationType === 'traverse') return;
+
+    // A replace or a refresh stays where it is, so neither should move. A push starts at the top of the
+    // page, or at its fragment — and that scroll is the runtime's own now: WebKit performs no
+    // `after-transition` reset at all for an intercepted push (bugs.webkit.org/304593). Chromium skips it
+    // too, and a fragment jump rides the same code path. Passing `manual` here makes the browser hand the
+    // handler over without scrolling; the `afterCommit` callback reaches the target once the new tree is on
+    // screen. Focus stays the browser's, reset after the transition.
     const inPlace = event.navigationType === 'replace' || event.navigationType === 'reload';
+    let afterCommit: (() => void) | undefined;
+    if (event.navigationType === 'push') {
+      const { hash } = new URL(event.destination.url);
+      afterCommit = hash === '' ? scrollToTop : () => jumpToAnchor(hash);
+    }
 
     event.intercept({
-      scroll: inPlace ? 'manual' : 'after-transition',
+      scroll: 'manual',
       focusReset: inPlace ? 'manual' : 'after-transition',
       // The URL commits before the handler runs, so a failure leaves the address bar describing a page the
       // document is not showing. A real load is the only way back to agreement.
-      handler: () => loadPayload(event.destination.url, event.signal).catch(() => loadOutsideRouter(() => window.location.reload())),
+      handler: () => loadPayload(event.destination.url, event.signal, afterCommit).catch(() => loadOutsideRouter(() => window.location.reload())),
     });
   };
 
+  /**
+   * Repaints a traversal the listener above deliberately left to the browser, and moves the viewport back
+   * where the entry was left. `popstate` fires after the browser has committed the entry, so the destination
+   * is `navigation.currentEntry` and its saved offset is in {@link scrollPositions}.
+   */
+  const onPopState = () => {
+    const stored = scrollPointFor(currentEntryKey());
+    const hash = location.hash;
+    const apply = () => {
+      if (stored) scrollToPoint(stored);
+      else if (hash !== '') jumpToAnchor(hash);
+      else scrollToTop();
+    };
+
+    // A fragment-only traversal never changed the payload: the address bar is back at an anchor of the page
+    // already on screen, so there is nothing to fetch and nothing to wait for. The browser's own restoration
+    // is off, so the offset comes from what `onNavigate` saved when the anchor was followed; no focus reset,
+    // which is what leaving those navigations to the browser has always meant.
+    if (documentUrl() === renderedUrl) {
+      apply();
+      return;
+    }
+
+    void loadPayload(location.href, undefined, () => {
+      apply();
+      // The browser performs this for an intercepted navigation; a traversal is no longer intercepted, so
+      // without it Back would leave focus on the link that was clicked on the page being left.
+      resetFocus();
+    }).catch(() => loadOutsideRouter(() => window.location.reload()));
+  };
+
   navigation.addEventListener('navigate', onNavigate);
-  return () => navigation.removeEventListener('navigate', onNavigate);
+  window.addEventListener('popstate', onPopState);
+  return () => {
+    navigation.removeEventListener('navigate', onNavigate);
+    window.removeEventListener('popstate', onPopState);
+  };
 }
 
 async function main() {
@@ -496,29 +739,49 @@ async function main() {
     }
   }
 
+  // Everything the last document saved, read before any payload commits: the in-memory map alone would not
+  // survive the reload that `history.scrollRestoration = 'manual'` just stopped the browser restoring. The
+  // entry's key is stable across a reload, and the offset is applied by `BrowserRoot`'s first layout effect,
+  // before the first paint of the new tree.
+  if (canSoftNavigate) readStoredScrollPositions();
+  const restored = scrollPointFor(currentEntryKey());
+
   function BrowserRoot() {
     const [payload, setPayloadState] = React.useState(initialPayload);
     const [pending, startTransition] = React.useTransition();
     // The resolver the payload on screen still owes — see {@link loadPayload}.
     const pendingCommit = React.useRef<(() => void) | null>(null);
+    // The scroll the payload about to commit owes, set with it so a payload that supersedes another takes
+    // its predecessor's scroll out of the queue along with its commit. Initialised with the reload's offset:
+    // the first layout effect below applies it with the first payload, before the new tree is painted.
+    const pendingScroll = React.useRef<(() => void) | null>(restored ? () => scrollToPoint(restored) : null);
 
     React.useEffect(() => {
-      setPayload = (next) =>
+      setPayload = (next, afterCommit) =>
         new Promise<void>((resolve) => {
           // A payload replaced before it ever painted still has a navigation waiting on it. React commits
           // only the newest, so the effect below never runs for the one it skipped: release it here.
           pendingCommit.current?.();
           pendingCommit.current = resolve;
+          // Replaced rather than kept: a server action's payload carries no `afterCommit`, and the
+          // navigation it superseded must not scroll the page the action is about to replace it with.
+          pendingScroll.current = afterCommit ?? null;
           setPayloadState(next);
         });
       startNav = (run) => startTransition(run);
     }, [startTransition]);
 
     /**
-     * Releases the navigation waiting on this payload, which is what lets the browser scroll and move focus
-     * now that their target exists. A layout effect, so the pre-scroll position is never painted.
+     * Performs the pending scroll and releases the navigation waiting on this payload. A layout effect, so
+     * the new tree is in the DOM and the pre-scroll position is never painted.
      */
     React.useLayoutEffect(() => {
+      const scroll = pendingScroll.current;
+      pendingScroll.current = null;
+      scroll?.();
+      // What the payload that just committed was rendered for — see {@link renderedUrl}. A redirect never
+      // reaches here, and an action or a dev refresh keeps the URL it was fetched for.
+      renderedUrl = documentUrl();
       const commit = pendingCommit.current;
       pendingCommit.current = null;
       commit?.();

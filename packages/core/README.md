@@ -322,8 +322,11 @@ Every target streams, which is the bar a new one has to clear.
 - **Soft navigation needs the [Navigation API](https://developer.mozilla.org/en-US/docs/Web/API/Navigation_API)**
   — Chrome/Edge 135, Firefox 147, Safari 26.2, [Baseline](https://web.dev/blog/baseline-navigation-api) since
   January 2026. Where it is missing there is no interception at all and every link is a real browser load,
-  which a server-rendered app answers correctly; only the soft part is gone. Scroll restoration, the fragment
-  jump and the post-navigation focus reset are all the browser's.
+  which a server-rendered app answers correctly; only the soft part is gone. On a soft navigation the runtime
+  owns the scroll: a push reaches the top or its fragment, a traversal returns to where the entry was left,
+  and focus resets — `history.scrollRestoration` is `manual` for the document and positions are kept per
+  entry, in `sessionStorage` too, so a reload lands where the last document was left. A same-page fragment
+  stays the browser's, since it never changes the payload.
 - **`redirect()` and `notFound()` must be reached before the page shell is sent.** A page streams: the status
   line and the first bytes go out as soon as the shell is ready, and HTTP has no take-backs after that. Called
   from a `<Suspense>` boundary that resolves later, the signal can no longer be a 3xx or a 404 — the response
