@@ -296,9 +296,9 @@ test.describe('boundaries', () => {
 });
 
 test.describe('scroll and focus on navigation', () => {
-  // Scroll is the browser's, through `intercept({ scroll: 'after-transition' })` — but only because the
-  // intercept handler resolves at React's commit rather than when the fetch lands. Resolve it early and the
-  // browser scrolls a document that has not been replaced yet, which is what these two pin down.
+  // Scroll is the runtime's, in the layout effect the payload commits in: `scroll: 'manual'` means the
+  // browser is not asked for its own reset (which WebKit and Chromium skip for an intercepted push anyway),
+  // and traversal restoration is off with `history.scrollRestoration = 'manual'`.
   test('a new navigation starts at the top', async ({ page }) => {
     await page.setViewportSize({ width: 500, height: 400 });
     await page.goto('/users');
@@ -327,6 +327,26 @@ test.describe('scroll and focus on navigation', () => {
 
     await expect(page).toHaveURL('/users');
     await expect.poll(() => page.evaluate(() => window.scrollY), { message: 'a traversal must come back to where it left' }).toBeGreaterThan(100);
+  });
+
+  // The same map read forward: a forward traversal returns to the offset that entry was left at when the
+  // back press saved it, not to the top and not to whatever the page on screen happened to be scrolled to.
+  test('going forward restores the offset the page was left at', async ({ page }) => {
+    await page.setViewportSize({ width: 500, height: 400 });
+    await page.goto('/profile/1');
+
+    await page.evaluate(() => window.scrollTo(0, 250));
+    await page.getByRole('link', { name: 'Users', exact: true }).click();
+    await expect(page).toHaveURL('/users');
+    await page.evaluate(() => window.scrollTo(0, 300));
+
+    await page.goBack();
+    await expect(page).toHaveURL('/profile/1');
+    await expect.poll(() => page.evaluate(() => window.scrollY), { message: 'back must restore the first entry' }).toBe(250);
+
+    await page.goForward();
+    await expect(page).toHaveURL('/users');
+    await expect.poll(() => page.evaluate(() => window.scrollY), { message: 'forward must restore the second entry' }).toBe(300);
   });
 
   // `focusReset: 'after-transition'`, which the hand-rolled router had no equivalent of: without it focus
@@ -363,6 +383,26 @@ test.describe('scroll and focus on navigation', () => {
     await expect(page).toHaveURL('/profile/1?tab=activity');
     await expect(page.locator('[data-nav="query-tab"]')).toHaveText('activity');
     expect(await page.evaluate(() => window.scrollY), 'a replace must not scroll').toBe(before);
+  });
+
+  // `history.scrollRestoration` is `manual` for a document the soft router owns, so the browser no longer
+  // puts a reload back; the runtime does, from the `sessionStorage` snapshot taken at `pagehide`. The home
+  // page first: its counter is the only marker that hydration — and so the `pagehide` listener — has run
+  // before the offset below is even recorded.
+  test('a reload lands where the document was left', async ({ page }) => {
+    await page.setViewportSize({ width: 500, height: 400 });
+    await page.goto('/');
+    await expect(page.getByText('(hydrated ✓)')).toBeVisible();
+
+    await page.getByRole('link', { name: 'Users', exact: true }).click();
+    await expect(page).toHaveURL('/users');
+    await page.evaluate(() => window.scrollTo(0, 300));
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(100);
+
+    await page.reload();
+
+    await expect(page.getByText('Ada Lovelace')).toBeVisible();
+    await expect.poll(() => page.evaluate(() => window.scrollY), { message: 'a reload must put the offset back itself' }).toBeGreaterThan(100);
   });
 });
 

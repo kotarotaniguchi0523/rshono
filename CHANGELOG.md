@@ -31,8 +31,19 @@ those.
   skips it too, so a pushed page kept the outgoing page's offset and a cross-page `#hash` never landed on its
   heading. The payload's layout effect now scrolls before paint: to the fragment's target through
   `scrollIntoView`, which is what honours `scroll-padding-top`, or to the top when there is none. `replace`
-  and `refresh` still leave the offset alone, and a traversal's restoration and the post-navigation focus
-  reset are unchanged.
+  and `refresh` still leave the offset alone.
+
+- **Back and forward no longer freeze the viewport on Safari, and a traversal restores where the entry was
+  left on every engine.** A traversal used to be intercepted so the browser would wait for React to commit
+  before restoring the offset — but an intercepted swipe-back, together with the wheel listener React's root
+  attaches, makes WebKit freeze the rendered viewport for about three seconds
+  ([bugs.webkit.org 319414](https://bugs.webkit.org/show_bug.cgi?id=319414)), and WebKit's own restoration of
+  an intercepted traversal is the behaviour behind its failing `scroll-behavior` tests. A traversal is now
+  left to the browser and repainted from `popstate`, and the runtime restores the offset itself from a map
+  keyed by the history entry, `sessionStorage`-backed so a reload lands where the last document was left;
+  focus is reset from the layout effect the payload commits in. `history.scrollRestoration` is `manual` for
+  the document, which is what stops the browser restoring against the outgoing tree. A same-page fragment is
+  still the browser's jump and still needs no payload.
 
 ## 1.0.0-rc.21
 
