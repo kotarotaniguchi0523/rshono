@@ -23,6 +23,17 @@ those.
   costs a document load — the same trade `data-native` makes by hand, and the direction that cannot strand a
   visitor.
 
+### Fixed
+
+- **A soft push reaches the top of the page — or its fragment — itself.** The scroll was the browser's,
+  through the Navigation API's `scroll: 'after-transition'`, but WebKit performs no reset at all for an
+  intercepted push ([bugs.webkit.org 304593](https://bugs.webkit.org/show_bug.cgi?id=304593)) and Chromium
+  skips it too, so a pushed page kept the outgoing page's offset and a cross-page `#hash` never landed on its
+  heading. The payload's layout effect now scrolls before paint: to the fragment's target through
+  `scrollIntoView`, which is what honours `scroll-padding-top`, or to the top when there is none. `replace`
+  and `refresh` still leave the offset alone, and a traversal's restoration and the post-navigation focus
+  reset are unchanged.
+
 ## 1.0.0-rc.21
 
 - **`@rspack/core` 2.2.2 → 2.2.6.** Four patch releases on the pin rc.19 moved to, taken in one commit across

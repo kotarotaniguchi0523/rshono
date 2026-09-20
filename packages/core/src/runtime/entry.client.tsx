@@ -333,11 +333,52 @@ function handleControlDigest(error: unknown, { hard = false }: { hard?: boolean 
 }
 
 /**
+ * Scrolls the document to its start.
+ *
+ * The options form rather than `scrollTo(0, 0)`: the two-argument call is `auto`, which follows a
+ * `scroll-behavior` the app may have set on `html`, and a soft navigation that animates its own reset reads
+ * as a glitch rather than a page change.
+ */
+function scrollToTop(): void {
+  window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+}
+
+/**
+ * Scrolls to a fragment's target the way the browser's own fragment jump does.
+ *
+ * `scrollIntoView` is the algorithm that honours `scroll-padding-top` on the scrolling box and
+ * `scroll-margin-top` on the target, which `window.scrollTo` does not. The lookup follows the browser's
+ * "find a potential indicated element": the id first, then the name. A malformed percent-escape falls back
+ * to the literal fragment, and a fragment nothing matches gets the top of the document — what a browser
+ * gives a missing anchor on a real load.
+ */
+function jumpToAnchor(hash: string): void {
+  const raw = hash.startsWith('#') ? hash.slice(1) : hash;
+  if (raw === '' || raw === 'top') {
+    scrollToTop();
+    return;
+  }
+  let id = raw;
+  try {
+    id = decodeURIComponent(raw);
+  } catch {
+    // Malformed escape — the literal fragment is the better guess at the id than nothing.
+  }
+  const target = document.getElementById(id) ?? document.getElementsByName(id)[0];
+  if (target) target.scrollIntoView();
+  else scrollToTop();
+}
+
+/**
  * Puts a payload on screen, resolving once React has committed it. Replaced by `BrowserRoot`'s own on mount;
  * the default covers the window before hydration, where `setServerCallback` is already registered but there
  * is no root to update — a reload is the honest answer, and nothing after it needs to run.
+ *
+ * `afterCommit`, when given, runs in the same layout effect that releases the commit: after the new tree is
+ * in the DOM and before the browser paints, which is the only moment a `#hash` target exists and the
+ * pre-scroll position has not been shown.
  */
-let setPayload: (payload: RscPayload) => Promise<void> = () => {
+let setPayload: (payload: RscPayload, afterCommit?: () => void) => Promise<void> = () => {
   window.location.reload();
   return new Promise<void>(() => {});
 };
@@ -350,12 +391,12 @@ let startNav: (run: () => void | Promise<void>) => void = (run) => {
 /**
  * Fetches the payload for `url` and puts it on screen.
  *
- * Resolves once React has **committed** it rather than when the fetch lands: an intercepted navigation
- * scrolls and moves focus when this promise settles, and a `#hash` target does not exist until the new tree
- * does. Rejects only on a genuine failure — being superseded is not one, and resolves quietly, because the
- * navigation that replaced this one owns the screen from then on.
+ * Resolves once React has **committed** it rather than when the fetch lands: `afterCommit` runs at that
+ * point, and a `#hash` target does not exist until the new tree does. Rejects only on a genuine failure —
+ * being superseded is not one, and resolves quietly, because the navigation that replaced this one owns the
+ * screen from then on.
  */
-function loadPayload(url: string, signal?: AbortSignal): Promise<void> {
+function loadPayload(url: string, signal?: AbortSignal, afterCommit?: () => void): Promise<void> {
   // Deliberately not awaited inside the transition: the scope ends once the payload is handed to React, and
   // React holds `pending` until the update it scheduled commits. Awaiting the commit *inside* the scope would
   // work too, but only because React happens not to gate a commit on its async scope settling — an internal
@@ -371,7 +412,7 @@ function loadPayload(url: string, signal?: AbortSignal): Promise<void> {
       push(payload.redirect);
       return;
     }
-    committed = setPayload(payload);
+    committed = setPayload(payload, afterCommit);
   };
 
   // `startTransition` runs the work but hands nothing back, so the promise carrying a failure is caught here
@@ -451,18 +492,27 @@ function listenNavigation(): () => void {
     }
     if (!event.canIntercept || leaveToBrowser(event)) return;
 
-    // A push or a traversal lands on a new page, so the browser resets the scroll offset — or restores the
-    // one it remembers — and moves focus, which is what makes a soft navigation announce itself to a screen
-    // reader. A replace or a refresh stays where it is, so neither should move. Both wait on the handler,
-    // which is the point of resolving it at commit rather than at fetch.
+    // A replace or a refresh stays where it is, so neither should move. A push starts at the top of the
+    // page, or at its fragment — and that scroll is the runtime's own now: WebKit performs no
+    // `after-transition` reset at all for an intercepted push (bugs.webkit.org/304593). Chromium skips it
+    // too, and a fragment jump rides the same code path. Passing `manual` here makes the browser hand the
+    // handler over without scrolling; the `afterCommit` callback reaches the target once the new tree is on
+    // screen. A traversal's restoration is still the browser's, and focus stays the browser's throughout,
+    // reset after the transition — both wait on the handler, which is the point of resolving it at commit
+    // rather than at fetch.
     const inPlace = event.navigationType === 'replace' || event.navigationType === 'reload';
+    let afterCommit: (() => void) | undefined;
+    if (event.navigationType === 'push') {
+      const { hash } = new URL(event.destination.url);
+      afterCommit = hash === '' ? scrollToTop : () => jumpToAnchor(hash);
+    }
 
     event.intercept({
-      scroll: inPlace ? 'manual' : 'after-transition',
+      scroll: event.navigationType === 'traverse' ? 'after-transition' : 'manual',
       focusReset: inPlace ? 'manual' : 'after-transition',
       // The URL commits before the handler runs, so a failure leaves the address bar describing a page the
       // document is not showing. A real load is the only way back to agreement.
-      handler: () => loadPayload(event.destination.url, event.signal).catch(() => loadOutsideRouter(() => window.location.reload())),
+      handler: () => loadPayload(event.destination.url, event.signal, afterCommit).catch(() => loadOutsideRouter(() => window.location.reload())),
     });
   };
 
@@ -501,24 +551,33 @@ async function main() {
     const [pending, startTransition] = React.useTransition();
     // The resolver the payload on screen still owes — see {@link loadPayload}.
     const pendingCommit = React.useRef<(() => void) | null>(null);
+    // The scroll the payload about to commit owes, set with it so a payload that supersedes another takes
+    // its predecessor's scroll out of the queue along with its commit.
+    const pendingScroll = React.useRef<(() => void) | null>(null);
 
     React.useEffect(() => {
-      setPayload = (next) =>
+      setPayload = (next, afterCommit) =>
         new Promise<void>((resolve) => {
           // A payload replaced before it ever painted still has a navigation waiting on it. React commits
           // only the newest, so the effect below never runs for the one it skipped: release it here.
           pendingCommit.current?.();
           pendingCommit.current = resolve;
+          // Replaced rather than kept: a server action's payload carries no `afterCommit`, and the
+          // navigation it superseded must not scroll the page the action is about to replace it with.
+          pendingScroll.current = afterCommit ?? null;
           setPayloadState(next);
         });
       startNav = (run) => startTransition(run);
     }, [startTransition]);
 
     /**
-     * Releases the navigation waiting on this payload, which is what lets the browser scroll and move focus
-     * now that their target exists. A layout effect, so the pre-scroll position is never painted.
+     * Performs the pending scroll and releases the navigation waiting on this payload. A layout effect, so
+     * the new tree is in the DOM and the pre-scroll position is never painted.
      */
     React.useLayoutEffect(() => {
+      const scroll = pendingScroll.current;
+      pendingScroll.current = null;
+      scroll?.();
       const commit = pendingCommit.current;
       pendingCommit.current = null;
       commit?.();
