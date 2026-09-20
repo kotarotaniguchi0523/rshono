@@ -65,6 +65,32 @@ test.describe('soft navigation', () => {
     expect(await documentId(page)).not.toBe(before);
   });
 
+  // A file is not a page: an RSC fetch for it can only come back with the file, so the runtime's recovery
+  // used to be a document load *after* the failed round trip — and the interception that came first leaves a
+  // same-document history entry, the traversal of which is the app's to repaint and a file's document is not.
+  // That is the reported "back changes the URL and nothing else" state. The link is left to the browser
+  // instead, exactly as `data-native` asks by hand.
+  test('a link that names a file is a real browser load, and back returns to the page', async ({ page }) => {
+    await page.goto('/');
+    const before = await markDocument(page);
+
+    const flightRequests = [];
+    page.on('request', (request) => {
+      if (request.headers()['rsc'] === '1') flightRequests.push(request.url());
+    });
+
+    await page.getByRole('link', { name: 'robots.txt' }).click();
+
+    await expect(page).toHaveURL('/robots.txt');
+    await expect(page.locator('body')).toContainText('User-agent: *');
+    expect(flightRequests, 'a file link must not be asked for a payload').toHaveLength(0);
+    expect(await documentId(page), 'the file is the browser’s document, not a payload rendered into ours').not.toBe(before);
+
+    await page.goBack();
+    await expect(page).toHaveURL('/');
+    await expect(page.getByRole('link', { name: 'robots.txt' })).toBeVisible();
+  });
+
   test('an off-site link is left to the browser', async ({ page }) => {
     await page.goto('/');
     // `exact` matters here: accessible-name matching is substring-based by default, so a loose

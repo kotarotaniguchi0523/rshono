@@ -392,6 +392,24 @@ function loadPayload(url: string, signal?: AbortSignal): Promise<void> {
 }
 
 /**
+ * Whether a destination names a file rather than a page. `public/`, `/_static` and an endpoint route that
+ * serves a document (`/llms.txt`, `/sitemap.xml`) answer an RSC fetch with the file itself, not a flight
+ * payload — so intercepting one buys nothing: the payload never arrives, and the only recovery left is the
+ * document load the browser would have made directly. Handing it that navigation up front also gives the
+ * entry the file loads into the browser's own history, so Back is an ordinary cross-document traversal. An
+ * intercepted entry is same-document by construction, and traversing one with nothing to repaint it changes
+ * the URL and nothing else — which is what a Back press out of an opened file was doing.
+ *
+ * A dot in the last path segment rather than a list of extensions: a list is never complete, and every miss
+ * is the failed round trip above. A page route whose last segment carries a dot (`/release-1.0`) therefore
+ * costs a document load — the direction to err in, and what a `data-native` link already asks for by hand.
+ */
+function namesAFile(href: string): boolean {
+  const lastSegment = new URL(href).pathname.split('/').pop() ?? '';
+  return lastSegment.includes('.');
+}
+
+/**
  * Navigations the browser can hand over but shouldn't:
  *
  * - a fragment jump, which is same-document already and needs no payload — the browser's own jump is the one
@@ -399,10 +417,17 @@ function loadPayload(url: string, signal?: AbortSignal): Promise<void> {
  * - a download, which is not a navigation of this page at all;
  * - a `POST` form, which is a submission and the server's to answer (a `GET` form carries its fields in the
  *   URL, has no `formData`, and soft-navigates like any other link);
- * - a link marked `data-native`, the documented opt-out.
+ * - a link marked `data-native`, the documented opt-out;
+ * - a destination that names a file — see {@link namesAFile}.
  */
 function leaveToBrowser(event: NavigateEvent): boolean {
-  return event.hashChange || event.downloadRequest !== null || event.formData !== null || event.sourceElement?.hasAttribute('data-native') === true;
+  return (
+    event.hashChange ||
+    event.downloadRequest !== null ||
+    event.formData !== null ||
+    event.sourceElement?.hasAttribute('data-native') === true ||
+    namesAFile(event.destination.url)
+  );
 }
 
 /**

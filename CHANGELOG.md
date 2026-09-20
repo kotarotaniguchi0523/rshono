@@ -11,6 +11,18 @@ those.
 
 ## Unreleased
 
+### Changed
+
+- **A link that names a file is left to the browser.** `public/`, `/_static` and an endpoint route serving a
+  document all answer an RSC fetch with the file itself, not a flight payload, so intercepting one was a
+  failed round trip followed by the document load the browser could have made directly. A destination whose
+  last path segment carries a dot (`/robots.txt`, `/report.pdf`) is now treated like a `data-native` link,
+  which also gives the entry the file loads into the browser's own history rather than an intercepted
+  same-document one whose traversal nothing in the file's document can repaint. An endpoint whose path has no
+  extension (`/download?id=3`) still needs `data-native`; a _page_ route whose last segment carries a dot now
+  costs a document load — the same trade `data-native` makes by hand, and the direction that cannot strand a
+  visitor.
+
 ## 1.0.0-rc.21
 
 - **`@rspack/core` 2.2.2 → 2.2.6.** Four patch releases on the pin rc.19 moved to, taken in one commit across

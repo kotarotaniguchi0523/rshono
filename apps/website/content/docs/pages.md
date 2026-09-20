@@ -21,7 +21,10 @@ Pages render the **entire document** (`<html>…</html>`), usually through a sha
 Interactive parts are `'use client'` components the page imports — only those ship JavaScript.
 
 There is no `<Link>`, `<Image>`, `<Script>` or `<Head>`: links are `<a href>`, images are `<img>`, forms
-are `<form action>`. Same-origin anchors are soft-navigated automatically; `data-native` opts one out.
+are `<form action>`. Same-origin anchors are soft-navigated automatically, except a destination whose last
+path segment carries a dot (`/llms.txt`, `/report.pdf`) — that is a file, not a page, so the browser loads it
+as a document. `data-native` opts any link out by hand; an endpoint with no extension in its path
+(`/download?id=3`) still needs it.
 
 ## Page props
 

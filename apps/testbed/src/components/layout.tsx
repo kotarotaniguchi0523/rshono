@@ -37,6 +37,10 @@ export function Layout({ title = 'rshono', description, children }: { title?: st
             <a href="/" data-native>
               Reload home
             </a>
+            {' · '}
+            {/* A file, so it is left to the browser without `data-native`: a dot in the last path segment is
+                the framework's own test. See `namesAFile` in entry.client.tsx. */}
+            <a href="/robots.txt">robots.txt</a>
           </p>
         </footer>
       </body>
