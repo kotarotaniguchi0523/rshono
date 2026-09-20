@@ -129,7 +129,7 @@ function showFatal(error: unknown, componentStack?: string | null): void {
     reload.textContent = 'Reload page';
     reload.style.cssText =
       'margin-top:1.25rem;padding:0.5rem 1rem;font:inherit;color:#18181b;background:#f4f4f5;border:0;border-radius:4px;cursor:pointer';
-    reload.addEventListener('click', () => loadOutsideRouter(() => window.location.reload()));
+    reload.addEventListener('click', () => loadDocument());
     box.appendChild(reload);
   });
 }
@@ -315,27 +315,36 @@ function settle(result: NavigationResult): void {
   void result.finished?.catch(ignore);
 }
 
-/** Set by {@link loadOutsideRouter}, read and cleared by the `navigate` listener. */
-let bypassRouter = false;
+/**
+ * The mark {@link loadDocument} puts on its navigations, so the `navigate` listener below recognizes them as
+ * the runtime's own. A symbol because the identity has to survive the trip through the browser intact:
+ * `NavigateEvent.info` hands the value back by reference, so only the navigation that was given it matches.
+ */
+const documentNavigation = Symbol('rshono:document-navigation');
 
 /**
  * Performs a navigation the router below must **not** intercept, and returns having asked for it.
  *
- * `location.reload()` and `location.assign()` fire a `navigate` event like any other navigation, and
- * `listenNavigation` intercepts a `reload` on purpose — that is what `router.refresh()` is. Every caller here
- * is reaching for a *new document* precisely because the current one cannot be repaired: the React root a
- * soft load would render into is the thing that just failed, or is about to be torn down. Intercepted, the
+ * `listenNavigation` intercepts a `reload` on purpose — that is what `router.refresh()` is — and every caller
+ * here is reaching for a *new document* precisely because the current one cannot be repaired: the React root
+ * a soft load would render into is the thing that just failed, or is about to be torn down. Intercepted, the
  * escape hatch becomes a payload fetch that lands nowhere — which is how a late `notFound()` left the tab on
  * its Suspense fallback with no second document ever arriving, and how a late `redirect()` moved the address
  * bar to a page it then failed to render.
  *
- * One-shot: the listener clears the flag on the next event it sees. If that event never comes — a navigation
- * the browser refuses — the cost is that the *next* navigation is a full load rather than a soft one, on a
- * document that was on its way out anyway.
+ * The mark rides the navigation itself, through `info`, so the listener recognizes the event that owns it
+ * instead of consuming a flag set in advance. There is no state to clear and none to leak: a navigation the
+ * browser refuses cannot make the next one a full load. Below the Navigation API there is no interception to
+ * opt out of, and `location.*` is already a document load.
  */
-function loadOutsideRouter(navigate: () => void): void {
-  bypassRouter = true;
-  navigate();
+function loadDocument(href?: string): void {
+  if (!canSoftNavigate) {
+    if (href === undefined) window.location.reload();
+    else window.location.assign(href);
+    return;
+  }
+
+  settle(href === undefined ? navigation.reload({ info: documentNavigation }) : navigation.navigate(href, { info: documentNavigation }));
 }
 
 // The imperative actions behind `useNavigation().router`. Each one only *asks*: the browser turns it into a
@@ -408,7 +417,7 @@ function reloadOnceForLateNotFound(): void {
     return;
   }
 
-  loadOutsideRouter(() => window.location.reload());
+  loadDocument();
 
   // The reload wins this race whenever it happens at all: the document goes away and takes the timer with
   // it. What this covers is a reload that does not happen — swallowed by an interceptor, refused by the
@@ -433,7 +442,8 @@ function handleControlDigest(error: unknown, { hard = false }: { hard?: boolean 
   if (!redirect) {
     reloadOnceForLateNotFound();
   } else if (hard) {
-    loadOutsideRouter(() => window.location.assign(new URL(redirect.location, window.location.href).href));
+    // The URL is resolved first: a malformed location then throws here, before any navigation is asked for.
+    loadDocument(new URL(redirect.location, window.location.href).href);
   } else {
     push(redirect.location);
   }
@@ -631,12 +641,10 @@ function listenNavigation(): () => void {
   if (!canSoftNavigate) return () => {};
 
   const onNavigate = (event: NavigateEvent) => {
-    // Cleared as it is consumed, whatever this event turns out to be: the flag names one navigation, and the
-    // one it named is the one that just arrived.
-    if (bypassRouter) {
-      bypassRouter = false;
-      return;
-    }
+    // A document navigation the runtime asked for itself, marked through `info`. Checked before the scroll
+    // snapshot: the document is going away, so where its entry was left does not matter, and an unrelated
+    // later navigation can never be mistaken for this one.
+    if (event.info === documentNavigation) return;
 
     // Whatever the browser is about to do with this navigation, the entry it is leaving is about to lose the
     // offset it was at, and nothing else in this document will put it back. Saved before the branches below
@@ -670,7 +678,7 @@ function listenNavigation(): () => void {
       focusReset: inPlace ? 'manual' : 'after-transition',
       // The URL commits before the handler runs, so a failure leaves the address bar describing a page the
       // document is not showing. A real load is the only way back to agreement.
-      handler: () => loadPayload(event.destination.url, event.signal, afterCommit).catch(() => loadOutsideRouter(() => window.location.reload())),
+      handler: () => loadPayload(event.destination.url, event.signal, afterCommit).catch(() => loadDocument()),
     });
   };
 
@@ -702,7 +710,7 @@ function listenNavigation(): () => void {
       // The browser performs this for an intercepted navigation; a traversal is no longer intercepted, so
       // without it Back would leave focus on the link that was clicked on the page being left.
       resetFocus();
-    }).catch(() => loadOutsideRouter(() => window.location.reload()));
+    }).catch(() => loadDocument());
   };
 
   navigation.addEventListener('navigate', onNavigate);
@@ -881,7 +889,7 @@ function initDevRefresh() {
 
   function reload(reason: string, error?: unknown): void {
     console.warn(`[rshono] ${reason} — reloading`, ...(error === undefined ? [] : [error]));
-    loadOutsideRouter(() => window.location.reload());
+    loadDocument();
   }
 
   async function applyClientUpdate(): Promise<void> {
@@ -899,7 +907,7 @@ function initDevRefresh() {
         targetHash = message.hash ?? targetHash;
         if (connectedOnce) {
           await applyClientUpdate();
-          await loadPayload(window.location.href).catch(() => loadOutsideRouter(() => window.location.reload()));
+          await loadPayload(window.location.href).catch(() => loadDocument());
         }
         connectedOnce = true;
         break;
@@ -909,7 +917,7 @@ function initDevRefresh() {
         break;
       case 'rsc-update':
         console.log('[rshono] server components updated');
-        await loadPayload(window.location.href).catch(() => loadOutsideRouter(() => window.location.reload()));
+        await loadPayload(window.location.href).catch(() => loadDocument());
         break;
     }
   }

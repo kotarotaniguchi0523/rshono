@@ -524,11 +524,12 @@ test.describe('no blank screens', () => {
  * runs in a browser. `/late-signal` signals 50ms in, long past shell-ready, so both cases are deterministic.
  *
  * Both recoveries are full document loads, and both were being swallowed by the framework's own router: a
- * `navigate` event fires for `location.reload()` and `location.assign()` like any other navigation, and
- * `listenNavigation` intercepts a reload on purpose — that is `router.refresh()`. Intercepted, the escape
- * hatch became a payload fetch rendering into the React root that had just been torn down. So each test
- * below asserts the *destination is on screen*, not merely that the address bar moved: the address bar moved
- * while this was broken.
+ * `navigate` event fires for `navigation.reload()` and `navigation.navigate()` — as it does for
+ * `location.reload()` and `location.assign()` — like any other navigation, and `listenNavigation` intercepts
+ * a reload on purpose, which is `router.refresh()`. Intercepted, the escape hatch became a payload fetch
+ * rendering into the React root that had just been torn down. The runtime marks its own document loads
+ * through `NavigateEvent.info` so the listener steps aside; each test below asserts the *destination is on
+ * screen*, not merely that the address bar moved: the address bar moved while this was broken.
  */
 test.describe('late control signals', () => {
   test('a late redirect() lands on the target page, not just its URL', async ({ page }) => {

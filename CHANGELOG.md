@@ -25,6 +25,15 @@ those.
 
 ### Fixed
 
+- **A refused hard navigation can no longer turn the next soft one into a document load.** The runtime's
+  escape hatches from a dead tree — a late `notFound()`'s recovery reload, a hard `redirect()`, the fatal
+  overlay's button, a dev refresh that cannot be patched — used a global one-shot flag to tell its own
+  `navigate` listener to step aside. If the matching event never arrived (a navigation the browser refuses)
+  or arrived before the listener existed, the flag stayed set, and the next unrelated navigation was not
+  intercepted — a full document load where a soft one was expected. The intent now rides the navigation
+  itself as a private `NavigateEvent.info` value, which no later navigation can inherit and no failure can
+  strand.
+
 - **A soft push reaches the top of the page — or its fragment — itself.** The scroll was the browser's,
   through the Navigation API's `scroll: 'after-transition'`, but WebKit performs no reset at all for an
   intercepted push ([bugs.webkit.org 304593](https://bugs.webkit.org/show_bug.cgi?id=304593)) and Chromium
