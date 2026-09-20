@@ -293,6 +293,19 @@ function persistScrollPositions(): void {
 }
 
 /**
+ * The snapshot starts with the document, not with hydration: the page is visible and clickable while the
+ * initial payload streams, and a reload or a navigation away in that window would otherwise lose the offset
+ * now that `manual` has stopped the browser restoring it. Nothing here depends on the router being mounted,
+ * so it does not wait for {@link listenNavigation}.
+ */
+if (canSoftNavigate) {
+  window.addEventListener('pagehide', () => {
+    rememberCurrentScroll();
+    persistScrollPositions();
+  });
+}
+
+/**
  * Drops a navigation's result promises. Both reject when a navigation is superseded or cancelled — routine
  * here, since a second click is meant to abandon the first — and unhandled they would be reported as faults.
  */
@@ -454,7 +467,9 @@ function scrollToPoint(point: ScrollPoint): void {
  */
 function jumpToAnchor(hash: string): void {
   const raw = hash.startsWith('#') ? hash.slice(1) : hash;
-  if (raw === '' || raw === 'top') {
+  // No special case for `#top`: the browser only treats it as the top of the document when no element
+  // matches, and the fallback below is that top.
+  if (raw === '') {
     scrollToTop();
     return;
   }
@@ -690,18 +705,11 @@ function listenNavigation(): () => void {
     }).catch(() => loadOutsideRouter(() => window.location.reload()));
   };
 
-  const onPageHide = () => {
-    rememberCurrentScroll();
-    persistScrollPositions();
-  };
-
   navigation.addEventListener('navigate', onNavigate);
   window.addEventListener('popstate', onPopState);
-  window.addEventListener('pagehide', onPageHide);
   return () => {
     navigation.removeEventListener('navigate', onNavigate);
     window.removeEventListener('popstate', onPopState);
-    window.removeEventListener('pagehide', onPageHide);
   };
 }
 

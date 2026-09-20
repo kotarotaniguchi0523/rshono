@@ -386,9 +386,9 @@ test.describe('scroll and focus on navigation', () => {
   });
 
   // `history.scrollRestoration` is `manual` for a document the soft router owns, so the browser no longer
-  // puts a reload back; the runtime does, from the `sessionStorage` snapshot taken at `pagehide`. The home
-  // page first: its counter is the only marker that hydration — and so the `pagehide` listener — has run
-  // before the offset below is even recorded.
+  // puts a reload back; the runtime does, from the `sessionStorage` snapshot taken at `pagehide`. The wait
+  // for hydration below is for the soft navigation to `/users`, not the snapshot: the `pagehide` listener
+  // is registered at startup, before any navigation can happen.
   test('a reload lands where the document was left', async ({ page }) => {
     await page.setViewportSize({ width: 500, height: 400 });
     await page.goto('/');
