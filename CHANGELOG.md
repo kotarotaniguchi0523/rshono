@@ -11,17 +11,9 @@ those.
 
 ## Unreleased
 
-### Changed
+## 1.0.0-rc.23
 
-- **A link that names a file is left to the browser.** `public/`, `/_static` and an endpoint route serving a
-  document all answer an RSC fetch with the file itself, not a flight payload, so intercepting one was a
-  failed round trip followed by the document load the browser could have made directly. A destination whose
-  last path segment carries a dot (`/robots.txt`, `/report.pdf`) is now treated like a `data-native` link,
-  which also gives the entry the file loads into the browser's own history rather than an intercepted
-  same-document one whose traversal nothing in the file's document can repaint. An endpoint whose path has no
-  extension (`/download?id=3`) still needs `data-native`; a _page_ route whose last segment carries a dot now
-  costs a document load — the same trade `data-native` makes by hand, and the direction that cannot strand a
-  visitor.
+### Changed
 
 - **`@rspack/core` 2.2.6 → 2.2.7.** A patch on the pin, taken across the manifests, the overrides and the
   lockfile, with the `minimumReleaseAgeExclude` entries following it. Upstream is fixes and cache internals;
@@ -34,6 +26,22 @@ those.
   value — could ship an HTML and a Flight payload holding different versions of it. One render now derives both
   outputs; request-time behavior is unchanged, the HTML is kept when the shared Flight branch cannot be
   captured, and the build falls back to request-time Flight. ([#46](https://github.com/rshono/rshono/pull/46))
+
+## 1.0.0-rc.22
+
+### Changed
+
+- **A link that names a file is left to the browser.** `public/`, `/_static` and an endpoint route serving a
+  document all answer an RSC fetch with the file itself, not a flight payload, so intercepting one was a
+  failed round trip followed by the document load the browser could have made directly. A destination whose
+  last path segment carries a dot (`/robots.txt`, `/report.pdf`) is now treated like a `data-native` link,
+  which also gives the entry the file loads into the browser's own history rather than an intercepted
+  same-document one whose traversal nothing in the file's document can repaint. An endpoint whose path has no
+  extension (`/download?id=3`) still needs `data-native`; a _page_ route whose last segment carries a dot now
+  costs a document load — the same trade `data-native` makes by hand, and the direction that cannot strand a
+  visitor.
+
+### Fixed
 
 - **A refused hard navigation can no longer turn the next soft one into a document load.** The runtime's
   escape hatches from a dead tree — a late `notFound()`'s recovery reload, a hard `redirect()`, the fatal
