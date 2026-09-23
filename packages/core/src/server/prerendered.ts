@@ -15,25 +15,45 @@
 export type PrerenderVariant = 'html' | 'flight';
 
 export const VARIANTS = {
-  // `headers` is what the build asks each representation for, so it stays the same request the browser makes:
-  // a document is the default and a flight payload is the `RSC` header. See `runtime/request.ts`.
-  html: { file: 'index.html', headers: {}, contentType: 'text/html' },
-  flight: { file: 'index.rsc', headers: { RSC: '1' }, contentType: 'text/x-component' },
-} as const satisfies Record<PrerenderVariant, { file: string; headers: Record<string, string>; contentType: string }>;
+  html: { file: 'index.html' },
+  flight: { file: 'index.rsc' },
+} as const satisfies Record<PrerenderVariant, { file: string }>;
 
 /**
  * How a build-time document render tells the prerender pass that the app minted a CSP nonce for its path.
  *
- * The other half of the same contract as {@link VARIANTS}, and it exists because the pass cannot see the
- * request it made: it renders through the app's own middleware inside the server bundle, in a module graph of
- * its own, and keeps the body alone. What it needs to know is whether a *request* for this path will mint a
- * nonce, because a document that will is one the framework re-renders per request — so the file the pass is
- * about to write is one no deployment will read, and saying "prerendered" about it is a lie by omission.
+ * The pass cannot see the request it made: it renders through the app's own middleware inside the server
+ * bundle, in a module graph of its own, and keeps the body alone. What it needs to know is whether a
+ * *request* for this path will mint a nonce, because a document that will is one the framework re-renders per
+ * request — so the file the pass is about to write is one no deployment will read, and saying "prerendered"
+ * about it is a lie by omission.
  *
  * Set only while `RSHONO_PRERENDER` is in the environment, which is `rshono build`'s own process, so it never
  * reaches a deployed response; and never stored, since only the body is.
  */
 export const PRERENDER_NONCE_HEADER = 'x-rshono-prerender-nonce';
+
+/**
+ * Process-local bridge from the server bundle's build-time HTML render to the SSG writer.
+ *
+ * The CLI and the app bundle are separate module graphs, so a module-local symbol would not be shared between
+ * them. `Symbol.for` keeps this internal contract available to both graphs without putting the Flight bytes in
+ * an HTTP header or changing the public response body. It is attached to the response stream because Hono may
+ * copy the `Response` object while it finalizes a handler result.
+ */
+const PRERENDER_FLIGHT: unique symbol = Symbol.for('rshono.prerender.flight-stream');
+
+type PrerenderResponseBody = ReadableStream<Uint8Array> & {
+  [PRERENDER_FLIGHT]?: Promise<Uint8Array>;
+};
+
+export function setPrerenderFlight(response: Response, flight: Promise<Uint8Array>): void {
+  if (response.body) Object.defineProperty(response.body, PRERENDER_FLIGHT, { value: flight });
+}
+
+export function getPrerenderFlight(response: Response): Promise<Uint8Array> | undefined {
+  return (response.body as PrerenderResponseBody | null)?.[PRERENDER_FLIGHT];
+}
 
 /**
  * The index the build leaves beside the pages, naming every file it wrote — one `files` array of

@@ -18,7 +18,7 @@ import { publicRouteCollisions } from '../dist/deploy/public-paths.js';
 import { appendVary, etagMatches, varyWith } from '../dist/server/headers.js';
 import { loadConfig } from '../dist/server/load-config.js';
 import { parsePort, resolveServerConfig } from '../dist/server/server-config.js';
-import { createPageCache, PRERENDER_NONCE_HEADER, ssgAssetPath, ssgFilePath } from '../dist/server/prerendered.js';
+import { createPageCache, PRERENDER_NONCE_HEADER, setPrerenderFlight, ssgAssetPath, ssgFilePath } from '../dist/server/prerendered.js';
 import { prerenderStaticRoutes, readPrerendered, resolveSiteOrigin } from '../dist/server/ssg.js';
 import { injectFlightPayload } from '../dist/runtime/flight-inject.js';
 import { asksForRsc, createRscRequest, isActionRequest, isBrowserFormPost, parseRenderRequest, wantsRsc } from '../dist/runtime/request.js';
@@ -188,6 +188,14 @@ describe('injectFlightPayload', () => {
     assert.deepEqual(got, payload, 'the client must read back exactly the bytes the server wrote');
   });
 
+  test('captures the raw Flight chunks byte-exactly', async () => {
+    const chunks = [encoder.encode('0:"hi"\n'), Buffer.from('313afffe0a', 'hex')];
+    const injected = injectFlightPayload(streamOf(chunks), { captureFlight: true });
+    await readAll(streamOf(['<html><body></body></html>']).pipeThrough(injected));
+
+    assert.deepEqual(Buffer.from(await injected.capturedFlight), Buffer.concat(chunks));
+  });
+
   test('keeps a byte-order mark that opens a payload chunk', async () => {
     // Decoding per chunk re-runs the BOM check on every call, so the decoder is `ignoreBOM`.
     const payload = Buffer.from('efbbbf41', 'hex');
@@ -278,11 +286,14 @@ describe('injectFlightPayload', () => {
         });
 
         let released = 0;
-        const out = streamOf(['<html><body><p>hi</p></body></html>']).pipeThrough(injectFlightPayload(watched, { onDone: () => released++ }));
+        const injected = injectFlightPayload(watched, { onDone: () => released++, captureFlight: true });
+        const out = streamOf(['<html><body><p>hi</p></body></html>']).pipeThrough(injected);
         const reader = out.getReader();
         await reader.read(); // the shell; the trailer is held back and `flush` is now parked
 
-        await reader.cancel(new Error('Client connection prematurely closed.'));
+        const reason = new Error('Client connection prematurely closed.');
+        await reader.cancel(reason);
+        await assert.rejects(injected.capturedFlight, /Client connection prematurely closed/);
         flight.release();
         await new Promise((resolve) => setTimeout(resolve, 50));
 
@@ -346,6 +357,40 @@ describe('injectFlightPayload', () => {
     for (let i = 0; i < 20; i++) await reader.read();
     assert.ok(flightPulled > before, 'reading again must resume the payload');
     await reader.cancel();
+  });
+
+  test('does not drain a large captured payload ahead of a slow HTML consumer', async () => {
+    const chunks = Array.from({ length: 500 }, (_, index) => {
+      const chunk = new Uint8Array(1024);
+      chunk.fill(index % 256);
+      return chunk;
+    });
+    let flightPulled = 0;
+    const flight = new ReadableStream({
+      pull(controller) {
+        if (flightPulled === chunks.length) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(chunks[flightPulled++]);
+      },
+    });
+    const injected = injectFlightPayload(flight, { captureFlight: true });
+    const reader = streamOf(['<html><body></body></html>']).pipeThrough(injected).getReader();
+
+    await reader.read();
+    let captureFinished = false;
+    void injected.capturedFlight.then(() => {
+      captureFinished = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.ok(flightPulled < 10, `capture must follow downstream demand, not drain all ${chunks.length} chunks (pulled ${flightPulled})`);
+    assert.equal(captureFinished, false, 'capture must remain pending while downstream demand is stalled');
+
+    while (!(await reader.read()).done) {
+      // Drain the simulated slow consumer one chunk at a time.
+    }
+    assert.deepEqual(Buffer.from(await injected.capturedFlight), Buffer.concat(chunks));
   });
 });
 
@@ -999,11 +1044,12 @@ describe('readPrerendered', () => {
 });
 
 describe('prerenderStaticRoutes', () => {
-  // The app answers per the `RSC` header, exactly as the real one does — the point of prerendering both.
-  const okResponse = (request) =>
-    request.headers.get('RSC') === '1'
-      ? new Response('0:{"root":"flight"}', { status: 200, headers: { 'Content-Type': 'text/x-component' } })
-      : new Response('<!DOCTYPE html><p>ok</p>', { status: 200, headers: { 'Content-Type': 'text/html' } });
+  // The server bundle exposes the raw bytes captured by the inline Flight reader on the build's HTML response.
+  const okResponse = () => {
+    const response = new Response('<!DOCTYPE html><p>ok</p>', { status: 200, headers: { 'Content-Type': 'text/html' } });
+    setPrerenderFlight(response, Promise.resolve(new TextEncoder().encode('0:{"root":"flight"}')));
+    return response;
+  };
 
   test('writes both representations per static route and per staticPaths entry', async () => {
     const ssgDir = tempDir();
@@ -1029,14 +1075,9 @@ describe('prerenderStaticRoutes', () => {
     assert.deepEqual(result.written, ['/about', '/docs/a', '/docs/b'], 'reported in route order, whatever order they rendered in');
     assert.deepEqual(
       requested.toSorted(),
-      ['document /about', 'document /docs/a', 'document /docs/b', 'flight /about', 'flight /docs/a', 'flight /docs/b'],
-      'each path is rendered as a document and as a flight payload; a dynamic route is never prerendered',
+      ['document /about', 'document /docs/a', 'document /docs/b'],
+      'each static path is rendered once; the dynamic route is never prerendered',
     );
-    // Sorted above because paths render concurrently. Within a path the order is still fixed: the flight
-    // payload is only asked for once the document has come back 200.
-    for (const path of ['/about', '/docs/a', '/docs/b']) {
-      assert.ok(requested.indexOf(`document ${path}`) < requested.indexOf(`flight ${path}`), `${path}: document before flight`);
-    }
     const decode = (page) => new TextDecoder().decode(page.body);
     assert.equal(decode(await readPrerendered(ssgDir, '/docs/a')), '<!DOCTYPE html><p>ok</p>');
     assert.equal(decode(await readPrerendered(ssgDir, '/docs/a', 'flight')), '0:{"root":"flight"}');
@@ -1064,10 +1105,11 @@ describe('prerenderStaticRoutes', () => {
     await prerenderStaticRoutes({
       ssgDir,
       routes: [{ path: '/about', render: 'static', component: async () => ({ default: () => null }) }],
-      fetch: (request) =>
-        request.headers.get('RSC') === '1'
-          ? new Response(payload, { status: 200, headers: { 'Content-Type': 'text/x-component' } })
-          : new Response('<!DOCTYPE html><p>ok</p>', { status: 200, headers: { 'Content-Type': 'text/html' } }),
+      fetch: () => {
+        const response = new Response('<!DOCTYPE html><p>ok</p>', { status: 200, headers: { 'Content-Type': 'text/html' } });
+        setPrerenderFlight(response, Promise.resolve(payload));
+        return response;
+      },
     });
 
     const stored = await readPrerendered(ssgDir, '/about', 'flight');
@@ -1101,7 +1143,7 @@ describe('prerenderStaticRoutes', () => {
     }
 
     assert.deepEqual(result.written, ['/docs/a', '/docs/b']);
-    assert.equal(requested.filter((path) => path === '/docs/a').length, 2, 'one document and one flight payload, not two of each');
+    assert.equal(requested.filter((path) => path === '/docs/a').length, 1, 'one shared render, not one render per output format');
     assert.match(warnings.join('\n'), /repeated 1 path/, 'and the app is told, since a repeated entry is usually a bug in its query');
   });
 
@@ -1147,23 +1189,51 @@ describe('prerenderStaticRoutes', () => {
         return okResponse(request);
       },
     });
-    assert.deepEqual(seen, ['https://example.com/about', 'https://example.com/about']);
+    assert.deepEqual(seen, ['https://example.com/about']);
   });
 
-  test('keeps the document when the flight payload cannot be produced', async () => {
+  test('keeps the document when the shared Flight payload cannot be captured', async () => {
     const ssgDir = tempDir();
     const result = await prerenderStaticRoutes({
       ssgDir,
       routes: [{ path: '/about', render: 'static', component: async () => ({ default: () => null }) }],
-      fetch: (request) =>
-        request.headers.get('RSC') === '1'
-          ? new Response('nope', { status: 500 })
-          : new Response('<!DOCTYPE html><p>ok</p>', { status: 200, headers: { 'Content-Type': 'text/html' } }),
+      // No bridge property represents a renderer that could not provide its second stream branch. The SSG
+      // pass must keep the valid document and let a later soft navigation render Flight per request.
+      fetch: () => new Response('<!DOCTYPE html><p>ok</p>', { status: 200, headers: { 'Content-Type': 'text/html' } }),
     });
 
     assert.deepEqual(result.written, ['/about'], 'a missing flight payload must not lose the document');
     assert.ok(await readPrerendered(ssgDir, '/about'));
     assert.equal(await readPrerendered(ssgDir, '/about', 'flight'), null, 'serving falls back to rendering it per request');
+  });
+
+  test('keeps the document when the shared Flight branch rejects', async () => {
+    const ssgDir = tempDir();
+    const warnings = [];
+    const warn = console.warn;
+    console.warn = (message) => warnings.push(String(message));
+    try {
+      await prerenderStaticRoutes({
+        ssgDir,
+        routes: [{ path: '/about', render: 'static', component: async () => ({ default: () => null }) }],
+        fetch: () => {
+          const response = new Response('<!DOCTYPE html><p>ok</p>', { status: 200, headers: { 'Content-Type': 'text/html' } });
+          setPrerenderFlight(
+            response,
+            Promise.resolve().then(() => {
+              throw new Error('flight branch failed');
+            }),
+          );
+          return response;
+        },
+      });
+    } finally {
+      console.warn = warn;
+    }
+
+    assert.ok(await readPrerendered(ssgDir, '/about'), 'the valid document remains available');
+    assert.equal(await readPrerendered(ssgDir, '/about', 'flight'), null, 'only Flight falls back to a request-time render');
+    assert.match(warnings.join('\n'), /shared Flight capture failed: flight branch failed/);
   });
 
   test('skips a parameterised static route with no staticPaths rather than failing the build', async () => {
@@ -1292,8 +1362,8 @@ describe('prerenderStaticRoutes', () => {
     assert.deepEqual(result.written, ['/docs/caf%C3%A9', '/docs/a%20b']);
     assert.deepEqual(
       requested.toSorted(),
-      ['/docs/a%20b', '/docs/a%20b', '/docs/caf%C3%A9', '/docs/caf%C3%A9'],
-      'the page is fetched at the URL a browser would use, once per representation',
+      ['/docs/a%20b', '/docs/caf%C3%A9'],
+      'the page is fetched once at the URL a browser would use, with both representations derived from it',
     );
 
     // …and read back at `c.req.path`, which is what Hono hands the handler: `decodeURI` has already run.

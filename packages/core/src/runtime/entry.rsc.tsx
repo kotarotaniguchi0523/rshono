@@ -29,10 +29,10 @@ import { routes as userRoutes } from '@rshono/routes';
 import * as serverAppModule from '@rshono/server-app';
 import { isPageRoute, type ErrorPageInfo, type FallbackPage, type PageComponent, type PageProps, type Route } from '../router.js';
 import { appendVary, etagMatches, varyWith } from '../server/headers.js';
-import { PRERENDER_NONCE_HEADER } from '../server/prerendered.js';
+import { PRERENDER_NONCE_HEADER, setPrerenderFlight } from '../server/prerendered.js';
 import { beginPageRender, getRequestContext, publicUrl, readParams, reportServerError, runWithContext } from './context.js';
 import { cameFromPayload, isControlSignal, RedirectSignal, type ControlSignal } from './control.js';
-import { renderHTML } from './entry.ssr.js';
+import { renderHTML, renderPrerenderHTML, type RenderHTMLOptions } from './entry.ssr.js';
 import { failureDocument } from './failure-document.js';
 // Type-only, so it is erased — the RSC layer does not take its own instance of the SSR layer's module.
 import type { CancellableTransformer } from './flight-inject.js';
@@ -412,8 +412,9 @@ async function renderComponent(c: Context, Page: ServerEntry<PageComponent>, opt
   }
 
   let ssrResult: Awaited<ReturnType<typeof renderHTML>>;
+  let prerenderFlight: Promise<Uint8Array> | undefined;
   try {
-    ssrResult = await renderHTML(rscStream, {
+    const renderOptions: RenderHTMLOptions = {
       bootstrapScripts: Page.entryJsFiles,
       formState: opts.formState,
       signal,
@@ -421,7 +422,14 @@ async function renderComponent(c: Context, Page: ServerEntry<PageComponent>, opt
       onDone: release,
       onShellError: (error) => reportServerError(error, { source: 'ssr', hono: c, message: '[rshono] SSR shell error:' }),
       onError: (error) => reportServerError(error, { source: 'ssr', hono: c, message: '[rshono] SSR error:' }),
-    });
+    };
+    if (prerendering) {
+      const result = await renderPrerenderHTML(rscStream, renderOptions);
+      ssrResult = result;
+      prerenderFlight = result.flight;
+    } else {
+      ssrResult = await renderHTML(rscStream, renderOptions);
+    }
   } catch (error) {
     // The render is abandoned, so stop it: a boundary still resolving is work for a response that will never
     // be sent, and it holds the tee's SSR branch open behind it. The `signal.aborted` guard in `onError`
@@ -451,10 +459,12 @@ async function renderComponent(c: Context, Page: ServerEntry<PageComponent>, opt
     release();
     throw controlSignal;
   }
-  return c.body(ssrResult.stream, (opts.status ?? 200) as ContentfulStatusCode, {
+  const response = c.body(ssrResult.stream, (opts.status ?? 200) as ContentfulStatusCode, {
     'content-type': 'text/html;charset=utf-8',
     ...prerenderNonceHeader(c),
   });
+  if (prerenderFlight) setPrerenderFlight(response, prerenderFlight);
+  return response;
 }
 
 /**

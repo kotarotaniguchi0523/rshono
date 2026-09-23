@@ -36,6 +36,19 @@ export interface RenderHTMLOptions {
   onDone?: () => void;
 }
 
+type RenderHTMLResult = { stream: ReadableStream<Uint8Array> };
+type RenderPrerenderHTMLResult = RenderHTMLResult & { flight: Promise<Uint8Array> };
+
+/** Renders HTML from the RSC stream and inlines its Flight payload for client hydration. */
+export function renderHTML(rscStream: ReadableStream<Uint8Array>, options: RenderHTMLOptions) {
+  return renderHTMLInternal(rscStream, options, false);
+}
+
+/** Renders build-time HTML and returns the raw Flight bytes from the same render. */
+export function renderPrerenderHTML(rscStream: ReadableStream<Uint8Array>, options: RenderHTMLOptions) {
+  return renderHTMLInternal(rscStream, options, true);
+}
+
 /**
  * Renders the flight payload to an HTML document, with a copy of the payload inlined for the client.
  *
@@ -45,7 +58,17 @@ export interface RenderHTMLOptions {
  * path that page could not be reached from, which made `RouteConfig.error`'s "rendered when a request
  * throws" false for the commonest server error there is: a page component that throws.
  */
-export async function renderHTML(rscStream: ReadableStream<Uint8Array>, options: RenderHTMLOptions) {
+async function renderHTMLInternal(rscStream: ReadableStream<Uint8Array>, options: RenderHTMLOptions, captureFlight: false): Promise<RenderHTMLResult>;
+async function renderHTMLInternal(
+  rscStream: ReadableStream<Uint8Array>,
+  options: RenderHTMLOptions,
+  captureFlight: true,
+): Promise<RenderPrerenderHTMLResult>;
+async function renderHTMLInternal(
+  rscStream: ReadableStream<Uint8Array>,
+  options: RenderHTMLOptions,
+  captureFlight: boolean,
+): Promise<RenderHTMLResult | RenderPrerenderHTMLResult> {
   // One copy is rendered to HTML here; the other rides along in that HTML for the client to hydrate from.
   const [rscForSsr, rscForClient] = rscStream.tee();
 
@@ -94,5 +117,12 @@ export async function renderHTML(rscStream: ReadableStream<Uint8Array>, options:
     throw error;
   }
 
-  return { stream: htmlStream.pipeThrough(injectFlightPayload(rscForClient, { nonce: options.nonce, onDone: options.onDone })) };
+  const injected = injectFlightPayload(rscForClient, {
+    nonce: options.nonce,
+    onDone: options.onDone,
+    captureFlight,
+  });
+  const stream = htmlStream.pipeThrough(injected);
+  if (captureFlight) return { stream, flight: injected.capturedFlight! };
+  return { stream };
 }
