@@ -1,6 +1,6 @@
 {
   "name": "@rshono/core",
-  "version": "1.0.0-rc.22",
+  "version": "1.0.0-rc.23",
   "description": "Minimalist web framework — Hono + Rspack + React Server Components",
   "author": "Lasse <lasse@lassetange.com> (https://www.lassetange.com)",
   "license": "MIT",
@@ -62,7 +62,7 @@
   },
   "dependencies": {
     "@hono/node-server": "^2.1.1",
-    "@rspack/core": "2.2.6",
+    "@rspack/core": "2.2.7",
     "@rspack/plugin-react-refresh": "2.0.2",
     "react-refresh": "0.18.0",
     "react-server-dom-rspack": "0.1.0"

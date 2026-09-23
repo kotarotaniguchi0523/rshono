@@ -23,7 +23,17 @@ those.
   costs a document load — the same trade `data-native` makes by hand, and the direction that cannot strand a
   visitor.
 
+- **`@rspack/core` 2.2.6 → 2.2.7.** A patch on the pin, taken across the manifests, the overrides and the
+  lockfile, with the `minimumReleaseAgeExclude` entries following it. Upstream is fixes and cache internals;
+  nothing in the framework moved.
+
 ### Fixed
+
+- **A static path is evaluated once at build time, not twice.** HTML and Flight were separate evaluations of
+  each concrete static path, so a Server Component reading mutable data — a database, file, API, clock, random
+  value — could ship an HTML and a Flight payload holding different versions of it. One render now derives both
+  outputs; request-time behavior is unchanged, the HTML is kept when the shared Flight branch cannot be
+  captured, and the build falls back to request-time Flight. ([#46](https://github.com/rshono/rshono/pull/46))
 
 - **A refused hard navigation can no longer turn the next soft one into a document load.** The runtime's
   escape hatches from a dead tree — a late `notFound()`'s recovery reload, a hard `redirect()`, the fatal
