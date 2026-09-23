@@ -4,6 +4,7 @@ import { dirname, join, resolve, sep } from 'node:path';
 import { isPageRoute, type PageRoute, type Route } from '../router.js';
 import {
   createPageCache,
+  getPrerenderFlight,
   PRERENDER_NONCE_HEADER,
   ssgFilePath,
   SSG_MANIFEST_FILE,
@@ -177,27 +178,49 @@ async function mapBounded<T, R>(items: readonly T[], limit: number, run: (item: 
 }
 
 /**
- * One representation of a path, as the app answered for it at build time. Discriminated on `ok` because both
- * callers have to tell "the app rendered this" from "it did not", and only one cares why.
- *
- * `failed` splits the second case in two. A 404, a 3xx or a payload of the wrong type is a page this pass
- * cannot *store*, and it still serves per request — the skip is honest. A 5xx is the app throwing, and this
- * pass renders a page exactly as a request does, so per request it will throw again: skipping it prints
- * "will SSR per request" over a route that will 500 forever, and exits 0.
+ * One representation of a path, as the app answered for it at build time. `failed` splits the failure case in
+ * two: a 404, a 3xx or a payload of the wrong type is a page this pass cannot store, and it still serves per
+ * request — the skip is honest. A 5xx is the app throwing, and this pass renders a page exactly as a request
+ * does, so per request it will throw again: skipping it prints "will SSR per request" over a route that will
+ * 500 forever, and exits 0.
  */
-type RenderedVariant = { ok: true; body: Uint8Array; nonced: boolean } | { ok: false; reason: string; failed: boolean };
+type RenderedVariant = { ok: true; body: Uint8Array; nonced: boolean; flight?: Promise<Uint8Array> } | { ok: false; reason: string; failed: boolean };
 
-async function renderVariant(fetch: PrerenderOptions['fetch'], url: string, variant: PrerenderVariant): Promise<RenderedVariant> {
-  const response = await fetch(new Request(url, { headers: VARIANTS[variant].headers }));
-  if (response.status !== 200) return { ok: false, reason: `${response.status}`, failed: response.status >= 500 };
-  if (!(response.headers.get('Content-Type') ?? '').includes(VARIANTS[variant].contentType)) {
-    return { ok: false, reason: `a non-${VARIANTS[variant].contentType} response`, failed: false };
+/** A missing or failed capture degrades only soft navigation; the document remains a valid prerender. */
+async function renderSharedFlight(capture: Promise<Uint8Array> | undefined): Promise<{ ok: true; body: Uint8Array } | { ok: false; reason: string }> {
+  if (!capture) return { ok: false, reason: 'the shared Flight payload was unavailable' };
+  try {
+    return { ok: true, body: await capture };
+  } catch (error) {
+    const reason =
+      error instanceof Error && error.message ? `the shared Flight capture failed: ${error.message}` : 'the shared Flight capture failed';
+    return { ok: false, reason };
   }
-  // Bytes, not `response.text()`. That is a *non-fatal* UTF-8 decode, so every byte of a binary row in a
-  // flight payload — `emitChunk` puts raw typed-array bytes on the wire — becomes U+FFFD, and writing the
-  // string back out spends three real bytes on each one. The page is then prerendered and unparseable.
-  // The header is the framework saying this render minted a CSP nonce; on a flight payload it is never set.
-  return { ok: true, body: new Uint8Array(await response.arrayBuffer()), nonced: response.headers.get(PRERENDER_NONCE_HEADER) !== null };
+}
+
+/**
+ * Makes the one build-time request for a concrete path and keeps the shared Flight branch with its document.
+ *
+ * The response body is still HTML; the optional branch is only consumed by the SSG writer. A missing or
+ * rejected branch therefore degrades Flight to a request-time render without discarding the document.
+ */
+async function renderDocument(fetch: PrerenderOptions['fetch'], url: string): Promise<RenderedVariant> {
+  const response = await fetch(new Request(url));
+  const flight = getPrerenderFlight(response);
+  if (response.status !== 200) {
+    void response.body?.cancel().catch(() => {});
+    return { ok: false, reason: `${response.status}`, failed: response.status >= 500 };
+  }
+  if (!(response.headers.get('Content-Type') ?? '').includes('text/html')) {
+    void response.body?.cancel().catch(() => {});
+    return { ok: false, reason: 'a non-text/html response', failed: false };
+  }
+  return {
+    ok: true,
+    body: new Uint8Array(await response.arrayBuffer()),
+    nonced: response.headers.get(PRERENDER_NONCE_HEADER) !== null,
+    flight,
+  };
 }
 
 /** A path the pass will render, resolved far enough that nothing left can fail the build. */
@@ -286,7 +309,7 @@ export async function prerenderStaticRoutes(options: PrerenderOptions): Promise<
   const outcomes = await mapBounded(targets, RENDER_CONCURRENCY, async ({ path, relPath }) => {
     /** Buffered, so a concurrent pass logs in the same order a serial one did. */
     const warnings: string[] = [];
-    const document = await renderVariant(fetch, origin + path, 'html');
+    const document = await renderDocument(fetch, origin + path);
     if (!document.ok) {
       // A 5xx fails the build instead of being warned about — see {@link RenderedVariant}.
       if (!document.failed) warnings.push(`  ⚠ "${path}" rendered ${document.reason} at build time — skipping, will SSR per request.`);
@@ -305,15 +328,14 @@ export async function prerenderStaticRoutes(options: PrerenderOptions): Promise<
     };
     write('html', document.body);
 
-    // The soft-navigation representation of the same page. Best-effort: the document is valid on its own, and
-    // serving falls back to rendering the flight payload per request.
-    const flight = await renderVariant(fetch, origin + path, 'flight');
+    // The inline Flight reader captured these bytes from the same RSC evaluation. Best-effort: the document
+    // remains valid if capture fails, and soft navigation then renders Flight per request.
+    const flight = await renderSharedFlight(document.flight);
     if (flight.ok) {
       write('flight', flight.body);
     } else {
-      // Not fatal the way a failed *document* is, even for a 5xx: the page is on disk and serves, and only
-      // soft navigation to it degrades to rendering per request. The reason is named because the two cases
-      // want different things done about them.
+      // Not fatal: the page is on disk and serves, and only soft navigation to it degrades to rendering per
+      // request. The reason is named because a missing shared branch is different from a failed document.
       warnings.push(`  ⚠ "${path}" produced no flight payload (${flight.reason}) — soft navigations to it will render per request.`);
     }
 

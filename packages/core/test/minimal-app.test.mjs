@@ -3,7 +3,7 @@
 // `defineRoutes` shorthand. The rest of the suite runs against one richly-configured testbed, which
 // is exactly the app that would never catch "the framework assumes X exists".
 import assert from 'node:assert/strict';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { buildApp, MINIMAL_APP_DIR, runCli, startApp, stopServer } from './helpers.mjs';
@@ -235,6 +235,39 @@ test('a rebuild drops a public/ file that is no longer there', () => {
   rmSync(publicDir, { recursive: true });
   buildApp(dir);
   assert.equal(existsSync(join(dir, 'dist', 'public')), false, 'and neither must the tree, once there is no public/ at all');
+});
+
+test('a static page evaluates its Server Component once for HTML and Flight', () => {
+  const dir = appWithRoutes(HOME_AND("  { path: '/snapshot', render: 'static', component: () => import('./pages/snapshot') },\n"));
+  writeFileSync(
+    join(dir, 'src', 'pages', 'snapshot.tsx'),
+    `let reads = 0;
+
+function nextRead() {
+  reads += 1;
+  return \`build-read-\${reads}\`;
+}
+
+export default function Snapshot() {
+  const value = nextRead();
+  console.log(\`[single-evaluation] \${value}\`);
+  return (
+    <html lang="en">
+      <body data-build-read={value}>{value}</body>
+    </html>
+  );
+}
+`,
+  );
+
+  const output = buildApp(dir);
+  assert.equal((output.match(/\[single-evaluation\] build-read-1/g) ?? []).length, 1, 'the page must be evaluated once');
+  assert.doesNotMatch(output, /\[single-evaluation\] build-read-2/, 'the page must not be evaluated again for Flight');
+
+  const html = readFileSync(join(dir, 'dist', 'ssg', 'snapshot', 'index.html'), 'utf8');
+  const flight = readFileSync(join(dir, 'dist', 'ssg', 'snapshot', 'index.rsc'), 'utf8');
+  assert.match(html, /data-build-read="build-read-1"/);
+  assert.match(flight, /build-read-1/);
 });
 
 test('a second route claiming a path the table already answers fails the build, naming both entries', () => {

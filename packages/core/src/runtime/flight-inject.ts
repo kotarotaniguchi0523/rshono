@@ -96,11 +96,53 @@ function trailerPrefixLength(buffer: Uint8Array, length: number): number {
  */
 const NONCE_CHARS = /^[A-Za-z0-9+/=_-]+$/;
 
+function createFlightCapture() {
+  const { promise, resolve, reject } = Promise.withResolvers<Uint8Array>();
+  // A render can be abandoned before the SSG pass receives this promise. Observing it here leaves the
+  // original promise rejected for a later await without risking an unhandled rejection in that gap.
+  void promise.catch(() => {});
+  let chunks: Uint8Array[] | undefined = [];
+  let byteLength = 0;
+
+  const fail = (reason?: unknown): void => {
+    if (!chunks) return;
+    chunks = undefined;
+    reject(reason ?? new Error('Flight capture was cancelled'));
+  };
+
+  return {
+    promise,
+    push(chunk: Uint8Array) {
+      if (!chunks) return;
+      chunks.push(chunk);
+      byteLength += chunk.byteLength;
+    },
+    complete() {
+      const captured = chunks;
+      if (!captured) return;
+      chunks = undefined;
+      try {
+        const bytes = new Uint8Array(byteLength);
+        let offset = 0;
+        for (const chunk of captured) {
+          bytes.set(chunk, offset);
+          offset += chunk.byteLength;
+        }
+        resolve(bytes);
+      } catch (error) {
+        reject(error);
+      }
+    },
+    fail,
+  };
+}
+
 export function injectFlightPayload(
   rscStream: ReadableStream<Uint8Array>,
-  options: { nonce?: string; onDone?: () => void } = {},
-): ReadableWritablePair<Uint8Array, Uint8Array> {
+  options: { nonce?: string; onDone?: () => void; captureFlight?: boolean } = {},
+): ReadableWritablePair<Uint8Array, Uint8Array> & { capturedFlight?: Promise<Uint8Array> } {
   const { nonce, onDone } = options;
+  const capture = options.captureFlight ? createFlightCapture() : undefined;
   const safeNonce = nonce !== undefined && NONCE_CHARS.test(nonce) ? nonce : undefined;
   const scriptOpen = `<script${safeNonce ? ` nonce="${safeNonce}"` : ''}>(self.__FLIGHT_DATA||=[]).push(`;
   const scriptClose = ')</script>';
@@ -201,6 +243,7 @@ export function injectFlightPayload(
     batch.length = 0;
     carry = null;
     for (const resolve of waiting.splice(0)) resolve();
+    capture?.fail(reason);
     // Otherwise the teed RSC branch keeps being pumped for a response nobody will read, and the tee's
     // other half buffers every chunk waiting for this one to catch up.
     flightReader?.cancel(reason).catch(() => {});
@@ -277,7 +320,10 @@ export function injectFlightPayload(
     for (;;) {
       if (cancelled) return;
       const { done, value } = await reader.read();
-      if (done) break;
+      if (done) {
+        capture?.complete();
+        break;
+      }
       // Only the decode is guarded: a `push` inside the same `try` would answer a dead controller by
       // re-encoding the chunk and enqueueing it again.
       let literal: string;
@@ -291,14 +337,31 @@ export function injectFlightPayload(
       // than whenever the payload would have ended on its own.
       try {
         await push(literal);
-      } catch {
+        capture?.push(value);
+      } catch (error) {
         cancelled = true;
+        capture?.fail(error);
         reader.cancel().catch(() => {});
         return;
       }
     }
     // No end-of-stream flush: a non-streaming decoder holds nothing between calls, so there is nothing left
     // to emit — and the flush this replaces could throw, erroring the response mid-document. See above.
+  }
+
+  function startFlight(controller: TransformStreamDefaultController<Uint8Array>): void {
+    if (startedFlight) return;
+    startedFlight = true;
+    if (cancelled) {
+      flightDone();
+      return;
+    }
+    void writeFlight(controller)
+      .catch((error) => {
+        capture?.fail(error);
+        controller.error(error);
+      })
+      .then(flightDone);
   }
 
   const transformer: CancellableTransformer<Uint8Array, Uint8Array> = {
@@ -327,14 +390,8 @@ export function injectFlightPayload(
           teardown(error);
           return;
         }
-        if (!startedFlight) {
-          startedFlight = true;
-          // Deliberately not awaited: this runs inside a scheduled callback with nothing to return to, and
-          // the chain already routes a write failure to `controller.error` before settling `flightDone`.
-          void writeFlight(controller)
-            .catch((error) => controller.error(error))
-            .then(flightDone);
-        }
+        // Deliberately not awaited: this runs inside a scheduled callback with nothing to return to.
+        startFlight(controller);
       });
     },
     async flush(controller) {
@@ -348,14 +405,7 @@ export function injectFlightPayload(
         // all — leaves nothing to have started the payload, and `flightDone` is only ever called from that
         // chain or from `cancel`. Without this the await below parks on a promise nothing will settle and the
         // response never ends. `cancelled` short-circuits it: there is nowhere to write the payload to.
-        if (!startedFlight) {
-          startedFlight = true;
-          if (cancelled) flightDone();
-          else
-            void writeFlight(controller)
-              .catch((error) => controller.error(error))
-              .then(flightDone);
-        }
+        startFlight(controller);
       } catch (error) {
         // The consumer went away while the batch was being emitted, so there is nothing left to write to and
         // nothing to wait for. Settled explicitly rather than left dangling, so the payload chain is released.
@@ -407,5 +457,6 @@ export function injectFlightPayload(
       return innerReader.cancel(reason);
     },
   });
-  return { readable, writable: inner.writable };
+  const pair = { readable, writable: inner.writable };
+  return capture ? { ...pair, capturedFlight: capture.promise } : pair;
 }
