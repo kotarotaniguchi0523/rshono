@@ -60,9 +60,11 @@ export interface PageProps<Path extends string = string, E extends Env = Env> {
    * On a `render: 'static'` route this is the build-time URL — rendered once against `siteUrl`, so the
    * origin is `siteUrl`'s and `url.searchParams` is always empty, on first paint and after a soft
    * navigation alike. **`useNavigation().url` is the same frozen URL, not a way around it**: the payload
-   * carries one `href` and both readings come from it. Mark the route `render: 'dynamic'` if the page
-   * depends on the query; a `'use client'` component that only wants it after hydration can read
-   * `location.search` in an effect.
+   * carries one `href` and both readings come from it. The fragment is the one part no payload can carry
+   * — a browser never sends `#…` with the request — so this prop never has one, while
+   * `useNavigation().url.hash` is read from the browser after hydration. Mark the route
+   * `render: 'dynamic'` if the page depends on the query; a `'use client'` component that only wants it
+   * after hydration can read `location.search` in an effect.
    */
   url: URL;
   /** Matched route params for this request, e.g. `{ id: '42' }` for `/profile/:id`. */

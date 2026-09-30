@@ -11,6 +11,15 @@ those.
 
 ## Unreleased
 
+### Fixed
+
+- **`useNavigation().url.hash` now mirrors the browser fragment.** The URL a client component read was built
+  only from the payload's `href`, and a browser never sends `#…` to the server, so an in-page link, a
+  Back/Forward between anchors of one page, or opening the document at `#section` left `url.hash` empty — a
+  table of contents kept highlighting the old section and a share link built from the hook dropped the
+  fragment. `RouterProvider` reads the fragment from the address bar after hydration and follows
+  `hashchange`, without requesting page data; path, query and origin remain the payload's.
+
 ## 1.0.0-rc.23
 
 ### Changed

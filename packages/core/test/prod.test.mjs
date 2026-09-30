@@ -370,11 +370,14 @@ test('the framework’s plain-text refusals all carry the same headers', async (
 });
 
 test('useNavigation() gives a client island server-computed pathname/params/searchParams during SSR (no flicker)', async () => {
-  const html = await (await fetch(`${base}/profile/1?tab=settings`)).text();
+  // The fragment is for the client alone: `fetch` strips it exactly as a browser does, so the server renders
+  // `(none)` for it and the address bar catches up after hydration. That handoff is asserted in test/browser.
+  const html = await (await fetch(`${base}/profile/1?tab=settings#details`)).text();
   assert.match(html, /data-nav="pathname">(?:<!--[^]*?-->)?\/profile\/1</, 'useNavigation().pathname was wrong at SSR time');
   assert.match(html, /data-nav="param-id">(?:<!--[^]*?-->)?1</, 'useNavigation().params.id was wrong at SSR time');
-  assert.match(html, /data-nav="query-tab">(?:<!--[^]*?-->)?settings</, 'useNavigation().searchParams was wrong at SSR time');
-  assert.match(html, /data-nav="pending">(?:<!--[^]*?-->)?no</, 'nothing is navigating during SSR, so pending must be false');
+  assert.match(html, /data-nav="query-tab">(?:<!--[^]*?-->)?settings/, 'useNavigation().searchParams was wrong at SSR time');
+  assert.match(html, /data-nav="hash">(?:<!--[^]*?-->)?\(none\)/, 'the server never sees a fragment');
+  assert.match(html, /data-nav="pending">(?:<!--[^]*?-->)?no/, 'nothing is navigating during SSR, so pending must be false');
 });
 
 test('the navigation URL rides the flight payload so soft navigation stays in sync', async () => {

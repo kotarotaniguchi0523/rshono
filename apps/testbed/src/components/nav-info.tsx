@@ -15,6 +15,8 @@ export function NavInfo() {
         <br />
         query tab: <code data-nav="query-tab">{nav.url.searchParams.get('tab') ?? '(none)'}</code>
         <br />
+        hash: <code data-nav="hash">{nav.url.hash || '(none)'}</code>
+        <br />
         pending: <code data-nav="pending">{nav.router.pending ? 'yes' : 'no'}</code>
       </p>
       <p>

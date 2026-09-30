@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useMemo, type ReactNode } from 'react';
+import { createContext, useContext, useMemo, useSyncExternalStore, type ReactNode } from 'react';
 
 /**
  * Imperative navigation actions, reached as `useNavigation().router`.
@@ -43,6 +43,12 @@ export interface NavigationState {
   /**
    * The full current {@link URL}. A fresh instance per navigation, so mutating it affects nothing else
    * — it is not written back to the address bar.
+   *
+   * The path, query and origin travel in the page payload, but the fragment cannot: a browser leaves `#…`
+   * out of the request line, so the server renders every page without one. `url.hash` is therefore read
+   * from the browser after hydration and follows `hashchange` — an in-page link, Back/Forward between
+   * anchors of one document, or opening the document at one. Nothing else about the URL is affected; see
+   * {@link useNavigation} for the `render: 'static'` case.
    */
   url: URL;
   /** Matched route params for the current page, e.g. `{ id: '42' }` for `/profile/:id`. */
@@ -65,6 +71,30 @@ export const RouterContext = createContext<NavigationRouter>(defaultRouter);
 const NavigationContext = createContext<NavigationState | null>(null);
 
 /**
+ * The browser's fragment navigation: the one part of the address a payload can never carry, and the one part
+ * that can move without a page data request. `hashchange` is every way it moves within a document — an
+ * in-page link, Back/Forward between anchors of one page, opening the document at `#section` covered by the
+ * post-hydration check `useSyncExternalStore` makes for a changed snapshot. A cross-page `#anchor` commits a
+ * payload instead; the re-render that follows reads the fragment then.
+ */
+function subscribeToHash(onStoreChange: () => void): () => void {
+  window.addEventListener('hashchange', onStoreChange);
+  return () => window.removeEventListener('hashchange', onStoreChange);
+}
+
+/** The live fragment, `#…` included, or `''`. */
+const readHash = (): string => window.location.hash;
+
+/**
+ * What the fragment reads as while the server snapshot is in use — server render and hydration. The server
+ * never saw one, so the payload's URL has none; answering with the live fragment here would render markup
+ * the server did not and fail hydration. The empty string is exactly what the payload carries, and the
+ * post-hydration re-render that `useSyncExternalStore` performs for a changed snapshot is where the
+ * browser's own arrives.
+ */
+const readServerHash = (): string => '';
+
+/**
  * Publishes the per-render location and params for {@link useNavigation} to read. The RSC entry wraps
  * every page in one.
  *
@@ -72,7 +102,14 @@ const NavigationContext = createContext<NavigationState | null>(null);
  */
 export function RouterProvider({ href, params, children }: { href: string; params: Record<string, string>; children: ReactNode }) {
   const router = useContext(RouterContext);
-  const value = useMemo<NavigationState>(() => ({ url: new URL(href), params, router }), [href, params, router]);
+  // `href` is the payload's URL — see `subscribeToHash` — so the browser's fragment is applied on top of it.
+  // This is the only client-side part of `url`; path, query and origin stay exactly what the payload said.
+  const hash = useSyncExternalStore(subscribeToHash, readHash, readServerHash);
+  const value = useMemo<NavigationState>(() => {
+    const url = new URL(href);
+    url.hash = hash;
+    return { url, params, router };
+  }, [href, hash, params, router]);
 
   return <NavigationContext.Provider value={value}>{children}</NavigationContext.Provider>;
 }
@@ -85,11 +122,16 @@ export function RouterProvider({ href, params, children }: { href: string; param
  * during SSR — no hydration flicker — and update on every navigation. `router` holds the imperative
  * actions plus a `pending` flag, `true` while a soft navigation is in flight.
  *
+ * The fragment is the exception the payload cannot cover: a browser never sends `#…` to the server, so
+ * `url.hash` is read from the address bar after hydration and kept in sync on `hashchange` — an in-page
+ * link, Back/Forward between anchors, or opening the document at `#section` — with no request either way.
+ * Everything before the `#` remains what the payload carried.
+ *
  * **On a `render: 'static'` route `url` is frozen at build time**, origin included and query empty. The
  * payload is one prerendered set of bytes and this reads the `href` in it, so it is the page's own
- * `PageProps.url` — the same value, not a live one. A page whose output depends on the query wants
- * `render: 'dynamic'`; a component that only needs it after hydration can read `location.search` in an
- * effect.
+ * `PageProps.url` — the same value, not a live one, `url.hash` aside. A page whose output depends on the
+ * query wants `render: 'dynamic'`; a component that only needs it after hydration can read
+ * `location.search` in an effect.
  *
  * Hooks can't run in a server component; read the same data there from `getRequestContext()`.
  *

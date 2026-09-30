@@ -182,9 +182,10 @@ test.describe('useNavigation', () => {
   });
 
   // A traversal is the browser's own operation, so `back()` / `forward()` only ask for it and the runtime
-  // picks the entry up as a `navigate` event. Two things have to come out of that. The readout is rendered from
-  // the payload's `href`, not from `location`, so it only changes if a new payload was fetched and applied —
-  // and the document id only survives if that happened in place, without a browser load.
+  // picks the entry up as a `navigate` event. Two things have to come out of that. The pathname and query the
+  // readout renders come from the payload's `href`, not from `location`, so they only change if a new payload
+  // was fetched and applied — and the document id only survives if that happened in place, without a browser
+  // load.
   test('router.back and router.forward traverse history as soft navigations', async ({ page }) => {
     await page.goto('/profile/1');
     await expect(page.locator('[data-nav="query-tab"]')).toHaveText('(none)');
@@ -203,6 +204,71 @@ test.describe('useNavigation', () => {
     await expect(page.locator('[data-nav="query-tab"]')).toHaveText('activity');
 
     expect(await documentId(page), 'neither traversal may reload the document').toBe(before);
+  });
+
+  // The fragment is the one part of `url` a payload cannot carry: browsers leave `#…` out of the request
+  // line, so the server rendered the page without one. It is read from the address bar instead, which is
+  // what an in-page link changes without asking for anything.
+  test('an in-page fragment updates the hook with no payload fetch', async ({ page }) => {
+    await page.goto('/profile/1');
+    await expect(page.locator('[data-nav="hash"]')).toHaveText('(none)');
+    const before = await markDocument(page);
+
+    const payloadRequests = [];
+    page.on('request', (request) => {
+      if (request.headers()['rsc'] === '1') payloadRequests.push(request.url());
+    });
+
+    // The address-bar half of an in-page link click: a fragment navigation of the document already shown.
+    await page.evaluate(() => {
+      window.location.hash = 'posts';
+    });
+
+    await expect(page).toHaveURL('/profile/1#posts');
+    await expect(page.locator('[data-nav="hash"]')).toHaveText('#posts');
+    expect(await documentId(page), 'a fragment must not reload the document').toBe(before);
+    expect(payloadRequests, 'a fragment needs nothing from the server').toEqual([]);
+  });
+
+  test('back out of a fragment clears the hook too', async ({ page }) => {
+    await page.goto('/profile/1');
+    await page.evaluate(() => {
+      window.location.hash = 'posts';
+    });
+    await expect(page.locator('[data-nav="hash"]')).toHaveText('#posts');
+
+    const payloadRequests = [];
+    page.on('request', (request) => {
+      if (request.headers()['rsc'] === '1') payloadRequests.push(request.url());
+    });
+
+    await page.goBack();
+
+    await expect(page).toHaveURL('/profile/1');
+    await expect(page.locator('[data-nav="hash"]')).toHaveText('(none)');
+    expect(payloadRequests, 'the document did not change, so nothing needed re-rendering').toEqual([]);
+  });
+
+  // A cross-page `#anchor` is an intercepted navigation, and the fragment rides outside the RSC fetch
+  // (browsers strip it), so the hook has to pick it up from the address bar when the payload commits.
+  test('a cross-page fragment reaches the hook with the payload', async ({ page }) => {
+    await page.goto('/profile/1');
+    await expect(page.locator('[data-nav="hash"]')).toHaveText('(none)');
+    const before = await markDocument(page);
+
+    await page.evaluate(() => {
+      window.location.href = '/profile/2#posts';
+    });
+
+    await expect(page).toHaveURL('/profile/2#posts');
+    await expect(page.locator('[data-nav="param-id"]')).toHaveText('2');
+    await expect(page.locator('[data-nav="hash"]')).toHaveText('#posts');
+    expect(await documentId(page), 'the page change must still be soft').toBe(before);
+  });
+
+  test('opening a document at a fragment lands the hook on it after hydration', async ({ page }) => {
+    await page.goto('/profile/1#posts');
+    await expect(page.locator('[data-nav="hash"]')).toHaveText('#posts');
   });
 });
 

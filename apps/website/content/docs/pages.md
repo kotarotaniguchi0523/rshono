@@ -121,7 +121,9 @@ export function NextPage() {
 ```
 
 `url` and `params` are the same names and types a page gets as props, so moving a read across the
-server/client line is a copy-paste. `router` holds `push`, `replace`, `back`, `forward`, `refresh` and
+server/client line is a copy-paste — apart from `url.hash`, which only the browser knows. A server never
+receives a fragment, so `useNavigation().url.hash` is read from the address bar after hydration and
+follows in-page links and Back/Forward. `router` holds `push`, `replace`, `back`, `forward`, `refresh` and
 `pending`; every one is a soft navigation, so client state outside the changed subtree survives.
 
 `<AsyncBoundary>` pairs a Suspense fallback with an error fallback, and `<CatchBoundary>` is the error

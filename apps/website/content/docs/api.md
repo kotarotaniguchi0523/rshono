@@ -199,7 +199,10 @@ The hook needs a client component.
 | `useNavigation(): NavigationState` | `{ url, params, router }` — the current location, and the router. |
 
 `url` and `params` are computed on the server and travel in the flight payload, so they are right during
-SSR and update on every navigation. In a server component, read the same data from `getRequestContext()`.
+SSR and update on every navigation. The fragment is the exception: a browser never sends `#…` to the
+server, so `url.hash` is read from the address bar after hydration and follows in-page links and
+Back/Forward with no request either way. In a server component, read the same data from
+`getRequestContext()`.
 
 ```tsx
 'use client';
