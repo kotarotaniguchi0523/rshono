@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "hono": "^4.13.8",
+    "hono": "^4.13.10",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "@rshono/core": "workspace:*",
@@ -18,7 +18,7 @@
     "rshono-test-external-client-dep": "workspace:*"
   },
   "devDependencies": {
-    "@types/node": "^26.6.2",
+    "@types/node": "^26.6.3",
     "@types/react": "^19.2.18",
     "typescript": "^7.0.2"
   }
