@@ -11,6 +11,8 @@ those.
 
 ## Unreleased
 
+## 1.0.0-rc.24
+
 ### Fixed
 
 - **`useNavigation().url.hash` now mirrors the browser fragment.** The URL a client component read was built
