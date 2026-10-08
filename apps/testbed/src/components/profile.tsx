@@ -3,7 +3,7 @@ import { notFound } from '@rshono/core/server';
 import { fakeDB } from '../db';
 import { Layout } from './layout';
 import { NavInfo } from './nav-info';
-import { NavigationSuspenseProbe } from './navigation-suspense-probe';
+import { NavigationRepro } from './navigation-suspense-probe';
 
 export default async function Profile({ params }: PageProps<'/profile/:id'>) {
   const user = await fakeDB.getUser(params.id);
@@ -31,7 +31,7 @@ export default async function Profile({ params }: PageProps<'/profile/:id'>) {
         </ul>
 
         <NavInfo />
-        <NavigationSuspenseProbe />
+        <NavigationRepro />
       </div>
     </Layout>
   );

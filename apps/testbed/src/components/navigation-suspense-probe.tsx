@@ -3,32 +3,39 @@
 import { Suspense, use } from 'react';
 import { useNavigation } from '@rshono/core/client';
 
-let gate: Promise<void> | undefined;
-
-function readClientContent() {
-  return (gate ??= fetch('/__navigation-suspense-probe').then(() => {}));
-}
+let resource: Promise<void> | undefined;
+let resolveResource: (() => void) | undefined;
 
 function Content() {
   const { url } = useNavigation();
-  const activity = url.searchParams.get('tab') === 'activity';
-  if (activity) use(readClientContent());
-  return <p data-probe="content">{activity ? 'Activity content' : 'Initial content'}</p>;
+
+  if (url.searchParams.get('tab') === 'activity' && resource) {
+    use(resource);
+    return <p>Activity content</p>;
+  }
+
+  return <p>Initial content</p>;
 }
 
-export function NavigationSuspenseProbe() {
+export function NavigationRepro() {
   const { router } = useNavigation();
+
+  function navigate() {
+    resource = new Promise<void>((resolve) => {
+      resolveResource = resolve;
+    });
+
+    router.push('?tab=activity');
+  }
+
   return (
     <div>
-      <button
-        onClick={() => {
-          router.push('?tab=activity');
-        }}
-      >
-        Navigate to suspended content
-      </button>
-      <p data-probe="pending">{router.pending ? 'yes' : 'no'}</p>
-      <Suspense fallback={<p data-probe="fallback">Loading client content</p>}>
+      <button onClick={navigate}>Navigate</button>
+      <button onClick={() => resolveResource?.()}>Resolve</button>
+
+      <p>pending: {String(router.pending)}</p>
+
+      <Suspense fallback={<p>Loading...</p>}>
         <Content />
       </Suspense>
     </div>
