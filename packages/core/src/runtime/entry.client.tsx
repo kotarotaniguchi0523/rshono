@@ -1096,7 +1096,12 @@ async function main() {
       push(payload.redirect);
       return undefined;
     }
-    if (documentUrl() === calledFrom) React.startTransition(() => void setPayload(payload));
+    if (documentUrl() === calledFrom) {
+      // The action carries newer server data. Invalidate any navigation snapshot requested before it
+      // without cancelling streams React may still retain in the outgoing tree.
+      currentNavigation++;
+      React.startTransition(() => void setPayload(payload));
+    }
     if (payload.notFound) return undefined;
     const result = payload.returnValue;
     if (!result) {
