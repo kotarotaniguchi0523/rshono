@@ -829,7 +829,14 @@ function loadPayload(url: string, signal?: AbortSignal, afterCommit?: () => void
   // `startTransition` runs the work but hands nothing back, so the promise carrying a failure is caught here
   // instead. Assigned synchronously: React invokes the callback before `startNav` returns.
   let work!: Promise<void>;
-  startNav(() => (work = run()));
+  startNav(
+    () =>
+      (work = run().catch((error: unknown) => {
+        // React observes this Action promise separately from the caller. Consume expected cancellation
+        // here, before it can become a rendering error, while preserving genuine request failures.
+        if (!stale()) throw error;
+      })),
+  );
 
   return work.then(
     // Undefined whenever nothing was applied — an abort, or a redirect — and there is then nothing to wait for.
