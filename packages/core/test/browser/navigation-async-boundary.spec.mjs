@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { emulateBrowserWithoutPrecommit } from './navigation-probe.mjs';
+import { emulateBrowserWithoutPrecommit, startRouterCall } from './navigation-probe.mjs';
 
 test.beforeEach(async ({ page }) => {
   const errors = [];
@@ -95,10 +95,7 @@ test('an address change does not remount the outgoing AsyncBoundary before its r
     await route.continue();
   });
   try {
-    await page.evaluate(() => {
-      const result = navigation.navigate('/navigation-async-other');
-      void Promise.allSettled([result.committed, result.finished]);
-    });
+    await startRouterCall(page, 'push', '/navigation-async-other');
     await expect(page).toHaveURL('/navigation-async-other');
     await expect(page.locator('[data-nav="pathname"]')).toHaveText('/navigation-async-other');
     await expect(page.getByRole('heading', { name: '/navigation-async-boundary', exact: true })).toBeVisible();
@@ -116,10 +113,7 @@ test('an errored AsyncBoundary resets on another path and remains navigable', as
   await suspend(page);
   await page.getByRole('button', { name: 'Reject', exact: true }).click();
   await expect(page.getByText('Resource failed', { exact: true })).toBeVisible();
-  await page.evaluate(() => {
-    const result = navigation.navigate('/navigation-async-other');
-    void Promise.allSettled([result.committed, result.finished]);
-  });
+  await startRouterCall(page, 'push', '/navigation-async-other');
   await expect(page.getByRole('heading', { name: '/navigation-async-other', exact: true })).toBeVisible();
   await expect(page.getByText('Initial content', { exact: true })).toBeVisible();
   await expect(page.getByText('Resource failed', { exact: true })).toBeHidden();
@@ -150,10 +144,7 @@ test('an omitted inner error fallback propagates to the outer AsyncBoundary and 
   await expect(page.getByText('Resource failed', { exact: true })).toBeHidden();
   await expect(page.getByRole('heading', { name: '/navigation-async-propagate', exact: true })).toBeVisible();
   await expect(page.getByText('pending: false', { exact: true })).toBeVisible();
-  await page.evaluate(() => {
-    const result = navigation.navigate('/navigation-async-other');
-    void Promise.allSettled([result.committed, result.finished]);
-  });
+  await startRouterCall(page, 'push', '/navigation-async-other');
   await expect(page.getByRole('heading', { name: '/navigation-async-other', exact: true })).toBeVisible();
   await expect(page.getByText('Initial content', { exact: true })).toBeVisible();
   await expect(page.getByText('Outer failed', { exact: true })).toBeHidden();
