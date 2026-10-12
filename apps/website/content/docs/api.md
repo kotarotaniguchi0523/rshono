@@ -198,11 +198,14 @@ The hook needs a client component.
 | ---------------------------------- | ----------------------------------------------------------------- |
 | `useNavigation(): NavigationState` | `{ url, params, router }` — the current location, and the router. |
 
-`url` and `params` are computed on the server and travel in the flight payload, so they are right during
-SSR and update on every navigation. The fragment is the exception: a browser never sends `#…` to the
-server, so `url.hash` is read from the address bar after hydration and follows in-page links and
-Back/Forward with no request either way. In a server component, read the same data from
-`getRequestContext()`.
+`url` and `params` come from the server payload during SSR and hydration. After hydration, `url`
+follows the browser address, including query and fragment changes on static pages, independently of
+page fetching. `params` describes the displayed page until its replacement commits. In a server
+component, read request data from `getRequestContext()`.
+
+Browser URL changes are reflected through a React transition. If a URL-dependent component suspends,
+already revealed content stays visible until its replacement is ready. The address bar can therefore
+change before the suspended content commits; newly mounted Suspense boundaries may show their fallback.
 
 ```tsx
 'use client';
@@ -220,9 +223,11 @@ export function NextPage() {
 ```
 
 `router` holds `push(href)`, `replace(href)`, `back()`, `forward()`, `refresh()` and the `pending` flag.
-Every one is a **soft** navigation: the page's flight payload is fetched and applied in place, so client
-state outside the changed subtree survives. Off-site hrefs, and a traversal that leaves the app, fall back
-to a full load.
+When the browser can intercept an action, it fetches and applies the page's flight payload in place, so
+client state outside the changed subtree survives. Off-site hrefs, and a traversal that leaves the app,
+fall back to a full load. Each action returns a promise with a `NavigationOutcome`: `rendered` after the
+destination commits, `no-op` if there is no history entry to traverse, or `document-navigation` when a
+browser load takes over. A failed or superseded intercepted navigation rejects the promise.
 
 ### Components
 
@@ -249,6 +254,7 @@ scoped — pass `resetKeys={[url.pathname]}` to clear its error state on navigat
 | -------------------- | --------------------------------------------------------------------------------------------------------- |
 | `NavigationState`    | `{ url, params, router }` — what `useNavigation()` returns.                                               |
 | `NavigationRouter`   | The imperative actions plus `pending`.                                                                    |
+| `NavigationOutcome`  | The result of an imperative router action.                                                                |
 | `AsyncBoundaryProps` | Props of `<AsyncBoundary>`.                                                                               |
 | `CatchBoundaryProps` | Props of `<CatchBoundary>`.                                                                               |
 | `ErrorFallback`      | `ReactNode`, or `(error, reset) => ReactNode`. The function form only works from a `'use client'` module. |

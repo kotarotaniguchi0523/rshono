@@ -22,5 +22,5 @@
  * @packageDocumentation
  */
 
-export { useNavigation, type NavigationRouter, type NavigationState } from './navigation.js';
+export { useNavigation, type NavigationOutcome, type NavigationRouter, type NavigationState } from './navigation.js';
 export { AsyncBoundary, CatchBoundary, type AsyncBoundaryProps, type CatchBoundaryProps, type ErrorFallback } from './boundaries.js';

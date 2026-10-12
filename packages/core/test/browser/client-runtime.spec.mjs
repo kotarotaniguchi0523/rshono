@@ -131,17 +131,21 @@ test.describe('navigation fetching', () => {
     await expect(page.getByText('(hydrated ✓)')).toBeVisible();
 
     // Holds the first navigation's payload until the second has been asked for and answered.
+    let requestSeen;
+    const seen = new Promise((resolve) => (requestSeen = resolve));
     let release;
     const held = new Promise((resolve) => (release = resolve));
     await page.route('**/users', async (route) => {
       if (route.request().headers()['rsc'] !== '1') return route.fallback();
+      requestSeen();
       await held;
       // The client is expected to have hung up on this by now, which is what makes `continue` throw.
       await route.continue().catch(() => {});
     });
 
     await page.getByRole('link', { name: 'Users', exact: true }).click();
-    await expect(page).toHaveURL('/users');
+    await seen;
+    await expect(page).toHaveURL('/');
 
     // The old tree stays interactive through a pending transition, so the nav is still clickable.
     await page.getByRole('link', { name: 'Sign Up', exact: true }).click();

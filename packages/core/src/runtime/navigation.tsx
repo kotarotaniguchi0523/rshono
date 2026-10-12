@@ -1,13 +1,19 @@
 'use client';
 
-import { createContext, useContext, useMemo, useSyncExternalStore, type ReactNode } from 'react';
+import { createContext, startTransition, useContext, useLayoutEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
+
+/** Outcome of a router action: a committed page, an unavailable history entry, or a browser load. */
+export type NavigationOutcome = { kind: 'rendered'; url: URL } | { kind: 'no-op' } | { kind: 'document-navigation' };
 
 /**
  * Imperative navigation actions, reached as `useNavigation().router`.
  *
- * Every action is a **soft** navigation: the page's flight payload is fetched and applied in place, so
+ * When intercepted, actions fetch and apply the page's flight payload in place, so
  * client component state outside the changed subtree survives. Off-site hrefs — and a traversal that leaves
  * the app — fall back to a full load.
+ *
+ * Each action resolves with a {@link NavigationOutcome}; `rendered` waits for the destination's DOM
+ * commit. Failed or superseded intercepted navigations reject, with `AbortError` on supersession.
  *
  * Soft navigation is the browser's
  * {@link https://developer.mozilla.org/en-US/docs/Web/API/Navigation_API | Navigation API}; where that is
@@ -25,15 +31,15 @@ import { createContext, useContext, useMemo, useSyncExternalStore, type ReactNod
  */
 export interface NavigationRouter {
   /** Navigates to `href` and pushes a new history entry. */
-  push(href: string): void;
+  push(href: string): Promise<NavigationOutcome>;
   /** Navigates to `href`, replacing the current history entry instead of adding one. */
-  replace(href: string): void;
+  replace(href: string): Promise<NavigationOutcome>;
   /** Steps one entry back in the browser's session history. Nothing to go back to is a no-op. */
-  back(): void;
+  back(): Promise<NavigationOutcome>;
   /** Steps one entry forward in the browser's session history. A no-op on the newest entry. */
-  forward(): void;
+  forward(): Promise<NavigationOutcome>;
   /** Re-fetches the current route from the server, re-running its server components. */
-  refresh(): void;
+  refresh(): Promise<NavigationOutcome>;
   /** `true` while a soft navigation is in flight — use it to disable controls or show a spinner. */
   pending: boolean;
 }
@@ -41,14 +47,11 @@ export interface NavigationRouter {
 /** The current location plus the {@link NavigationRouter}, as returned by {@link useNavigation}. */
 export interface NavigationState {
   /**
-   * The full current {@link URL}. A fresh instance per navigation, so mutating it affects nothing else
+   * The full current {@link URL}. This hook returns its own instance, so mutating it affects nothing else
    * — it is not written back to the address bar.
    *
-   * The path, query and origin travel in the page payload, but the fragment cannot: a browser leaves `#…`
-   * out of the request line, so the server renders every page without one. `url.hash` is therefore read
-   * from the browser after hydration and follows `hashchange` — an in-page link, Back/Forward between
-   * anchors of one document, or opening the document at one. Nothing else about the URL is affected; see
-   * {@link useNavigation} for the `render: 'static'` case.
+   * During server rendering and hydration, the URL comes from the page payload. After hydration it
+   * follows the browser address, including query and fragment changes, independently of page fetching.
    */
   url: URL;
   /** Matched route params for the current page, e.g. `{ id: '42' }` for `/profile/:id`. */
@@ -57,42 +60,41 @@ export interface NavigationState {
   router: NavigationRouter;
 }
 
-const noop = () => {};
+const noop = (): Promise<NavigationOutcome> => Promise.resolve({ kind: 'no-op' });
 
 const defaultRouter: NavigationRouter = { push: noop, replace: noop, back: noop, forward: noop, refresh: noop, pending: false };
 
 /**
- * Carries the live {@link NavigationRouter} from the hydration runtime down to {@link RouterProvider}.
+ * Carries the live {@link NavigationRouter} from the hydration runtime to {@link useNavigation}.
  *
  * @internal
  */
 export const RouterContext = createContext<NavigationRouter>(defaultRouter);
 
-const NavigationContext = createContext<NavigationState | null>(null);
+// Only server-rendered page identity belongs in this provider. Live browser state is composed in
+// the public hook, so an address change does not replace the context for the whole payload tree.
+type RouteState = { href: string; params: Record<string, string> };
+const NavigationContext = createContext<RouteState | null>(null);
 
-/**
- * The browser's fragment navigation: the one part of the address a payload can never carry, and the one part
- * that can move without a page data request. `hashchange` is every way it moves within a document — an
- * in-page link, Back/Forward between anchors of one page, opening the document at `#section` covered by the
- * post-hydration check `useSyncExternalStore` makes for a changed snapshot. A cross-page `#anchor` commits a
- * payload instead; the re-render that follows reads the fragment then.
- */
-function subscribeToHash(onStoreChange: () => void): () => void {
+function subscribeToBrowserUrl(onStoreChange: () => void): () => void {
+  if (typeof navigation !== 'undefined') navigation.addEventListener('currententrychange', onStoreChange);
   window.addEventListener('hashchange', onStoreChange);
-  return () => window.removeEventListener('hashchange', onStoreChange);
+  window.addEventListener('popstate', onStoreChange);
+  return () => {
+    if (typeof navigation !== 'undefined') navigation.removeEventListener('currententrychange', onStoreChange);
+    window.removeEventListener('hashchange', onStoreChange);
+    window.removeEventListener('popstate', onStoreChange);
+  };
 }
 
-/** The live fragment, `#…` included, or `''`. */
-const readHash = (): string => window.location.hash;
+const readBrowserUrl = (): string => (typeof navigation !== 'undefined' ? navigation.currentEntry?.url : undefined) ?? location.href;
 
-/**
- * What the fragment reads as while the server snapshot is in use — server render and hydration. The server
- * never saw one, so the payload's URL has none; answering with the live fragment here would render markup
- * the server did not and fail hydration. The empty string is exactly what the payload carries, and the
- * post-hydration re-render that `useSyncExternalStore` performs for a changed snapshot is where the
- * browser's own arrives.
- */
-const readServerHash = (): string => '';
+// This immutable snapshot distinguishes hydration from a later client mount. It does not subscribe
+// to URL mutations: those updates remain transition-owned. A newly mounted error-boundary child must
+// not start from an old payload URL and throw before its layout effect can reconcile the address.
+const subscribeToHydration = () => () => {};
+const readHydrated = () => true;
+const readServerHydrated = () => false;
 
 /**
  * Publishes the per-render location and params for {@link useNavigation} to read. The RSC entry wraps
@@ -101,17 +103,8 @@ const readServerHash = (): string => '';
  * @internal
  */
 export function RouterProvider({ href, params, children }: { href: string; params: Record<string, string>; children: ReactNode }) {
-  const router = useContext(RouterContext);
-  // `href` is the payload's URL — see `subscribeToHash` — so the browser's fragment is applied on top of it.
-  // This is the only client-side part of `url`; path, query and origin stay exactly what the payload said.
-  const hash = useSyncExternalStore(subscribeToHash, readHash, readServerHash);
-  const value = useMemo<NavigationState>(() => {
-    const url = new URL(href);
-    url.hash = hash;
-    return { url, params, router };
-  }, [href, hash, params, router]);
-
-  return <NavigationContext.Provider value={value}>{children}</NavigationContext.Provider>;
+  const route = useMemo(() => ({ href, params }), [href, params]);
+  return <NavigationContext.Provider value={route}>{children}</NavigationContext.Provider>;
 }
 
 /**
@@ -122,27 +115,21 @@ export function RouterProvider({ href, params, children }: { href: string; param
  * @internal
  */
 export function useNavigationPathname(): string | undefined {
-  return useContext(NavigationContext)?.url.pathname;
+  const route = useContext(NavigationContext);
+  return route ? new URL(route.href).pathname : undefined;
 }
 
 /**
  * Reactive access to the current URL and programmatic navigation, in one hook. Call it from a
  * `'use client'` component.
  *
- * `url` and `params` are computed on the server and travel in the flight payload, so they are correct
- * during SSR — no hydration flicker — and update on every navigation. `router` holds the imperative
- * actions plus a `pending` flag, `true` while a soft navigation is in flight.
+ * During SSR and hydration, `url` and `params` come from the server payload. After hydration `url`
+ * follows the browser address, including on prerendered pages and while the next payload is pending.
+ * `params` still describes the displayed page until its replacement commits. `router` holds the
+ * imperative actions and a `pending` flag, true while a soft navigation is in flight.
  *
- * The fragment is the exception the payload cannot cover: a browser never sends `#…` to the server, so
- * `url.hash` is read from the address bar after hydration and kept in sync on `hashchange` — an in-page
- * link, Back/Forward between anchors, or opening the document at `#section` — with no request either way.
- * Everything before the `#` remains what the payload carried.
- *
- * **On a `render: 'static'` route `url` is frozen at build time**, origin included and query empty. The
- * payload is one prerendered set of bytes and this reads the `href` in it, so it is the page's own
- * `PageProps.url` — the same value, not a live one, `url.hash` aside. A page whose output depends on the
- * query wants `render: 'dynamic'`; a component that only needs it after hydration can read
- * `location.search` in an effect.
+ * A static server-rendered page still cannot depend on a request's query. Client components can read
+ * the current query directly through this hook after hydration; no additional effect is required.
  *
  * Hooks can't run in a server component; read the same data there from `getRequestContext()`.
  *
@@ -177,5 +164,23 @@ export function useNavigation(): NavigationState {
       "[rshono] useNavigation() must be called inside a 'use client' component rendered by a page. In a server component, read the URL from getRequestContext() instead.",
     );
   }
-  return value;
+  const router = useContext(RouterContext);
+  // Preserve SSR markup, then read the address independently of page fetching after hydration.
+  const hydrated = useSyncExternalStore(subscribeToHydration, readHydrated, readServerHydrated);
+  const [browserHref, setBrowserHref] = useState(() => (hydrated ? readBrowserUrl() : value.href));
+  useLayoutEffect(() => {
+    let lastHref: string | undefined;
+    const update = () => {
+      const href = readBrowserUrl();
+      // Several browser events may report the same address; avoid restarting an unchanged transition.
+      if (href === lastHref) return;
+      lastHref = href;
+      startTransition(() => setBrowserHref(href));
+    };
+    const unsubscribe = subscribeToBrowserUrl(update);
+    // Catch address changes between rendering and registration, including initial fragments.
+    update();
+    return unsubscribe;
+  }, []);
+  return useMemo(() => ({ url: new URL(browserHref), params: value.params, router }), [browserHref, value.params, router]);
 }
