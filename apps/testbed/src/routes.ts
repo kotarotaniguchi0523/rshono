@@ -42,6 +42,26 @@ export const routes = defineRoutes({
       component: () => import('./components/profile'),
     },
     {
+      path: '/navigation-async-boundary',
+      component: () => import('./components/navigation-async-boundary'),
+    },
+    {
+      path: '/navigation-async-other',
+      component: () => import('./components/navigation-async-boundary'),
+    },
+    {
+      path: '/navigation-async-propagate',
+      component: () => import('./components/navigation-async-propagate'),
+    },
+    {
+      path: '/navigation-async-nested',
+      component: () => import('./components/navigation-async-nested'),
+    },
+    {
+      path: '/navigation-address-suspense',
+      component: () => import('./components/navigation-address-suspense'),
+    },
+    {
       path: '/navigation-suspense',
       component: () => import('./components/navigation-suspense'),
     },

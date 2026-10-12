@@ -3,6 +3,7 @@
 import type { PageProps } from '@rshono/core';
 import { fakeDB } from '../db';
 import { Layout } from './layout';
+import { NavInfo } from './nav-info';
 
 export default async function Documentation({ params, url }: PageProps<'/docs/:slug'>) {
   const [doc, docs] = await Promise.all([fakeDB.getDoc(params.slug), fakeDB.listDocs()]);
@@ -17,6 +18,7 @@ export default async function Documentation({ params, url }: PageProps<'/docs/:s
       */}
       <link rel="canonical" href={url.href} />
       <div className="page">
+        <NavInfo />
         <nav className="meta">
           {docs.map((d, i) => (
             <span key={d.slug}>

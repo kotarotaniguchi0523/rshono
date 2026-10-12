@@ -215,41 +215,11 @@ async function payloadResponse(request: Request): Promise<Response> {
 }
 
 /**
- * A payload fetch, split into what React parses and a signal for the end of the stream.
- *
- * The payload promise resolves as soon as the root model is ready, which for a streamed response is well
- * before the response body has delivered its last chunk. {@link loadPayload} needs the second promise to
- * recover a transition React can leave suspended when a later chunk resolves — see the retry there.
- *
- * `settled` means **the body arrived in full**, not "the body is done". It resolves from the pass-through's
- * `flush`, which only runs when the source closes cleanly; a body that errors — an abort, a network drop, a
- * truncated stream — errors the destination instead and leaves `settled` pending for the life of the entry.
- * That is deliberate: the retry is exactly what must not run for a failed stream, and nothing needs a
- * "finished, however it finished" signal today. A later caller that wants one must not read it into this
- * promise.
+ * Fetches and decodes the root while React continues reading streamed children.
+ * Uncached: the browser's HTTP cache handles repeat visits.
  */
-type FetchedPayload = { payload: Promise<RscPayload>; settled: Promise<void> };
-
-/**
- * Asks a URL for its flight payload. Deliberately uncached — a payload can never be staler than the click
- * that wanted it, and the browser's own HTTP cache is what makes a repeat visit cheap.
- *
- * The body rides through a pass-through so its end is observable: a tee would keep a copy of every byte
- * React has not parsed yet, and the flight stream is the one thing here that can be large.
- */
-function requestPayload(href: string, signal?: AbortSignal): FetchedPayload {
-  const response = payloadResponse(createRscRequest(new URL(href, location.href).href, undefined, signal));
-  const { promise: settled, resolve: settle } = Promise.withResolvers<void>();
-  const forFlight = response.then((value) => {
-    const body = value.body;
-    if (!body) {
-      settle();
-      return value;
-    }
-    const stream = body.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({ flush: () => settle() }));
-    return new Response(stream, { status: value.status, statusText: value.statusText, headers: value.headers });
-  });
-  return { payload: createFromFetch<RscPayload>(forFlight), settled };
+function requestPayload(href: string, signal: AbortSignal): Promise<RscPayload> {
+  return createFromFetch<RscPayload>(payloadResponse(createRscRequest(new URL(href, location.href).href, undefined, signal)));
 }
 
 /**
@@ -425,6 +395,7 @@ function loadDocument(href?: string): void {
 // The imperative actions behind `useNavigation().router`. Each one only *asks*: the browser turns it into a
 // `navigate` event, which is where `listenNavigation` answers it — so a `router.push` and a link click reach
 // the same code by the same route, and inherit the same fetch, scroll and `pending` flag.
+// Carry each caller's completion through its browser event, fetch, and DOM commit.
 function push(href: string): void {
   if (canSoftNavigate) settle(navigation.navigate(href, { history: 'push' }));
   else window.location.assign(href);
@@ -520,7 +491,7 @@ function handleControlDigest(error: unknown, { hard = false }: { hard?: boolean 
     // The URL is resolved first: a malformed location then throws here, before any navigation is asked for.
     loadDocument(new URL(redirect.location, window.location.href).href);
   } else {
-    push(redirect.location);
+    void push(redirect.location);
   }
   return true;
 }
@@ -688,17 +659,9 @@ let setPayload: (payload: RscPayload, afterCommit?: () => void) => Promise<void>
   return new Promise<void>(() => {});
 };
 
-/**
- * Re-dispatches the payload already waiting to commit, for {@link loadPayload}'s lost-ping retry. Unlike
- * {@link setPayload} it creates and releases no commit promise, so re-rendering the same payload cannot
- * resolve the navigation's commit early. Assigned with {@link setPayload} by `BrowserRoot`.
- */
-let reapplyPayload: () => void = () => {};
-
-/** Runs work inside the nav transition so `useNavigation().pending` stays true across the round-trip. */
-let startNav: (run: () => void | Promise<void>) => void = (run) => {
-  void run();
-};
+/** Tracks the network round-trip separately from the transition that applies its payload. */
+let trackPayloadFetch: (work: Promise<void>) => void = () => {};
+let startPayloadTransition: (run: () => void) => void = React.startTransition;
 
 /**
  * The navigation whose payload is allowed to settle the screen. React runs async work concurrently, so two
@@ -725,7 +688,12 @@ let currentNavigation = 0;
  * Pruned when a payload commits and when a newer navigation starts. A fetch stopped by a browser cancellation
  * waits for one of those to drop it; the entries that remain are the applied ones plus the current fetch.
  */
-type NavigationFetch = { navigation: number; controller: AbortController; payload: RscPayload | null };
+type NavigationFetch = {
+  navigation: number;
+  controller: AbortController;
+  /** Null until handed to React; retained streams must survive cancellation until a replacement commits. */
+  payload: RscPayload | null;
+};
 let navigationFetches: NavigationFetch[] = [];
 
 /** Stop only the requests whose streams no longer belong to a retained render. */
@@ -737,6 +705,13 @@ function abortNavigationFetches(shouldAbort: (fetch: NavigationFetch) => boolean
   });
 }
 
+type LoadPayloadOptions = {
+  /** Available for intercepted navigations; history traversal and dev refresh have no browser signal. */
+  signal?: AbortSignal;
+  /** Scroll/focus work when needed; refresh and replace preserve the current position. */
+  afterCommit?: () => void;
+};
+
 /**
  * Fetches the payload for `url` and puts it on screen.
  *
@@ -745,7 +720,7 @@ function abortNavigationFetches(shouldAbort: (fetch: NavigationFetch) => boolean
  * being superseded is not one, and resolves quietly, because the navigation that replaced this one owns the
  * screen from then on.
  */
-function loadPayload(url: string, signal?: AbortSignal, afterCommit?: () => void): Promise<void> {
+function loadPayload(url: string, { signal, afterCommit }: LoadPayloadOptions = {}): Promise<void> {
   // This navigation's place in the queue, and its own abort switch: the navigation stops being applied by
   // whichever comes first, the browser superseding it (an intercepted navigation carries `event.signal`) or a
   // newer runtime fetch starting (a traversal, an action, a dev refresh). The fetch itself runs on until its
@@ -758,11 +733,7 @@ function loadPayload(url: string, signal?: AbortSignal, afterCommit?: () => void
   // A newer navigation owns the screen now, and an older fetch whose payload never reached React is reading
   // into a tree that does not exist — stopping it cannot reject a chunk anything holds. One that did reach
   // React waits for this payload's commit; see {@link navigationFetches}.
-  navigationFetches = navigationFetches.filter((fetch) => {
-    if (fetch === entry || fetch.payload !== null) return true;
-    fetch.controller.abort();
-    return false;
-  });
+  abortNavigationFetches((fetch) => fetch !== entry && fetch.payload === null);
 
   // The browser supersedes an intercepted navigation the moment a newer one starts, and `signal` is how it
   // says so. A fetch React has been handed keeps running (see {@link navigationFetches}), but one that never
@@ -783,14 +754,8 @@ function loadPayload(url: string, signal?: AbortSignal, afterCommit?: () => void
   // work too, but only because React happens not to gate a commit on its async scope settling — an internal
   // this has no reason to depend on across the whole `^19.1.0` peer range.
   let committed: Promise<void> | undefined;
-  // Whether the payload update has committed. A streamed transition can suspend on a flight chunk whose later
-  // resolution React never pings the lane back for; the retry below re-schedules the update once the stream
-  // has closed, but only while this is still false.
-  let committedSettled = false;
-
   const run = async () => {
-    const { payload, settled } = requestPayload(url, controller.signal);
-    const nextPayload = await payload;
+    const nextPayload = await requestPayload(url, controller.signal);
     // Checked again after the await because the fetch may already have resolved by then, and applying it
     // would repaint a page the user has left.
     if (stale()) return;
@@ -799,13 +764,12 @@ function loadPayload(url: string, signal?: AbortSignal, afterCommit?: () => void
       return;
     }
     // The fetch crossed an await, so its payload update needs a new synchronous transition scope.
-    // Keep the commit promise outside the async Action; React tracks the scheduled update until commit.
-    React.startTransition(() => {
+    // Keep the commit promise outside the transition callback; React tracks the update until commit.
+    startPayloadTransition(() => {
       // From here React holds this payload's stream, so a superseded fetch may not be stopped until a newer
       // payload commits — see {@link navigationFetches}.
       entry.payload = nextPayload;
       committed = setPayload(nextPayload, afterCommit);
-      void committed.then(() => (committedSettled = true));
     });
 
     // This payload is on screen, so every fetch it superseded is reading into a tree React has replaced.
@@ -813,40 +777,15 @@ function loadPayload(url: string, signal?: AbortSignal, afterCommit?: () => void
     // Only the older ones: a newer navigation may have started while this payload was in flight, and its
     // fetch is the one the screen is waiting for.
     void committed?.then(() => {
-      navigationFetches = navigationFetches.filter((fetch) => {
-        if (fetch.navigation >= navigation) return true;
-        fetch.controller.abort();
-        return false;
-      });
-    });
-
-    // A streamed payload can suspend a transition on a flight chunk that resolves after the shell without
-    // React ever pinging the suspended lane back, which strands the navigation on the previous tree. The
-    // chunks have all landed by the time the stream closes, so one re-application — still a transition, so a
-    // payload that is waiting on something other than flight keeps the #52 behaviour — commits the render a
-    // lost ping stranded. It goes through `reapplyPayload` rather than `setPayload`: the payload is not
-    // replaced, so the commit the navigation waits on has to stay attached to it. The macrotask lets the
-    // decoder process the last chunk and React's own retry run first, so the normal path is not interrupted.
-    void settled.then(() => {
-      if (stale() || committedSettled) return;
-      setTimeout(() => {
-        if (stale() || committedSettled) return;
-        React.startTransition(reapplyPayload);
-      }, 0);
+      abortNavigationFetches((fetch) => fetch.navigation < navigation);
     });
   };
 
-  // `startTransition` runs the work but hands nothing back, so the promise carrying a failure is caught here
-  // instead. Assigned synchronously: React invokes the callback before `startNav` returns.
-  let work!: Promise<void>;
-  startNav(
-    () =>
-      (work = run().catch((error: unknown) => {
-        // React observes this Action promise separately from the caller. Consume expected cancellation
-        // here, before it can become a rendering error, while preserving genuine request failures.
-        if (!stale()) throw error;
-      })),
-  );
+  // Expected cancellation is not a rendering failure; the replacement owns the screen.
+  const work = run().catch((error: unknown) => {
+    if (!stale()) throw error;
+  });
+  trackPayloadFetch(work);
 
   return work.then(
     // Undefined whenever nothing was applied — an abort, or a redirect — and there is then nothing to wait for.
@@ -926,14 +865,18 @@ function listenNavigation(): () => void {
     // return, so a fragment the browser performs itself is covered too.
     rememberCurrentScroll();
 
-    if (!event.canIntercept || leaveToBrowser(event)) return;
+    if (!event.canIntercept || leaveToBrowser(event)) {
+      return;
+    }
 
     // A traversal is repainted by the `popstate` listener below, not intercepted. `intercept`ing one is what
     // makes WebKit stall the rendered viewport for about three seconds on a back swipe
     // (bugs.webkit.org/319414): the view gesture's snapshot is only removed once the navigation finishes, and
     // React's root attaches the wheel listener the bug also needs. Letting the traversal through means the
     // browser commits the entry straight away, and the runtime puts the payload on screen when it arrives.
-    if (event.navigationType === 'traverse') return;
+    if (event.navigationType === 'traverse') {
+      return;
+    }
 
     // A replace or a refresh stays where it is, so neither should move. A push starts at the top of the
     // page, or at its fragment — and that scroll is the runtime's own now: WebKit performs no
@@ -947,13 +890,10 @@ function listenNavigation(): () => void {
       const { hash } = new URL(event.destination.url);
       afterCommit = hash === '' ? scrollToTop : () => jumpToAnchor(hash);
     }
-
     event.intercept({
       scroll: 'manual',
       focusReset: inPlace ? 'manual' : 'after-transition',
-      // The URL commits before the handler runs, so a failure leaves the address bar describing a page the
-      // document is not showing. A real load is the only way back to agreement.
-      handler: () => loadPayload(event.destination.url, event.signal, afterCommit).catch(() => loadDocument()),
+      handler: () => loadPayload(event.destination.url, { signal: event.signal, afterCommit }).catch(() => loadDocument()),
     });
   };
 
@@ -978,8 +918,8 @@ function listenNavigation(): () => void {
     // is off, so the offset comes from what `onNavigate` saved when the anchor was followed; no focus reset,
     // which is what leaving those navigations to the browser has always meant.
     if (documentUrl() === renderedUrl && renderedPayload) {
-      // Back can restore the address while a newer payload is still scheduled behind Suspense.
-      // Replace that reservation urgently, and retain streams belonging to the committed page.
+      // Back may arrive while a newer payload is scheduled but still suspended. The URL matches the
+      // committed tree, but that pending update must be replaced or it can paint after this traversal.
       const restoredGeneration = ++currentNavigation;
       abortNavigationFetches((fetch) => fetch.payload === null);
       void setPayload(renderedPayload, () => {
@@ -989,11 +929,11 @@ function listenNavigation(): () => void {
       return;
     }
 
-    void loadPayload(location.href, undefined, () => {
-      apply();
-      // The browser performs this for an intercepted navigation; a traversal is no longer intercepted, so
-      // without it Back would leave focus on the link that was clicked on the page being left.
-      resetFocus();
+    void loadPayload(location.href, {
+      afterCommit: () => {
+        apply();
+        resetFocus();
+      },
     }).catch(() => loadDocument());
   };
 
@@ -1072,6 +1012,7 @@ async function main() {
     const { payload } = render;
     const scheduledRender = React.useRef(render);
     const [pending, startTransition] = React.useTransition();
+    const [fetching, updateFetching] = React.useState(false);
 
     // Descendant passive effects can start a navigation before the root's passive effects run.
     React.useLayoutEffect(() => {
@@ -1082,9 +1023,18 @@ async function main() {
         setPayloadState(scheduled);
         return scheduled.committed;
       };
-      // Preserve the same commit record when retrying an already scheduled streamed payload.
-      reapplyPayload = () => setPayloadState({ ...scheduledRender.current });
-      startNav = (run) => startTransition(run);
+      startPayloadTransition = startTransition;
+      let requests = 0;
+      trackPayloadFetch = (work) => {
+        requests++;
+        updateFetching(true);
+        const finish = () => {
+          if (--requests === 0) updateFetching(false);
+        };
+        // An async Action entangles independent URL transitions until the response arrives.
+        // Only applying the payload belongs in a Transition; fetching has its own pending flag.
+        void work.then(finish, finish);
+      };
     }, [startTransition]);
 
     React.useLayoutEffect(() => {
@@ -1096,7 +1046,10 @@ async function main() {
     // A descendant may navigate from its first passive effect. Intercept it before that effect runs.
     React.useLayoutEffect(() => listenNavigation(), []);
 
-    const router = React.useMemo<NavigationRouter>(() => ({ push, replace, back, forward, refresh, pending }), [pending]);
+    const router = React.useMemo<NavigationRouter>(
+      () => ({ push, replace, back, forward, refresh, pending: pending || fetching }),
+      [pending, fetching],
+    );
 
     return <RouterContext.Provider value={router}>{payload.root}</RouterContext.Provider>;
   }
@@ -1128,7 +1081,7 @@ async function main() {
       // lose ownership before it can replace that newer data. Applied streams stay alive until commit.
       const actionGeneration = ++currentNavigation;
       abortNavigationFetches((fetch) => fetch.payload === null);
-      React.startTransition(() => {
+      startPayloadTransition(() => {
         const committed = setPayload(payload);
         void committed.then(() => {
           abortNavigationFetches((fetch) => fetch.navigation < actionGeneration);
