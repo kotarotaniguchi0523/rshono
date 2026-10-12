@@ -1,6 +1,81 @@
 import { expect, test } from '@playwright/test';
 import { emulateBrowserWithoutPrecommit, routerResult, startRouterCall } from './navigation-probe.mjs';
 
+for (const method of ['push', 'replace']) {
+  test(`precommit ${method} holds the URL and reports pending before the root arrives`, async ({ page }) => {
+    await page.goto('/profile/1');
+    let release;
+    const held = new Promise((resolve) => {
+      release = resolve;
+    });
+    let requestSeen;
+    const seen = new Promise((resolve) => {
+      requestSeen = resolve;
+    });
+    let requests = 0;
+    await page.route('**/profile/1?tab=activity', async (route) => {
+      if (route.request().headers()['rsc'] !== '1') return route.fallback();
+      requests++;
+      requestSeen();
+      await held;
+      await route.continue();
+    });
+    try {
+      await startRouterCall(page, method, '?tab=activity');
+      await seen;
+      await expect(page.locator('[data-nav="pending"]')).toHaveText('yes');
+      expect(new URL(page.url()).search).toBe('');
+      expect(await routerResult(page).then((result) => result.state)).toBe('waiting');
+    } finally {
+      release?.();
+    }
+    await expect.poll(() => routerResult(page).then((result) => result.state)).toBe('resolved');
+    await expect(page.locator('[data-nav="query-tab"]')).toHaveText('activity');
+    await expect(page.locator('[data-nav="pending"]')).toHaveText('no');
+    expect(requests).toBe(1);
+  });
+}
+
+test('precommit failure leaves the URL and existing screen intact', async ({ page }) => {
+  await page.goto('/profile/1');
+  await page.route('**/profile/1?tab=activity', (route) => route.fulfill({ status: 503, contentType: 'text/plain', body: 'unavailable' }));
+  await startRouterCall(page, 'push', '?tab=activity');
+  await expect.poll(() => routerResult(page).then((result) => result.state)).toBe('rejected');
+  expect(new URL(page.url()).search).toBe('');
+  await expect(page.getByRole('heading', { name: /Ada Lovelace/ })).toBeVisible();
+  await expect(page.locator('[data-nav="pending"]')).toHaveText('no');
+});
+
+for (const precommit of [false, true]) {
+  test(`root redirect completes on the final screen (precommit=${precommit})`, async ({ page }) => {
+    if (!precommit) await emulateBrowserWithoutPrecommit(page);
+    await page.goto('/profile/1');
+    await page.route('**/audit-redirect', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'text/x-component',
+        body: '0:{"root":null,"redirect":"/login"}\n',
+      }),
+    );
+    await startRouterCall(page, 'push', '/audit-redirect');
+    await expect.poll(() => routerResult(page).then((result) => result.state)).toBe('resolved');
+    const outcome = await routerResult(page);
+    expect(outcome.kind).toBe('rendered');
+    expect(new URL(outcome.url).pathname).toBe('/login');
+    expect(outcome.heading).toBe('Log in');
+  });
+}
+
+test('precommit commits the shell without waiting for the streamed child', async ({ page }) => {
+  await page.goto('/profile/1');
+  await startRouterCall(page, 'push', '/anchor-stream#depth-target');
+  await expect.poll(() => routerResult(page).then((result) => result.state)).toBe('resolved');
+  await expect(page).toHaveURL('/anchor-stream#depth-target');
+  await expect(page.locator('[data-anchor-loading]')).toBeVisible();
+  await expect(page.locator('#depth-target')).toHaveCount(0);
+  await expect(page.locator('#depth-target')).toBeVisible();
+});
+
 for (const method of ['push', 'replace', 'refresh', 'back', 'forward']) {
   test(`${method} resolves after the destination payload commits`, async ({ page }) => {
     await page.goto('/profile/1');
@@ -46,7 +121,7 @@ for (const method of ['push', 'replace', 'refresh', 'back', 'forward']) {
   });
 }
 
-for (const precommit of [false]) {
+for (const precommit of [false, true]) {
   test(`rejects a superseded navigation and finishes its replacement (precommit=${precommit})`, async ({ page }) => {
     if (!precommit) await emulateBrowserWithoutPrecommit(page);
     await page.goto('/profile/1');
@@ -164,6 +239,76 @@ test('Navigation API finished is earlier than a traversal payload commit', async
     release?.();
   }
   await expect(page.getByRole('heading', { name: /Ada Lovelace/ })).toBeVisible();
+});
+
+test('automatic preparation marks the router pending while an additional browser gate is held', async ({ page }) => {
+  await page.goto('/profile/1');
+  await expect(page.locator('[data-nav="pending"]')).toHaveText('no');
+  const probe = await page.evaluate(async () => {
+    let release;
+    const gate = new Promise((resolve) => {
+      release = resolve;
+    });
+    let entered;
+    const enteredGate = new Promise((resolve) => {
+      entered = resolve;
+    });
+    const listener = (event) => {
+      event.intercept({
+        precommitHandler: async () => {
+          entered();
+          await gate;
+        },
+      });
+    };
+    navigation.addEventListener('navigate', listener, { once: true });
+    const result = navigation.navigate('?tab=activity');
+    await enteredGate;
+    // The browser may start the two precommit handlers on different frames.
+    const pending = () => document.querySelector('[data-nav="pending"]')?.textContent;
+    const deadline = performance.now() + 2000;
+    while (pending() !== 'yes' && performance.now() < deadline) {
+      await new Promise(requestAnimationFrame);
+    }
+    const held = { url: location.search, pending: document.querySelector('[data-nav="pending"]')?.textContent };
+    release();
+    await result.finished;
+    return held;
+  });
+  expect(probe).toEqual({ url: '', pending: 'yes' });
+  await expect(page.locator('[data-nav="query-tab"]')).toHaveText('activity');
+});
+
+for (const target of ['/audit-loop', 'https://example.com/elsewhere', '//example.com/elsewhere', 'javascript:alert(1)', 'data:text/html,unsafe']) {
+  test(`precommit rejects unsafe root redirect ${target} before changing the URL`, async ({ page }) => {
+    await page.goto('/profile/1');
+    const externalRequests = [];
+    page.on('request', (request) => {
+      if (new URL(request.url()).origin !== new URL(page.url()).origin) externalRequests.push(request.url());
+    });
+    await page.route('https://example.com/**', (route) => route.abort());
+    await page.route('**/audit-loop', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'text/x-component',
+        body: `0:${JSON.stringify({ root: null, redirect: target })}\n`,
+      }),
+    );
+    await startRouterCall(page, 'push', '/audit-loop');
+    await expect.poll(() => routerResult(page).then((result) => result.state)).toBe('rejected');
+    await expect(page).toHaveURL('/profile/1');
+    await expect(page.locator('[data-nav="pending"]')).toHaveText('no');
+    await expect(page.getByRole('heading', { name: /Ada Lovelace/ })).toBeVisible();
+    expect(externalRequests).toEqual([]);
+  });
+}
+
+test('precommit falls back when the browser ignores its preparation handler', async ({ page }) => {
+  await emulateBrowserWithoutPrecommit(page);
+  await page.goto('/profile/1');
+  await startRouterCall(page, 'push', '/users');
+  await expect.poll(() => routerResult(page).then((result) => result.state)).toBe('resolved');
+  await expect(page.getByRole('heading', { name: 'Users', exact: true })).toBeVisible();
 });
 
 test('a digest redirect reports a document handoff before recovering the page', async ({ page }) => {
