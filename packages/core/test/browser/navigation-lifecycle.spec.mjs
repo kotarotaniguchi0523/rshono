@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { emulateBrowserWithoutPrecommit, routerResult, startRouterCall } from './navigation-probe.mjs';
+import { emulateBrowserWithoutPrecommit, routerResult, startRouterCall } from './navigation-api-probe.mjs';
 
 for (const method of ['push', 'replace']) {
   test(`precommit ${method} holds the URL and reports pending before the root arrives`, async ({ page }) => {

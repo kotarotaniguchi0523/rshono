@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { emulateBrowserWithoutPrecommit, startRouterCall } from './navigation-probe.mjs';
+import { emulateBrowserWithoutPrecommit, startRouterCall } from './navigation-api-probe.mjs';
 
 test.beforeEach(async ({ page }) => {
   const errors = [];

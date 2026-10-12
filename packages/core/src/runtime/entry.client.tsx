@@ -764,22 +764,8 @@ let currentNavigation = 0;
  * Pruned when a payload commits and when a newer navigation starts. A fetch stopped by a browser cancellation
  * waits for one of those to drop it; the entries that remain are the applied ones plus the current fetch.
  */
-type NavigationFetch = {
-  navigation: number;
-  controller: AbortController;
-  /** Null until handed to React; retained streams must survive cancellation until a replacement commits. */
-  payload: RscPayload | null;
-};
+type NavigationFetch = { navigation: number; controller: AbortController; applied: boolean };
 let navigationFetches: NavigationFetch[] = [];
-
-/** Stop only the requests whose streams no longer belong to a retained render. */
-function abortNavigationFetches(shouldAbort: (fetch: NavigationFetch) => boolean): void {
-  navigationFetches = navigationFetches.filter((fetch) => {
-    if (!shouldAbort(fetch)) return true;
-    fetch.controller.abort();
-    return false;
-  });
-}
 
 /** A prepared response and the controller owning its still-streaming body must travel together. */
 type PreparedPayload = { payload: Promise<RscPayload>; controller: AbortController };
@@ -810,13 +796,17 @@ function loadPayload(url: string, { signal, afterCommit, attempt, prepared }: Lo
   // payload is on screen and a newer one commits — see {@link navigationFetches}.
   const navigation = ++currentNavigation;
   const controller = prepared?.controller ?? new AbortController();
-  const entry: NavigationFetch = { navigation, controller, payload: null };
+  const entry: NavigationFetch = { navigation, controller, applied: false };
   navigationFetches.push(entry);
 
   // A newer navigation owns the screen now, and an older fetch whose payload never reached React is reading
   // into a tree that does not exist — stopping it cannot reject a chunk anything holds. One that did reach
   // React waits for this payload's commit; see {@link navigationFetches}.
-  abortNavigationFetches((fetch) => fetch !== entry && fetch.payload === null);
+  navigationFetches = navigationFetches.filter((fetch) => {
+    if (fetch === entry || fetch.applied) return true;
+    fetch.controller.abort();
+    return false;
+  });
 
   // The browser supersedes an intercepted navigation the moment a newer one starts, and `signal` is how it
   // says so. A fetch React has been handed keeps running (see {@link navigationFetches}), but one that never
@@ -825,7 +815,7 @@ function loadPayload(url: string, { signal, afterCommit, attempt, prepared }: Lo
   let abandoned = signal?.aborted ?? false;
   const abandon = () => {
     abandoned = true;
-    if (entry.payload === null) controller.abort();
+    if (!entry.applied) controller.abort();
   };
   if (abandoned) abandon();
   else signal?.addEventListener('abort', abandon, { once: true });
@@ -854,7 +844,7 @@ function loadPayload(url: string, { signal, afterCommit, attempt, prepared }: Lo
     startPayloadTransition(() => {
       // From here React holds this payload's stream, so a superseded fetch may not be stopped until a newer
       // payload commits — see {@link navigationFetches}.
-      entry.payload = nextPayload;
+      entry.applied = true;
       committed = setPayload(nextPayload, afterCommit);
     });
 
@@ -863,7 +853,11 @@ function loadPayload(url: string, { signal, afterCommit, attempt, prepared }: Lo
     // Only the older ones: a newer navigation may have started while this payload was in flight, and its
     // fetch is the one the screen is waiting for.
     void committed?.then(() => {
-      abortNavigationFetches((fetch) => fetch.navigation < navigation);
+      navigationFetches = navigationFetches.filter((fetch) => {
+        if (fetch.navigation >= navigation) return true;
+        fetch.controller.abort();
+        return false;
+      });
     });
   };
 
@@ -1154,53 +1148,41 @@ async function main() {
   if (canSoftNavigate) readStoredScrollPositions();
   const restored = scrollPointFor(currentEntryKey());
 
-  /** Owns completion and post-commit work even when React retries or supersedes another render. */
-  type RenderRecord = { payload: RscPayload; href: string; committed: Promise<void>; commit: () => void; supersede: () => void };
-  /**
-   * Creates a one-shot completion for this render. Superseding it releases its waiter without
-   * running scroll/focus work; committing runs that work before the browser paints.
-   */
-  function createRender(payload: RscPayload, href: string, afterCommit?: () => void): RenderRecord {
-    const { promise, resolve } = Promise.withResolvers<void>();
-    let finished = false;
-    return {
-      payload,
-      href,
-      committed: promise,
-      commit: () => {
-        if (finished) return;
-        finished = true;
-        afterCommit?.();
-        resolve();
-      },
-      // Supersession releases the old waiter, but never runs its scroll/focus callback.
-      supersede: () => {
-        finished = true;
-        resolve();
-      },
-    };
-  }
-
   function BrowserRoot() {
-    const [render, setPayloadState] = React.useState(() =>
-      createRender(initialPayload, documentUrl(), restored ? () => scrollToPoint(restored) : undefined),
-    );
-    const { payload } = render;
-    const scheduledRender = React.useRef(render);
+    const [payload, setPayloadState] = React.useState(initialPayload);
     const [pending, startTransition] = React.useTransition();
-    const [preparing, updatePreparing] = React.useState(false);
-    const [fetching, updateFetching] = React.useState(false);
+    // The latest scheduled payload identifies which DOM commit can complete a router call.
+    const currentPayload = React.useRef<RscPayload>(initialPayload);
+    // The resolver the payload on screen still owes — see {@link loadPayload}.
+    const pendingCommit = React.useRef<(() => void) | null>(null);
+    // The scroll the payload about to commit owes, set with it so a payload that supersedes another takes
+    // its predecessor's scroll out of the queue along with its commit. Initialised with the reload's offset:
+    // the first layout effect below applies it with the first payload, before the new tree is painted.
+    const pendingScroll = React.useRef<(() => void) | null>(restored ? () => scrollToPoint(restored) : null);
 
     // Descendant passive effects can start a navigation before the root's passive effects run.
+    // Install the live payload setter and transition runner before any such navigation starts.
     React.useLayoutEffect(() => {
       setPayload = (next, afterCommit) => {
-        const scheduled = createRender(next, documentUrl(), afterCommit);
-        scheduledRender.current.supersede();
-        scheduledRender.current = scheduled;
-        setPayloadState(scheduled);
-        return scheduled.committed;
+        currentPayload.current = next;
+        return new Promise<void>((resolve) => {
+          // A payload replaced before it ever painted still has a navigation waiting on it. React commits
+          // only the newest, so the effect below never runs for the one it skipped: release it here.
+          pendingCommit.current?.();
+          pendingCommit.current = resolve;
+          // Replaced rather than kept: a server action's payload carries no `afterCommit`, and the
+          // navigation it superseded must not scroll the page the action is about to replace it with.
+          pendingScroll.current = afterCommit ?? null;
+          setPayloadState(next);
+        });
       };
       startPayloadTransition = startTransition;
+    }, [startTransition]);
+
+    // Fetching is separate from React transitions so live URL consumers can suspend independently.
+    const [preparing, updatePreparing] = React.useState(false);
+    const [fetching, updateFetching] = React.useState(false);
+    React.useLayoutEffect(() => {
       let requests = 0;
       trackPayloadFetch = (work) => {
         requests++;
@@ -1208,17 +1190,27 @@ async function main() {
         const finish = () => {
           if (--requests === 0) updateFetching(false);
         };
-        // An async Action entangles independent URL transitions until the response arrives.
-        // Only applying the payload belongs in a Transition; fetching has its own pending flag.
         void work.then(finish, finish);
       };
       setPreparing = updatePreparing;
     }, [startTransition]);
 
+    /**
+     * Performs the pending scroll and releases the navigation waiting on this payload. A layout effect, so
+     * the new tree is in the DOM and the pre-scroll position is never painted.
+     */
     React.useLayoutEffect(() => {
-      renderedUrl = render.href;
-      render.commit();
-    }, [render, payload]);
+      if (payload !== currentPayload.current) return;
+      const scroll = pendingScroll.current;
+      pendingScroll.current = null;
+      scroll?.();
+      // What the payload that just committed was rendered for — see {@link renderedUrl}. A redirect never
+      // reaches here, and an action or a dev refresh keeps the URL it was fetched for.
+      renderedUrl = documentUrl();
+      const commit = pendingCommit.current;
+      pendingCommit.current = null;
+      commit?.();
+    }, [payload]);
 
     // A descendant may navigate from its first passive effect. Intercept it before that effect runs.
     React.useLayoutEffect(() => listenNavigation(), []);
