@@ -1123,7 +1123,18 @@ async function main() {
       push(payload.redirect);
       return undefined;
     }
-    if (documentUrl() === calledFrom) React.startTransition(() => void setPayload(payload));
+    if (documentUrl() === calledFrom) {
+      // An action response contains the page after the mutation. Any older navigation snapshot must
+      // lose ownership before it can replace that newer data. Applied streams stay alive until commit.
+      const actionGeneration = ++currentNavigation;
+      abortNavigationFetches((fetch) => fetch.payload === null);
+      React.startTransition(() => {
+        const committed = setPayload(payload);
+        void committed.then(() => {
+          abortNavigationFetches((fetch) => fetch.navigation < actionGeneration);
+        });
+      });
+    }
     if (payload.notFound) return undefined;
     const result = payload.returnValue;
     if (!result) {
