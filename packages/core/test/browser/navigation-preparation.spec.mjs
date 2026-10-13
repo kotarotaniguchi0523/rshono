@@ -196,7 +196,7 @@ test('a cross-origin payload redirect becomes a real document load', async ({ pa
     return route.fulfill({
       status: 200,
       contentType: 'text/x-component',
-      body: `0:${JSON.stringify({ root: null, redirect: '//example.com/elsewhere' })}\n`,
+      body: `0:${JSON.stringify({ root: null, redirect: 'https://example.com/elsewhere' })}\n`,
     });
   });
   await page.route('https://example.com/**', (route) =>
