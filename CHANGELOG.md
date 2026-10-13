@@ -20,6 +20,14 @@ those.
   streaming commits as before — only the root has to be ready. On a browser without precommit support the
   URL commits first as it always did, and the post-commit handler's document-load recovery is unchanged.
 
+- **`useNavigation().url` follows the browser address after hydration, including the query.** The hook still
+  starts from the server payload, so SSR and hydration render what the payload carried and a prerendered page
+  keeps matching its markup; after hydration `url` tracks `location` — path, query, fragment and all — on
+  every route, including a `render: 'static'` page. `PageProps.url` is unchanged: on a static route it still
+  holds the build-time value, because the server cannot see a request query. `params` is unchanged as well —
+  it describes the page on screen until its replacement commits — so a suspended navigation's `url` can name
+  the destination while `params` still describes the committed page.
+
 ### Fixed
 
 - **A failed precommit fetch no longer aborts a soft navigation into silence.** The precommit handler meant
@@ -33,6 +41,13 @@ those.
   one push is one entry: Back from the target returns to the page that started the navigation rather than to
   a URL that redirects again. A redirect that leaves the origin, or one that names a file, cannot be a
   same-document commit and becomes a real document load instead.
+
+- **Back now cancels a suspended navigation and restores the last committed payload.** A destination whose
+  render was waiting on a client resource could outlive the traversal that abandoned it: the address bar
+  returned to the previous entry while the screen stayed suspended, or the abandoned payload surfaced an
+  abort as a render failure. An urgent traversal now releases the pending payload in favor of the committed
+  one, and `useNavigation().pending` now tracks the navigation's own work rather than only a React
+  transition, so a cancelled round-trip ends it.
 
 - **`rshono dev` drains the old server worker instead of terminating it between rebuilds.** A worker stopped
   with `terminate()` never runs its HTTP server's `close()`, so every response still being served — most

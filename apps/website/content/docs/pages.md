@@ -120,11 +120,11 @@ export function NextPage() {
 }
 ```
 
-`url` and `params` are the same names and types a page gets as props, so moving a read across the
-server/client line is a copy-paste — apart from `url.hash`, which only the browser knows. A server never
-receives a fragment, so `useNavigation().url.hash` is read from the address bar after hydration and
-follows in-page links and Back/Forward. `router` holds `push`, `replace`, `back`, `forward`, `refresh` and
-`pending`; every one is a soft navigation, so client state outside the changed subtree survives.
+`url` and `params` have the same names and types as page props. During SSR and hydration they come
+from the server payload; after hydration, `url` follows the browser address, including its query and
+fragment, even on static pages. `params` remains tied to the displayed page until its replacement
+commits. `router` holds `push`, `replace`, `back`, `forward`, `refresh` and `pending`. Intercepted
+navigations preserve client state outside the changed subtree; navigation to another site loads a document.
 
 `<AsyncBoundary>` pairs a Suspense fallback with an error fallback, and `<CatchBoundary>` is the error
 half alone. Both are `'use client'` modules a server component can render directly. A `redirect()` is
