@@ -26,7 +26,7 @@ export function NavigationRepro({ onActivityRender }: { onActivityRender?: () =>
       resolveResource = resolve;
     });
 
-    router.push('?tab=activity');
+    void router.push('?tab=activity');
   }
 
   return (

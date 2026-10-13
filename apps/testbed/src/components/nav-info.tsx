@@ -4,9 +4,16 @@ import { useNavigation } from '@rshono/core/client';
 
 export function NavInfo() {
   const nav = useNavigation();
-
+  // Keep the browser-test handle on this fixture element, rather than on Window.
   return (
-    <div className="feature-card" style={{ margin: '1.5rem auto', maxWidth: '28rem' }}>
+    <div
+      ref={(element) => {
+        if (element) Object.assign(element, { router: nav.router });
+      }}
+      data-nav-router
+      className="feature-card"
+      style={{ margin: '1.5rem auto', maxWidth: '28rem' }}
+    >
       <h3>useNavigation()</h3>
       <p className="meta">
         pathname: <code data-nav="pathname">{nav.url.pathname}</code>
@@ -20,28 +27,28 @@ export function NavInfo() {
         pending: <code data-nav="pending">{nav.router.pending ? 'yes' : 'no'}</code>
       </p>
       <p>
-        <button className="btn" onClick={() => nav.router.push('/users')}>
+        <button className="btn" onClick={() => void nav.router.push('/users')}>
           push('/users')
         </button>{' '}
-        <button className="btn btn-outline" onClick={() => nav.router.refresh()}>
+        <button className="btn btn-outline" onClick={() => void nav.router.refresh()}>
           refresh()
         </button>
       </p>
       {/* The push is same-page on purpose: a traversal off it lands back on these controls. */}
       <p>
-        <button className="btn btn-outline" onClick={() => nav.router.push('?tab=activity')}>
+        <button className="btn btn-outline" onClick={() => void nav.router.push('?tab=activity')}>
           push('?tab=activity')
         </button>{' '}
-        <button className="btn btn-outline" onClick={() => nav.router.back()}>
+        <button className="btn btn-outline" onClick={() => void nav.router.back()}>
           back()
         </button>{' '}
-        <button className="btn btn-outline" onClick={() => nav.router.forward()}>
+        <button className="btn btn-outline" onClick={() => void nav.router.forward()}>
           forward()
         </button>
       </p>
       {/* Same-page too, and deliberately not a push: a replace must leave the scroll offset where it is. */}
       <p>
-        <button className="btn btn-outline" onClick={() => nav.router.replace('?tab=activity')}>
+        <button className="btn btn-outline" onClick={() => void nav.router.replace('?tab=activity')}>
           replace('?tab=activity')
         </button>
       </p>

@@ -11,7 +11,7 @@ export function NavigateOnMount({ method = 'replace' }: { method?: 'push' | 'rep
     // router changes when pending changes; this redirect should only start once per mount.
     if (navigated.current) return;
     navigated.current = true;
-    router[method]('/users');
+    void router[method]('/users');
   }, [method, router]);
 
   return <p>pending: {String(router.pending)}</p>;

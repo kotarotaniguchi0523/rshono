@@ -13,7 +13,7 @@ import type { RscPayload } from './entry.rsc.js';
 // Dev-only: its one caller sits behind `import.meta.webpackHot`, which a production build compiles to
 // `false` — so this module is dropped there.
 import { walkHotUpdates } from './hot-update.js';
-import { RouterContext, type NavigationRouter } from './navigation.js';
+import { RouterContext, type NavigationRouter, type NavigationOutcome } from './navigation.js';
 import { createRscRequest } from './request.js';
 
 const isDev = process.env.NODE_ENV === 'development';
@@ -398,6 +398,7 @@ const documentNavigation = Symbol('rshono:document-navigation');
  * opt out of, and `location.*` is already a document load.
  */
 function loadDocument(href?: string): void {
+  finishAttempt(activeAttempt, { kind: 'document-navigation' });
   if (!canSoftNavigate) {
     if (href === undefined) window.location.reload();
     else window.location.assign(href);
@@ -424,33 +425,107 @@ function loadDocument(href?: string): void {
 // The imperative actions behind `useNavigation().router`. Each one only *asks*: the browser turns it into a
 // `navigate` event, which is where `listenNavigation` answers it — so a `router.push` and a link click reach
 // the same code by the same route, and inherit the same fetch, scroll and `pending` flag.
-function push(href: string): void {
-  if (canSoftNavigate) settle(navigation.navigate(href, { history: 'push' }));
-  else window.location.assign(href);
+// Carry each caller's completion through its browser event, fetch, and DOM commit.
+const attemptMark = Symbol('rshono:navigation-attempt');
+type NavigationAttempt = {
+  mark: typeof attemptMark;
+  hop: number;
+  done: boolean;
+  browserOnlyRendered: boolean;
+  promise: Promise<NavigationOutcome>;
+  resolve: (outcome: NavigationOutcome) => void;
+  reject: (error: unknown) => void;
+};
+let activeAttempt: NavigationAttempt | undefined;
+let traversalAttempt: { attempt: NavigationAttempt; key: string } | undefined;
+
+function finishAttempt(attempt: NavigationAttempt | undefined, outcome: NavigationOutcome): void {
+  if (!attempt || attempt.done) return;
+  attempt.done = true;
+  attempt.resolve(outcome);
+  if (activeAttempt === attempt) activeAttempt = undefined;
 }
 
-function replace(href: string): void {
-  if (canSoftNavigate) settle(navigation.navigate(href, { history: 'replace' }));
-  else window.location.replace(href);
+function rejectAttempt(attempt: NavigationAttempt | undefined, error: unknown): void {
+  if (!attempt || attempt.done) return;
+  attempt.done = true;
+  attempt.reject(error);
+  if (activeAttempt === attempt) activeAttempt = undefined;
 }
 
-// A traversal is the browser's to perform either way — `navigation` only hands it back as an interceptable
-// event first. Nothing to go back to is a rejection there and a no-op here; both amount to the same thing.
-function back(): void {
-  if (canSoftNavigate) settle(navigation.back());
-  else window.history.back();
+function newAttempt(): NavigationAttempt {
+  const { promise, resolve, reject } = Promise.withResolvers<NavigationOutcome>();
+  // Ignoring a router call must not create an unhandled rejection; awaiting this original promise still rejects.
+  void promise.catch(() => {});
+  return { mark: attemptMark, hop: 0, done: false, browserOnlyRendered: false, promise, resolve, reject };
 }
 
-function forward(): void {
-  if (canSoftNavigate) settle(navigation.forward());
-  else window.history.forward();
+function requestNavigation(attempt: NavigationAttempt, run: () => NavigationResult): Promise<NavigationOutcome> {
+  const hop = attempt.hop;
+  try {
+    const result = run();
+    settle(result);
+    void result.finished?.then(
+      () => {
+        if (attempt.hop === hop && attempt.browserOnlyRendered) {
+          finishAttempt(attempt, { kind: 'rendered', url: new URL(location.href) });
+        }
+      },
+      (error: unknown) => {
+        if (attempt.hop === hop) rejectAttempt(attempt, error);
+      },
+    );
+  } catch (error) {
+    rejectAttempt(attempt, error);
+  }
+  return attempt.promise;
 }
 
-// A refresh keeps the URL, and is still a navigation: it arrives as `navigationType: 'reload'`, which is what
-// tells the listener to leave scroll and focus where the user left them.
-function refresh(): void {
-  if (canSoftNavigate) settle(navigation.reload());
-  else window.location.reload();
+function navigateAttempt(href: string, history: 'push' | 'replace', attempt = newAttempt()): Promise<NavigationOutcome> {
+  if (!canSoftNavigate) {
+    if (history === 'replace') window.location.replace(href);
+    else window.location.assign(href);
+    finishAttempt(attempt, { kind: 'document-navigation' });
+    return attempt.promise;
+  }
+  return requestNavigation(attempt, () => navigation.navigate(href, { history, info: attempt }));
+}
+
+function push(href: string): Promise<NavigationOutcome> {
+  return navigateAttempt(href, 'push');
+}
+
+function replace(href: string): Promise<NavigationOutcome> {
+  return navigateAttempt(href, 'replace');
+}
+
+function back(): Promise<NavigationOutcome> {
+  if (!canSoftNavigate) {
+    window.history.back();
+    return Promise.resolve({ kind: 'document-navigation' });
+  }
+  if (!navigation.canGoBack) return Promise.resolve({ kind: 'no-op' });
+  const attempt = newAttempt();
+  return requestNavigation(attempt, () => navigation.back({ info: attempt }));
+}
+
+function forward(): Promise<NavigationOutcome> {
+  if (!canSoftNavigate) {
+    window.history.forward();
+    return Promise.resolve({ kind: 'document-navigation' });
+  }
+  if (!navigation.canGoForward) return Promise.resolve({ kind: 'no-op' });
+  const attempt = newAttempt();
+  return requestNavigation(attempt, () => navigation.forward({ info: attempt }));
+}
+
+function refresh(): Promise<NavigationOutcome> {
+  if (!canSoftNavigate) {
+    window.location.reload();
+    return Promise.resolve({ kind: 'document-navigation' });
+  }
+  const attempt = newAttempt();
+  return requestNavigation(attempt, () => navigation.reload({ info: attempt }));
 }
 
 /** How long the recovery reload is given to replace this document before the panel is painted instead. */
@@ -519,7 +594,7 @@ function handleControlDigest(error: unknown, { hard = false }: { hard?: boolean 
     // The URL is resolved first: a malformed location then throws here, before any navigation is asked for.
     loadDocument(new URL(redirect.location, window.location.href).href);
   } else {
-    push(redirect.location);
+    void push(redirect.location);
   }
   return true;
 }
@@ -727,6 +802,24 @@ let currentNavigation = 0;
 type NavigationFetch = { navigation: number; controller: AbortController; applied: boolean };
 let navigationFetches: NavigationFetch[] = [];
 
+/** Stop only the requests whose streams no longer belong to a retained render. */
+function abortNavigationFetches(shouldAbort: (fetch: NavigationFetch) => boolean): void {
+  navigationFetches = navigationFetches.filter((fetch) => {
+    if (!shouldAbort(fetch)) return true;
+    fetch.controller.abort();
+    return false;
+  });
+}
+
+type LoadPayloadOptions = {
+  /** Available for intercepted navigations; history traversal and dev refresh have no browser signal. */
+  signal?: AbortSignal;
+  /** Scroll/focus work when needed; refresh and replace preserve the current position. */
+  afterCommit?: () => void;
+  /** Tracks an imperative router caller; ordinary links and dev refresh have no caller to resolve. */
+  attempt?: NavigationAttempt;
+};
+
 /**
  * Fetches the payload for `url` and puts it on screen.
  *
@@ -735,7 +828,7 @@ let navigationFetches: NavigationFetch[] = [];
  * being superseded is not one, and resolves quietly, because the navigation that replaced this one owns the
  * screen from then on.
  */
-function loadPayload(url: string, signal?: AbortSignal, afterCommit?: () => void): Promise<void> {
+function loadPayload(url: string, { signal, afterCommit, attempt }: LoadPayloadOptions = {}): Promise<void> {
   // This navigation's place in the queue, and its own abort switch: the navigation stops being applied by
   // whichever comes first, the browser superseding it (an intercepted navigation carries `event.signal`) or a
   // newer runtime fetch starting (a traversal, an action, a dev refresh). The fetch itself runs on until its
@@ -748,11 +841,7 @@ function loadPayload(url: string, signal?: AbortSignal, afterCommit?: () => void
   // A newer navigation owns the screen now, and an older fetch whose payload never reached React is reading
   // into a tree that does not exist — stopping it cannot reject a chunk anything holds. One that did reach
   // React waits for this payload's commit; see {@link navigationFetches}.
-  navigationFetches = navigationFetches.filter((fetch) => {
-    if (fetch === entry || fetch.applied) return true;
-    fetch.controller.abort();
-    return false;
-  });
+  abortNavigationFetches((fetch) => fetch !== entry && !fetch.applied);
 
   // The browser supersedes an intercepted navigation the moment a newer one starts, and `signal` is how it
   // says so. A fetch React has been handed keeps running (see {@link navigationFetches}), but one that never
@@ -773,19 +862,18 @@ function loadPayload(url: string, signal?: AbortSignal, afterCommit?: () => void
   // work too, but only because React happens not to gate a commit on its async scope settling — an internal
   // this has no reason to depend on across the whole `^19.1.0` peer range.
   let committed: Promise<void> | undefined;
-  // Whether the payload update has committed. A streamed transition can suspend on a flight chunk whose later
-  // resolution React never pings the lane back for; the retry below re-schedules the update once the stream
-  // has closed, but only while this is still false.
   let committedSettled = false;
-
   const run = async () => {
-    const { payload, settled } = requestPayload(url, controller.signal);
-    const nextPayload = await payload;
+    const fetched = requestPayload(url, controller.signal);
+    const nextPayload = await fetched.payload;
     // Checked again after the await because the fetch may already have resolved by then, and applying it
     // would repaint a page the user has left.
     if (stale()) return;
     if (nextPayload.redirect) {
-      push(nextPayload.redirect);
+      if (attempt) {
+        attempt.hop++;
+        void navigateAttempt(nextPayload.redirect, 'push', attempt);
+      } else void push(nextPayload.redirect);
       return;
     }
     // The fetch crossed an await, so its payload update needs a new synchronous transition scope.
@@ -809,27 +897,23 @@ function loadPayload(url: string, signal?: AbortSignal, afterCommit?: () => void
         return false;
       });
     });
-
-    // A streamed payload can suspend a transition on a flight chunk that resolves after the shell without
-    // React ever pinging the suspended lane back, which strands the navigation on the previous tree. The
-    // chunks have all landed by the time the stream closes, so one re-application — still a transition, so a
-    // payload that is waiting on something other than flight keeps the #52 behaviour — commits the render a
-    // lost ping stranded. It goes through `reapplyPayload` rather than `setPayload`: the payload is not
-    // replaced, so the commit the navigation waits on has to stay attached to it. The macrotask lets the
-    // decoder process the last chunk and React's own retry run first, so the normal path is not interrupted.
-    void settled.then(() => {
-      if (stale() || committedSettled) return;
-      setTimeout(() => {
+    if ('settled' in fetched) {
+      void fetched.settled.then(() => {
         if (stale() || committedSettled) return;
-        React.startTransition(reapplyPayload);
-      }, 0);
-    });
+        setTimeout(() => {
+          if (!stale() && !committedSettled) React.startTransition(reapplyPayload);
+        }, 0);
+      });
+    }
   };
 
-  // `startTransition` runs the work but hands nothing back, so the promise carrying a failure is caught here
-  // instead. Assigned synchronously: React invokes the callback before `startNav` returns.
   let work!: Promise<void>;
-  startNav(() => (work = run()));
+  startNav(
+    () =>
+      (work = run().catch((error: unknown) => {
+        if (!stale()) throw error;
+      })),
+  );
 
   return work.then(
     // Undefined whenever nothing was applied — an abort, or a redirect — and there is then nothing to wait for.
@@ -900,6 +984,12 @@ function listenNavigation(): () => void {
     // later navigation can never be mistaken for this one.
     if (event.info === documentNavigation) return;
 
+    const info = event.info as NavigationAttempt | undefined;
+    const attempt = info?.mark === attemptMark ? info : undefined;
+    if (activeAttempt && activeAttempt !== attempt) rejectAttempt(activeAttempt, new DOMException('Navigation superseded', 'AbortError'));
+    activeAttempt = attempt;
+    traversalAttempt = undefined;
+
     // A commit for the destination being left is no longer the screen's; its pending fragment target (or
     // `autofocus` element) must not scroll or focus the page that replaces it.
     cancelElementWatches();
@@ -909,14 +999,24 @@ function listenNavigation(): () => void {
     // return, so a fragment the browser performs itself is covered too.
     rememberCurrentScroll();
 
-    if (!event.canIntercept || leaveToBrowser(event)) return;
+    if (!event.canIntercept || leaveToBrowser(event)) {
+      if (attempt) {
+        if (event.hashChange) {
+          attempt.browserOnlyRendered = true;
+        } else finishAttempt(attempt, { kind: 'document-navigation' });
+      }
+      return;
+    }
 
     // A traversal is repainted by the `popstate` listener below, not intercepted. `intercept`ing one is what
     // makes WebKit stall the rendered viewport for about three seconds on a back swipe
     // (bugs.webkit.org/319414): the view gesture's snapshot is only removed once the navigation finishes, and
     // React's root attaches the wheel listener the bug also needs. Letting the traversal through means the
     // browser commits the entry straight away, and the runtime puts the payload on screen when it arrives.
-    if (event.navigationType === 'traverse') return;
+    if (event.navigationType === 'traverse') {
+      if (attempt) traversalAttempt = { attempt, key: event.destination.key };
+      return;
+    }
 
     // A replace or a refresh stays where it is, so neither should move. A push starts at the top of the
     // page, or at its fragment — and that scroll is the runtime's own now: WebKit performs no
@@ -925,18 +1025,28 @@ function listenNavigation(): () => void {
     // handler over without scrolling; the `afterCommit` callback reaches the target once the new tree is on
     // screen. Focus stays the browser's, reset after the transition.
     const inPlace = event.navigationType === 'replace' || event.navigationType === 'reload';
-    let afterCommit: (() => void) | undefined;
-    if (event.navigationType === 'push') {
-      const { hash } = new URL(event.destination.url);
-      afterCommit = hash === '' ? scrollToTop : () => jumpToAnchor(hash);
-    }
-
+    const hop = attempt?.hop;
     event.intercept({
       scroll: 'manual',
       focusReset: inPlace ? 'manual' : 'after-transition',
       // The URL commits before the handler runs, so a failure leaves the address bar describing a page the
       // document is not showing. A real load is the only way back to agreement.
-      handler: () => loadPayload(event.destination.url, event.signal, afterCommit).catch(() => loadDocument()),
+      handler: () => {
+        let afterCommit: (() => void) | undefined;
+        if (event.navigationType === 'push') {
+          const { hash } = new URL(event.destination.url);
+          afterCommit = hash === '' ? scrollToTop : () => jumpToAnchor(hash);
+        }
+        return loadPayload(event.destination.url, { signal: event.signal, afterCommit, attempt }).then(
+          () => {
+            if (attempt?.hop === hop && !event.signal.aborted) finishAttempt(attempt, { kind: 'rendered', url: new URL(location.href) });
+          },
+          (error: unknown) => {
+            rejectAttempt(attempt, error);
+            loadDocument();
+          },
+        );
+      },
     });
   };
 
@@ -946,6 +1056,9 @@ function listenNavigation(): () => void {
    * is `navigation.currentEntry` and its saved offset is in {@link scrollPositions}.
    */
   const onPopState = () => {
+    const traversal = traversalAttempt;
+    const attempt = traversal && traversal.key === currentEntryKey() ? traversal.attempt : undefined;
+    traversalAttempt = undefined;
     // Same ownership as `onNavigate`: this traversal's commit replaces whatever the last one was waiting for.
     cancelElementWatches();
     const stored = scrollPointFor(currentEntryKey());
@@ -954,6 +1067,7 @@ function listenNavigation(): () => void {
       if (stored) scrollToPoint(stored);
       else if (hash !== '') jumpToAnchor(hash);
       else scrollToTop();
+      finishAttempt(attempt, { kind: 'rendered', url: new URL(location.href) });
     };
 
     // A fragment-only traversal never changed the payload: the address bar is back at an anchor of the page
@@ -965,12 +1079,25 @@ function listenNavigation(): () => void {
       return;
     }
 
-    void loadPayload(location.href, undefined, () => {
-      apply();
-      // The browser performs this for an intercepted navigation; a traversal is no longer intercepted, so
-      // without it Back would leave focus on the link that was clicked on the page being left.
-      resetFocus();
-    }).catch(() => loadDocument());
+    // A root redirect transfers completion to the next navigation, just as for push/replace.
+    const hop = attempt?.hop;
+    void loadPayload(location.href, {
+      afterCommit: () => {
+        apply();
+        // The browser performs this for an intercepted navigation; a traversal is no longer intercepted, so
+        // without it Back would leave focus on the link that was clicked on the page being left.
+        resetFocus();
+      },
+      attempt,
+    }).then(
+      () => {
+        if (attempt?.hop === hop) finishAttempt(attempt, { kind: 'rendered', url: new URL(location.href) });
+      },
+      (error: unknown) => {
+        rejectAttempt(attempt, error);
+        loadDocument();
+      },
+    );
   };
 
   navigation.addEventListener('navigate', onNavigate);
@@ -1093,10 +1220,22 @@ async function main() {
       throw error;
     }
     if (payload.redirect) {
-      push(payload.redirect);
+      void push(payload.redirect);
       return undefined;
     }
-    if (documentUrl() === calledFrom) React.startTransition(() => void setPayload(payload));
+    if (documentUrl() === calledFrom) {
+      // An action response contains the page after the mutation. Any older navigation snapshot must
+      // lose ownership before it can replace that newer data. Applied streams stay alive until commit.
+      const actionGeneration = ++currentNavigation;
+      rejectAttempt(activeAttempt, new DOMException('Navigation superseded by server action', 'AbortError'));
+      abortNavigationFetches((fetch) => !fetch.applied);
+      React.startTransition(() => {
+        const committed = setPayload(payload);
+        void committed.then(() => {
+          abortNavigationFetches((fetch) => fetch.navigation < actionGeneration);
+        });
+      });
+    }
     if (payload.notFound) return undefined;
     const result = payload.returnValue;
     if (!result) {

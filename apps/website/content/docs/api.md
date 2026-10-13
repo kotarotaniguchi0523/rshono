@@ -220,9 +220,11 @@ export function NextPage() {
 ```
 
 `router` holds `push(href)`, `replace(href)`, `back()`, `forward()`, `refresh()` and the `pending` flag.
-Every one is a **soft** navigation: the page's flight payload is fetched and applied in place, so client
-state outside the changed subtree survives. Off-site hrefs, and a traversal that leaves the app, fall back
-to a full load.
+When the browser can intercept an action, it fetches and applies the page's flight payload in place, so
+client state outside the changed subtree survives. Off-site hrefs, and a traversal that leaves the app,
+fall back to a full load. Each action returns a promise with a `NavigationOutcome`: `rendered` after the
+destination commits, `no-op` if there is no history entry to traverse, or `document-navigation` when a
+browser load takes over. A failed or superseded intercepted navigation rejects the promise.
 
 ### Components
 
@@ -249,6 +251,7 @@ scoped — pass `resetKeys={[url.pathname]}` to clear its error state on navigat
 | -------------------- | --------------------------------------------------------------------------------------------------------- |
 | `NavigationState`    | `{ url, params, router }` — what `useNavigation()` returns.                                               |
 | `NavigationRouter`   | The imperative actions plus `pending`.                                                                    |
+| `NavigationOutcome`  | The result of an imperative router action.                                                                |
 | `AsyncBoundaryProps` | Props of `<AsyncBoundary>`.                                                                               |
 | `CatchBoundaryProps` | Props of `<CatchBoundary>`.                                                                               |
 | `ErrorFallback`      | `ReactNode`, or `(error, reset) => ReactNode`. The function form only works from a `'use client'` module. |
