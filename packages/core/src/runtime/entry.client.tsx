@@ -7,7 +7,13 @@ import {
   encodeReply,
   setServerCallback,
 } from 'react-server-dom-rspack/client.browser';
-import { cancelNavigationPreparation, listenNavigationPreparation, takePreparedPayload, useNavigationPreparation } from './navigation-preparation.js';
+import {
+  cancelNavigationPreparation,
+  isPreparedNavigation,
+  listenNavigationPreparation,
+  useNavigationPreparation,
+  type PreparedNavigation,
+} from './navigation-preparation.js';
 import { isControlDigest, parseRedirectDigest } from './control.js';
 import type { DevMessage } from './dev-protocol.js';
 import type { RscPayload } from './entry.rsc.js';
@@ -238,8 +244,6 @@ type FetchedPayload = { payload: Promise<RscPayload>; settled: Promise<void> };
  * React has not parsed yet, and the flight stream is the one thing here that can be large.
  */
 function requestPayload(href: string, signal?: AbortSignal): FetchedPayload {
-  const prepared = takePreparedPayload(href, signal);
-  if (prepared) return prepared;
   const response = payloadResponse(createRscRequest(new URL(href, location.href).href, undefined, signal));
   const { promise: settled, resolve: settle } = Promise.withResolvers<void>();
   const forFlight = response.then((value) => {
@@ -737,8 +741,11 @@ let navigationFetches: NavigationFetch[] = [];
  * point, and a `#hash` target does not exist until the new tree does. Rejects only on a genuine failure —
  * being superseded is not one, and resolves quietly, because the navigation that replaced this one owns the
  * screen from then on.
+ *
+ * `prepared`, when given, is a fetch that was started before the URL committed: this call takes over its
+ * abort wiring, so from here it follows the same applied-fetch rules as one this function started.
  */
-function loadPayload(url: string, signal?: AbortSignal, afterCommit?: () => void): Promise<void> {
+function loadPayload(url: string, signal?: AbortSignal, afterCommit?: () => void, prepared?: PreparedNavigation): Promise<void> {
   // This navigation's place in the queue, and its own abort switch: the navigation stops being applied by
   // whichever comes first, the browser superseding it (an intercepted navigation carries `event.signal`) or a
   // newer runtime fetch starting (a traversal, an action, a dev refresh). The fetch itself runs on until its
@@ -782,7 +789,21 @@ function loadPayload(url: string, signal?: AbortSignal, afterCommit?: () => void
   let committedSettled = false;
 
   const run = async () => {
-    const { payload, settled } = requestPayload(url, controller.signal);
+    let fetched: FetchedPayload;
+    if (prepared) {
+      // The payload is already on the wire and its abort switch belonged to the navigation event up to the
+      // commit. Take over here so the runtime's ownership rules apply from now on: a superseded fetch that
+      // never reached React stops at once, while one React is reading waits for a newer commit.
+      const owned = prepared;
+      const abortPrepared = () => owned.controller.abort(controller.signal.reason);
+      if (controller.signal.aborted) abortPrepared();
+      else controller.signal.addEventListener('abort', abortPrepared, { once: true });
+      void owned.fetched.settled.then(() => controller.signal.removeEventListener('abort', abortPrepared));
+      fetched = owned.fetched;
+    } else {
+      fetched = requestPayload(url, controller.signal);
+    }
+    const { payload, settled } = fetched;
     const nextPayload = await payload;
     // Checked again after the await because the fetch may already have resolved by then, and applying it
     // would repaint a page the user has left.
@@ -886,6 +907,22 @@ function leaveToBrowser(event: NavigateEvent): boolean {
 }
 
 /**
+ * The scroll a committing navigation owes: a push reaches its own fragment or the top, an in-place change
+ * stays where it is. Read at commit rather than at dispatch, so a redirect the preparation followed lands
+ * on the fragment it actually committed.
+ */
+function afterCommitFor(event: NavigateEvent): (() => void) | undefined {
+  if (event.navigationType !== 'push') return undefined;
+  const { hash } = new URL(event.destination.url);
+  return hash === '' ? scrollToTop : () => jumpToAnchor(hash);
+}
+
+/** Puts a payload that was fetched before its navigation committed on screen. */
+function applyPrepared(event: NavigateEvent, prepared: PreparedNavigation): void {
+  void loadPayload(event.destination.url, event.signal, afterCommitFor(event), prepared).catch(() => loadDocument());
+}
+
+/**
  * The whole router, in one listener.
  *
  * Every navigation the page can make arrives as a `navigate` event — a link click, a `GET` form, a
@@ -896,10 +933,13 @@ function leaveToBrowser(event: NavigateEvent): boolean {
  */
 function listenNavigation(): () => void {
   if (!canSoftNavigate) return () => {};
-  const disposePreparation = listenNavigationPreparation(
-    requestPayload,
-    (event) => event.info !== documentNavigation && event.canIntercept && !leaveToBrowser(event),
-  );
+  const disposePreparation = listenNavigationPreparation({
+    fetchPayload: requestPayload,
+    shouldIntercept: (event) => event.info !== documentNavigation && event.canIntercept && !leaveToBrowser(event),
+    canCommitInPlace: (href) => !namesAFile(href),
+    apply: applyPrepared,
+    fallbackToDocument: loadDocument,
+  });
 
   const onNavigate = (event: NavigateEvent) => {
     // A document navigation the runtime asked for itself, marked through `info`. Checked before the scroll
@@ -925,6 +965,10 @@ function listenNavigation(): () => void {
     // browser commits the entry straight away, and the runtime puts the payload on screen when it arrives.
     if (event.navigationType === 'traverse') return;
 
+    // The preparation listener claimed this push or replace: it set the scroll and focus options and will
+    // apply the prepared payload from its own precommit, so there is no handler to register here.
+    if (isPreparedNavigation(event)) return;
+
     // A replace or a refresh stays where it is, so neither should move. A push starts at the top of the
     // page, or at its fragment — and that scroll is the runtime's own now: WebKit performs no
     // `after-transition` reset at all for an intercepted push (bugs.webkit.org/304593). Chromium skips it
@@ -932,18 +976,15 @@ function listenNavigation(): () => void {
     // handler over without scrolling; the `afterCommit` callback reaches the target once the new tree is on
     // screen. Focus stays the browser's, reset after the transition.
     const inPlace = event.navigationType === 'replace' || event.navigationType === 'reload';
-    let afterCommit: (() => void) | undefined;
-    if (event.navigationType === 'push') {
-      const { hash } = new URL(event.destination.url);
-      afterCommit = hash === '' ? scrollToTop : () => jumpToAnchor(hash);
-    }
 
     event.intercept({
       scroll: 'manual',
       focusReset: inPlace ? 'manual' : 'after-transition',
-      // The URL commits before the handler runs, so a failure leaves the address bar describing a page the
-      // document is not showing. A real load is the only way back to agreement.
-      handler: () => loadPayload(event.destination.url, event.signal, afterCommit).catch(() => loadDocument()),
+      // The URL has committed by the time this runs, so a failure leaves the address bar describing a page
+      // the document is not showing. That is the whole path for a reload, and the fallback path for a push
+      // or replace on a browser without precommit support — see `listenNavigationPreparation`. A real load
+      // is the only way back to agreement.
+      handler: () => loadPayload(event.destination.url, event.signal, afterCommitFor(event)).catch(() => loadDocument()),
     });
   };
 

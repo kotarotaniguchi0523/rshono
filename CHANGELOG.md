@@ -11,7 +11,28 @@ those.
 
 ## Unreleased
 
+### Changed
+
+- **A soft `push` or `replace` fetches its flight payload before the URL commits, where the browser supports
+  precommit handlers.** The address bar, the history entry and the rendered page now change together: the
+  runtime no longer commits the destination URL first and leaves the previous tree on screen until the
+  payload arrives. `useNavigation().pending` covers the fetch, and a destination whose shell is still
+  streaming commits as before — only the root has to be ready. On a browser without precommit support the
+  URL commits first as it always did, and the post-commit handler's document-load recovery is unchanged.
+
 ### Fixed
+
+- **A failed precommit fetch no longer aborts a soft navigation into silence.** The precommit handler meant
+  the post-commit `loadDocument()` fallback could never run for a `push`/`replace`, so a link click whose
+  payload the server refused did nothing at all. The failure now asks the browser for the destination as a
+  real document load — the server's answer under the destination URL, exactly the recovery the post-commit
+  path uses — unless the navigation itself was superseded or cancelled.
+
+- **A `redirect()` reached before a soft navigation commits no longer puts the redirect stub in history.**
+  The payload's redirect is resolved in the precommit handler and committed with `controller.redirect()`, so
+  one push is one entry: Back from the target returns to the page that started the navigation rather than to
+  a URL that redirects again. A redirect that leaves the origin, or one that names a file, cannot be a
+  same-document commit and becomes a real document load instead.
 
 - **`rshono dev` drains the old server worker instead of terminating it between rebuilds.** A worker stopped
   with `terminate()` never runs its HTTP server's `close()`, so every response still being served — most

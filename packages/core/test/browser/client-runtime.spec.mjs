@@ -393,7 +393,7 @@ test.describe('scroll and focus on navigation', () => {
 
     await page.getByRole('link', { name: 'Docs' }).click();
     await expect(page).toHaveURL('/docs/getting-started');
-    // The URL commits before the payload. This test leaves a completed page, not an in-flight navigation.
+    // Wait out the click's navigation: `goBack` must start a traversal, not supersede a pending push.
     await page.evaluate(() => window.navigation.transition?.finished);
     await page.goBack();
 
@@ -627,7 +627,7 @@ test.describe('late control signals', () => {
     await page.goto('/late-signal');
 
     await expect(page).toHaveURL('/login');
-    // The URL commits before an intercepted handler runs, so it moves whether or not anything rendered.
+    // The recovery is a real document load, so the URL moves whether or not the old tree rendered anything.
     await expect(page.getByRole('heading', { name: 'Log in' })).toBeVisible();
     await expect(page.locator('[data-section="loading"]')).toHaveCount(0, 'the page it left must be gone');
   });
