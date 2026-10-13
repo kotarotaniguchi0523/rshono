@@ -42,7 +42,7 @@ export function NavigationRepro({
       rejectResource = reject;
     });
 
-    router.push('?tab=activity');
+    void router.push('?tab=activity');
   }
 
   const content = <Content activity={activity} onActivityRender={onActivityRender} />;

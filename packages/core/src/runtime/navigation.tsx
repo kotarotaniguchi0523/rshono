@@ -2,12 +2,18 @@
 
 import { createContext, startTransition, useContext, useLayoutEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
 
+/** Outcome of a router action: a committed page, an unavailable history entry, or a browser load. */
+export type NavigationOutcome = { kind: 'rendered'; url: URL } | { kind: 'no-op' } | { kind: 'document-navigation' };
+
 /**
  * Imperative navigation actions, reached as `useNavigation().router`.
  *
- * Every action is a **soft** navigation: the page's flight payload is fetched and applied in place, so
+ * When intercepted, actions fetch and apply the page's flight payload in place, so
  * client component state outside the changed subtree survives. Off-site hrefs — and a traversal that leaves
  * the app — fall back to a full load.
+ *
+ * Each action resolves with a {@link NavigationOutcome}; `rendered` waits for the destination's DOM
+ * commit. Failed or superseded intercepted navigations reject, with `AbortError` on supersession.
  *
  * Soft navigation is the browser's
  * {@link https://developer.mozilla.org/en-US/docs/Web/API/Navigation_API | Navigation API}; where that is
@@ -25,15 +31,15 @@ import { createContext, startTransition, useContext, useLayoutEffect, useMemo, u
  */
 export interface NavigationRouter {
   /** Navigates to `href` and pushes a new history entry. */
-  push(href: string): void;
+  push(href: string): Promise<NavigationOutcome>;
   /** Navigates to `href`, replacing the current history entry instead of adding one. */
-  replace(href: string): void;
+  replace(href: string): Promise<NavigationOutcome>;
   /** Steps one entry back in the browser's session history. Nothing to go back to is a no-op. */
-  back(): void;
+  back(): Promise<NavigationOutcome>;
   /** Steps one entry forward in the browser's session history. A no-op on the newest entry. */
-  forward(): void;
+  forward(): Promise<NavigationOutcome>;
   /** Re-fetches the current route from the server, re-running its server components. */
-  refresh(): void;
+  refresh(): Promise<NavigationOutcome>;
   /** `true` while a soft navigation is in flight — use it to disable controls or show a spinner. */
   pending: boolean;
 }
@@ -54,7 +60,7 @@ export interface NavigationState {
   router: NavigationRouter;
 }
 
-const noop = () => {};
+const noop = (): Promise<NavigationOutcome> => Promise.resolve({ kind: 'no-op' });
 
 const defaultRouter: NavigationRouter = { push: noop, replace: noop, back: noop, forward: noop, refresh: noop, pending: false };
 
