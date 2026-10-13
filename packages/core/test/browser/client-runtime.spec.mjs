@@ -131,17 +131,21 @@ test.describe('navigation fetching', () => {
     await expect(page.getByText('(hydrated ✓)')).toBeVisible();
 
     // Holds the first navigation's payload until the second has been asked for and answered.
+    let requestSeen;
+    const seen = new Promise((resolve) => (requestSeen = resolve));
     let release;
     const held = new Promise((resolve) => (release = resolve));
     await page.route('**/users', async (route) => {
       if (route.request().headers()['rsc'] !== '1') return route.fallback();
+      requestSeen();
       await held;
       // The client is expected to have hung up on this by now, which is what makes `continue` throw.
       await route.continue().catch(() => {});
     });
 
     await page.getByRole('link', { name: 'Users', exact: true }).click();
-    await expect(page).toHaveURL('/users');
+    await seen;
+    await expect(page).toHaveURL('/');
 
     // The old tree stays interactive through a pending transition, so the nav is still clickable.
     await page.getByRole('link', { name: 'Sign Up', exact: true }).click();
@@ -389,7 +393,7 @@ test.describe('scroll and focus on navigation', () => {
 
     await page.getByRole('link', { name: 'Docs' }).click();
     await expect(page).toHaveURL('/docs/getting-started');
-    // The URL commits before the payload. This test leaves a completed page, not an in-flight navigation.
+    // Wait out the click's navigation: `goBack` must start a traversal, not supersede a pending push.
     await page.evaluate(() => window.navigation.transition?.finished);
     await page.goBack();
 
@@ -623,7 +627,7 @@ test.describe('late control signals', () => {
     await page.goto('/late-signal');
 
     await expect(page).toHaveURL('/login');
-    // The URL commits before an intercepted handler runs, so it moves whether or not anything rendered.
+    // The recovery is a real document load, so the URL moves whether or not the old tree rendered anything.
     await expect(page.getByRole('heading', { name: 'Log in' })).toBeVisible();
     await expect(page.locator('[data-section="loading"]')).toHaveCount(0, 'the page it left must be gone');
   });

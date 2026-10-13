@@ -7,6 +7,13 @@ import {
   encodeReply,
   setServerCallback,
 } from 'react-server-dom-rspack/client.browser';
+import {
+  cancelNavigationPreparation,
+  isPreparedNavigation,
+  listenNavigationPreparation,
+  useNavigationPreparation,
+  type PreparedNavigation,
+} from './navigation-preparation.js';
 import { isControlDigest, parseRedirectDigest } from './control.js';
 import type { DevMessage } from './dev-protocol.js';
 import type { RscPayload } from './entry.rsc.js';
@@ -831,6 +838,8 @@ type LoadPayloadOptions = {
   afterCommit?: () => void;
   /** Tracks an imperative router caller; ordinary links and dev refresh have no caller to resolve. */
   attempt?: NavigationAttempt;
+  /** A fetch started before its URL committed, from `listenNavigationPreparation`. */
+  prepared?: PreparedNavigation;
 };
 
 /**
@@ -840,8 +849,11 @@ type LoadPayloadOptions = {
  * point, and a `#hash` target does not exist until the new tree does. Rejects only on a genuine failure —
  * being superseded is not one, and resolves quietly, because the navigation that replaced this one owns the
  * screen from then on.
+ *
+ * `prepared`, when given, is a fetch that was started before the URL committed: this call takes over its
+ * abort wiring, so from here it follows the same applied-fetch rules as one this function started.
  */
-function loadPayload(url: string, { signal, afterCommit, attempt }: LoadPayloadOptions = {}): Promise<void> {
+function loadPayload(url: string, { signal, afterCommit, attempt, prepared }: LoadPayloadOptions = {}): Promise<void> {
   // This navigation's place in the queue, and its own abort switch: the navigation stops being applied by
   // whichever comes first, the browser superseding it (an intercepted navigation carries `event.signal`) or a
   // newer runtime fetch starting (a traversal, an action, a dev refresh). The fetch itself runs on until its
@@ -877,7 +889,20 @@ function loadPayload(url: string, { signal, afterCommit, attempt }: LoadPayloadO
   let committed: Promise<void> | undefined;
   let committedSettled = false;
   const run = async () => {
-    const fetched = requestPayload(url, controller.signal);
+    let fetched: FetchedPayload;
+    if (prepared) {
+      // The payload is already on the wire and its abort switch belonged to the navigation event up to the
+      // commit. Take over here so the runtime's ownership rules apply from now on: a superseded fetch that
+      // never reached React stops at once, while one React is reading waits for a newer commit.
+      const owned = prepared;
+      const abortPrepared = () => owned.controller.abort(controller.signal.reason);
+      if (controller.signal.aborted) abortPrepared();
+      else controller.signal.addEventListener('abort', abortPrepared, { once: true });
+      void owned.fetched.settled.then(() => controller.signal.removeEventListener('abort', abortPrepared));
+      fetched = owned.fetched;
+    } else {
+      fetched = requestPayload(url, controller.signal);
+    }
     const nextPayload = await fetched.payload;
     // Checked again after the await because the fetch may already have resolved by then, and applying it
     // would repaint a page the user has left.
@@ -985,6 +1010,33 @@ function leaveToBrowser(event: NavigateEvent): boolean {
 }
 
 /**
+ * The scroll a committing navigation owes: a push reaches its own fragment or the top, an in-place change
+ * stays where it is. Read at commit rather than at dispatch, so a redirect the preparation followed lands
+ * on the fragment it actually committed.
+ */
+function afterCommitFor(event: NavigateEvent): (() => void) | undefined {
+  if (event.navigationType !== 'push') return undefined;
+  const { hash } = new URL(event.destination.url);
+  return hash === '' ? scrollToTop : () => jumpToAnchor(hash);
+}
+
+/** Puts a payload that was fetched before its navigation committed on screen. */
+function applyPrepared(event: NavigateEvent, prepared: PreparedNavigation): void {
+  const info = event.info as NavigationAttempt | undefined;
+  const attempt = info?.mark === attemptMark ? info : undefined;
+  const hop = attempt?.hop;
+  void loadPayload(event.destination.url, { signal: event.signal, afterCommit: afterCommitFor(event), attempt, prepared }).then(
+    () => {
+      if (attempt?.hop === hop && !event.signal.aborted) finishAttempt(attempt, { kind: 'rendered', url: new URL(location.href) });
+    },
+    (error: unknown) => {
+      rejectAttempt(attempt, error);
+      loadDocument();
+    },
+  );
+}
+
+/**
  * The whole router, in one listener.
  *
  * Every navigation the page can make arrives as a `navigate` event — a link click, a `GET` form, a
@@ -995,6 +1047,13 @@ function leaveToBrowser(event: NavigateEvent): boolean {
  */
 function listenNavigation(): () => void {
   if (!canSoftNavigate) return () => {};
+  const disposePreparation = listenNavigationPreparation({
+    fetchPayload: requestPayload,
+    shouldIntercept: (event) => event.info !== documentNavigation && event.canIntercept && !leaveToBrowser(event),
+    canCommitInPlace: (href) => !namesAFile(href),
+    apply: applyPrepared,
+    fallbackToDocument: loadDocument,
+  });
 
   const onNavigate = (event: NavigateEvent) => {
     // A document navigation the runtime asked for itself, marked through `info`. Checked before the scroll
@@ -1036,6 +1095,10 @@ function listenNavigation(): () => void {
       return;
     }
 
+    // The preparation listener claimed this push or replace: it set the scroll and focus options and will
+    // apply the prepared payload from its own precommit, so there is no handler to register here.
+    if (isPreparedNavigation(event)) return;
+
     // A replace or a refresh stays where it is, so neither should move. A push starts at the top of the
     // page, or at its fragment — and that scroll is the runtime's own now: WebKit performs no
     // `after-transition` reset at all for an intercepted push (bugs.webkit.org/304593). Chromium skips it
@@ -1047,15 +1110,12 @@ function listenNavigation(): () => void {
     event.intercept({
       scroll: 'manual',
       focusReset: inPlace ? 'manual' : 'after-transition',
-      // The URL commits before the handler runs, so a failure leaves the address bar describing a page the
-      // document is not showing. A real load is the only way back to agreement.
-      handler: () => {
-        let afterCommit: (() => void) | undefined;
-        if (event.navigationType === 'push') {
-          const { hash } = new URL(event.destination.url);
-          afterCommit = hash === '' ? scrollToTop : () => jumpToAnchor(hash);
-        }
-        return loadPayload(event.destination.url, { signal: event.signal, afterCommit, attempt }).then(
+      // The URL has committed by the time this runs, so a failure leaves the address bar describing a page
+      // the document is not showing. That is the whole path for a reload, and the fallback path for a push
+      // or replace on a browser without precommit support — see `listenNavigationPreparation`. A real load
+      // is the only way back to agreement.
+      handler: () =>
+        loadPayload(event.destination.url, { signal: event.signal, afterCommit: afterCommitFor(event), attempt }).then(
           () => {
             if (attempt?.hop === hop && !event.signal.aborted) finishAttempt(attempt, { kind: 'rendered', url: new URL(location.href) });
           },
@@ -1063,8 +1123,7 @@ function listenNavigation(): () => void {
             rejectAttempt(attempt, error);
             loadDocument();
           },
-        );
-      },
+        ),
     });
   };
 
@@ -1121,6 +1180,7 @@ function listenNavigation(): () => void {
   navigation.addEventListener('navigate', onNavigate);
   window.addEventListener('popstate', onPopState);
   return () => {
+    disposePreparation();
     navigation.removeEventListener('navigate', onNavigate);
     window.removeEventListener('popstate', onPopState);
   };
@@ -1233,7 +1293,11 @@ async function main() {
     // A descendant may navigate from its first passive effect. Intercept it before that effect runs.
     React.useLayoutEffect(() => listenNavigation(), []);
 
-    const router = React.useMemo<NavigationRouter>(() => ({ push, replace, back, forward, refresh, pending }), [pending]);
+    const preparing = useNavigationPreparation();
+    const router = React.useMemo<NavigationRouter>(
+      () => ({ push, replace, back, forward, refresh, pending: pending || preparing }),
+      [pending, preparing],
+    );
 
     return <RouterContext.Provider value={router}>{payload.root}</RouterContext.Provider>;
   }
@@ -1252,6 +1316,7 @@ async function main() {
     let payload: RscPayload;
     try {
       payload = await createFromFetch<RscPayload>(payloadResponse(request), { temporaryReferences });
+      if (documentUrl() === calledFrom) cancelNavigationPreparation();
     } catch (error) {
       if (handleControlDigest(error)) return undefined;
       throw error;

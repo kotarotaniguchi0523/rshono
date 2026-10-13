@@ -64,9 +64,14 @@ test('Back during an unapplied Docs request keeps the home island hydrated', asy
   await page.goto('/');
   await expect(page.getByText('(hydrated ✓)')).toBeVisible();
   const marker = await page.evaluate(() => (window.__auditDocument = crypto.randomUUID()));
+  // A prepared push does not commit a history entry while it waits, so Back has somewhere to land only if
+  // the home page is the entry before the one the Docs link is clicked from.
+  await page.getByRole('link', { name: 'Users', exact: true }).click();
+  await expect(page).toHaveURL('/users');
   await page.getByRole('link', { name: 'Docs', exact: true }).click();
-  await expect(page).toHaveURL('/docs/getting-started');
   await expect.poll(() => page.evaluate(() => window.__auditDocsRequested)).toBe(true);
+  // The URL stays on the page being left until the held payload arrives; the Back below supersedes it.
+  await expect(page).toHaveURL('/users');
   await page.goBack();
   await expect(page).toHaveURL('/');
   await expect.poll(() => page.evaluate(() => window.__auditDocsAborted)).toBe(true);

@@ -129,8 +129,8 @@ test('a newer navigation stops a superseded payload fetch before its replacement
   await page.getByRole('link', { name: 'slow' }).click();
   await first;
 
-  // The URL has committed but the shell has not, so a navigation to another URL of the same slow page
-  // supersedes the first while its payload is still unapplied.
+  // The fetch is still on the wire and its payload has not reached React, so a navigation to another URL
+  // of the same slow page supersedes the first while it is still unapplied.
   await page.getByRole('link', { name: 'again' }).click();
 
   expect((await firstFailed).failure()?.errorText).toContain('ERR_ABORTED');

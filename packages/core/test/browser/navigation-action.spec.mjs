@@ -1,6 +1,13 @@
 import { expect, test } from '@playwright/test';
 
 test('a completed server action supersedes an older navigation snapshot', async ({ page }) => {
+  // This browser supports precommit, where the URL is held until the payload arrives and an action cancels
+  // the prepared fetch outright. Remove the interface the runtime feature-detects so this test keeps
+  // covering the post-commit path instead: the URL has already committed, the older loader is still on the
+  // wire, and the action's payload has to reach the screen ahead of it.
+  await page.addInitScript(() => {
+    delete window.NavigationPrecommitController;
+  });
   await page.goto('/users');
   let release;
   const held = new Promise((resolve) => {
