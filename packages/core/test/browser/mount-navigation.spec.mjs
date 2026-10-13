@@ -45,10 +45,9 @@ test('a mount-effect navigation stays pending while its payload is in flight', a
 
   try {
     await page.goto('/mount-navigation');
-    await expect(page).toHaveURL('/users');
     await expect.poll(() => heldRequests).toBe(1);
-    // The source remains mounted until the explicitly held payload is released. URL commit alone
-    // does not show the destination or prove that BrowserRoot's transition runner was installed.
+    await expect(page).toHaveURL('/mount-navigation');
+    // Preparation keeps the source URL and mounted tree until the held payload is released.
     await expect(page.getByText('pending: true', { exact: true })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Users', exact: true })).toBeHidden();
   } finally {

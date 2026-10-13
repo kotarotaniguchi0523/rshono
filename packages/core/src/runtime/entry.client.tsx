@@ -7,6 +7,7 @@ import {
   encodeReply,
   setServerCallback,
 } from 'react-server-dom-rspack/client.browser';
+import { cancelNavigationPreparation, listenNavigationPreparation, takePreparedPayload, useNavigationPreparation } from './navigation-preparation.js';
 import { isControlDigest, parseRedirectDigest } from './control.js';
 import type { DevMessage } from './dev-protocol.js';
 import type { RscPayload } from './entry.rsc.js';
@@ -237,6 +238,8 @@ type FetchedPayload = { payload: Promise<RscPayload>; settled: Promise<void> };
  * React has not parsed yet, and the flight stream is the one thing here that can be large.
  */
 function requestPayload(href: string, signal?: AbortSignal): FetchedPayload {
+  const prepared = takePreparedPayload(href, signal);
+  if (prepared) return prepared;
   const response = payloadResponse(createRscRequest(new URL(href, location.href).href, undefined, signal));
   const { promise: settled, resolve: settle } = Promise.withResolvers<void>();
   const forFlight = response.then((value) => {
@@ -893,6 +896,10 @@ function leaveToBrowser(event: NavigateEvent): boolean {
  */
 function listenNavigation(): () => void {
   if (!canSoftNavigate) return () => {};
+  const disposePreparation = listenNavigationPreparation(
+    requestPayload,
+    (event) => event.info !== documentNavigation && event.canIntercept && !leaveToBrowser(event),
+  );
 
   const onNavigate = (event: NavigateEvent) => {
     // A document navigation the runtime asked for itself, marked through `info`. Checked before the scroll
@@ -976,6 +983,7 @@ function listenNavigation(): () => void {
   navigation.addEventListener('navigate', onNavigate);
   window.addEventListener('popstate', onPopState);
   return () => {
+    disposePreparation();
     navigation.removeEventListener('navigate', onNavigate);
     window.removeEventListener('popstate', onPopState);
   };
@@ -1069,7 +1077,11 @@ async function main() {
     // A descendant may navigate from its first passive effect. Intercept it before that effect runs.
     React.useLayoutEffect(() => listenNavigation(), []);
 
-    const router = React.useMemo<NavigationRouter>(() => ({ push, replace, back, forward, refresh, pending }), [pending]);
+    const preparing = useNavigationPreparation();
+    const router = React.useMemo<NavigationRouter>(
+      () => ({ push, replace, back, forward, refresh, pending: pending || preparing }),
+      [pending, preparing],
+    );
 
     return <RouterContext.Provider value={router}>{payload.root}</RouterContext.Provider>;
   }
@@ -1088,6 +1100,7 @@ async function main() {
     let payload: RscPayload;
     try {
       payload = await createFromFetch<RscPayload>(payloadResponse(request), { temporaryReferences });
+      if (documentUrl() === calledFrom) cancelNavigationPreparation();
     } catch (error) {
       if (handleControlDigest(error)) return undefined;
       throw error;
