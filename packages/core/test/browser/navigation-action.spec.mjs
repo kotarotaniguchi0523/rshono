@@ -1,8 +1,6 @@
 import { expect, test } from '@playwright/test';
-import { emulateBrowserWithoutPrecommit } from './navigation-probe.mjs';
 
 test('a completed server action supersedes an older navigation snapshot', async ({ page }) => {
-  await emulateBrowserWithoutPrecommit(page);
   await page.goto('/users');
   let release;
   const held = new Promise((resolve) => {

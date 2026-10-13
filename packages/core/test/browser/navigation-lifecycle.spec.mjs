@@ -1,25 +1,22 @@
 import { expect, test } from '@playwright/test';
-import { emulateBrowserWithoutPrecommit, routerResult, startRouterCall } from './navigation-probe.mjs';
+import { routerResult, startRouterCall } from './navigation-probe.mjs';
 
-for (const precommit of [false]) {
-  test(`root redirect completes on the final screen (precommit=${precommit})`, async ({ page }) => {
-    if (!precommit) await emulateBrowserWithoutPrecommit(page);
-    await page.goto('/profile/1');
-    await page.route('**/audit-redirect', (route) =>
-      route.fulfill({
-        status: 200,
-        contentType: 'text/x-component',
-        body: '0:{"root":null,"redirect":"/login"}\n',
-      }),
-    );
-    await startRouterCall(page, 'push', '/audit-redirect');
-    await expect.poll(() => routerResult(page).then((result) => result.state)).toBe('resolved');
-    const outcome = await routerResult(page);
-    expect(outcome.kind).toBe('rendered');
-    expect(new URL(outcome.url).pathname).toBe('/login');
-    expect(outcome.heading).toBe('Log in');
-  });
-}
+test('root redirect completes on the final screen', async ({ page }) => {
+  await page.goto('/profile/1');
+  await page.route('**/audit-redirect', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'text/x-component',
+      body: '0:{"root":null,"redirect":"/login"}\n',
+    }),
+  );
+  await startRouterCall(page, 'push', '/audit-redirect');
+  await expect.poll(() => routerResult(page).then((result) => result.state)).toBe('resolved');
+  const outcome = await routerResult(page);
+  expect(outcome.kind).toBe('rendered');
+  expect(new URL(outcome.url).pathname).toBe('/login');
+  expect(outcome.heading).toBe('Log in');
+});
 
 for (const method of ['push', 'replace', 'refresh', 'back', 'forward']) {
   test(`${method} resolves after the destination payload commits`, async ({ page }) => {
@@ -66,37 +63,34 @@ for (const method of ['push', 'replace', 'refresh', 'back', 'forward']) {
   });
 }
 
-for (const precommit of [false]) {
-  test(`rejects a superseded navigation and finishes its replacement (precommit=${precommit})`, async ({ page }) => {
-    if (!precommit) await emulateBrowserWithoutPrecommit(page);
-    await page.goto('/profile/1');
-    let release;
-    const held = new Promise((resolve) => {
-      release = resolve;
-    });
-    let requestSeen;
-    const seen = new Promise((resolve) => {
-      requestSeen = resolve;
-    });
-    await page.route('**/profile/1?tab=activity', async (route) => {
-      if (route.request().headers()['rsc'] !== '1') return route.fallback();
-      requestSeen();
-      await held;
-      await route.continue();
-    });
-    try {
-      await startRouterCall(page, 'push', '?tab=activity');
-      await seen;
-      await startRouterCall(page, 'push', '/users', 'secondary');
-      await expect.poll(() => routerResult(page)).toEqual({ state: 'rejected', name: 'AbortError' });
-      await expect
-        .poll(() => routerResult(page, 'secondary'))
-        .toEqual(expect.objectContaining({ state: 'resolved', kind: 'rendered', heading: 'Users' }));
-    } finally {
-      release?.();
-    }
+test('rejects a superseded navigation and finishes its replacement', async ({ page }) => {
+  await page.goto('/profile/1');
+  let release;
+  const held = new Promise((resolve) => {
+    release = resolve;
   });
-}
+  let requestSeen;
+  const seen = new Promise((resolve) => {
+    requestSeen = resolve;
+  });
+  await page.route('**/profile/1?tab=activity', async (route) => {
+    if (route.request().headers()['rsc'] !== '1') return route.fallback();
+    requestSeen();
+    await held;
+    await route.continue();
+  });
+  try {
+    await startRouterCall(page, 'push', '?tab=activity');
+    await seen;
+    await startRouterCall(page, 'push', '/users', 'secondary');
+    await expect.poll(() => routerResult(page)).toEqual({ state: 'rejected', name: 'AbortError' });
+    await expect
+      .poll(() => routerResult(page, 'secondary'))
+      .toEqual(expect.objectContaining({ state: 'resolved', kind: 'rendered', heading: 'Users' }));
+  } finally {
+    release?.();
+  }
+});
 
 test('hash completion and forward completion refer to the committed entry', async ({ page }) => {
   await page.goto('/profile/1');

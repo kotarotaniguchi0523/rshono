@@ -897,23 +897,26 @@ function loadPayload(url: string, { signal, afterCommit, attempt }: LoadPayloadO
         return false;
       });
     });
-    if ('settled' in fetched) {
-      void fetched.settled.then(() => {
-        if (stale() || committedSettled) return;
-        setTimeout(() => {
-          if (!stale() && !committedSettled) React.startTransition(reapplyPayload);
-        }, 0);
-      });
-    }
+    // A streamed payload can suspend a transition on a flight chunk that resolves after the shell without
+    // React ever pinging the suspended lane back, which strands the navigation on the previous tree. The
+    // chunks have all landed by the time the stream closes, so one re-application — still a transition, so a
+    // payload that is waiting on something other than flight keeps the #52 behaviour — commits the render a
+    // lost ping stranded. It goes through `reapplyPayload` rather than `setPayload`: the payload is not
+    // replaced, so the commit the navigation waits on has to stay attached to it. The macrotask lets the
+    // decoder process the last chunk and React's own retry run first, so the normal path is not interrupted.
+    void fetched.settled.then(() => {
+      if (stale() || committedSettled) return;
+      setTimeout(() => {
+        if (!stale() && !committedSettled) React.startTransition(reapplyPayload);
+      }, 0);
+    });
   };
 
+  // `startTransition` runs the work but hands nothing back, so the promise carrying a failure is caught by
+  // the rejection handler on `work` below instead. Assigned synchronously: React invokes the callback before
+  // `startNav` returns.
   let work!: Promise<void>;
-  startNav(
-    () =>
-      (work = run().catch((error: unknown) => {
-        if (!stale()) throw error;
-      })),
-  );
+  startNav(() => (work = run()));
 
   return work.then(
     // Undefined whenever nothing was applied — an abort, or a redirect — and there is then nothing to wait for.

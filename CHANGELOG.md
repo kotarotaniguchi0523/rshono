@@ -11,6 +11,15 @@ those.
 
 ## Unreleased
 
+### Changed
+
+- **`useNavigation().router` actions now return a `NavigationOutcome`.** `push`, `replace`, `back`, `forward`
+  and `refresh` return `Promise<NavigationOutcome>` instead of `void`, and `NavigationOutcome` is exported from
+  `@rshono/core/client`. `rendered` resolves once the destination has committed — the point a caller awaiting
+  a navigation actually cares about — `no-op` reports a traversal with no entry to move to, and
+  `document-navigation` reports a browser load taking over; a failed or superseded intercepted navigation
+  still rejects, with `AbortError` on supersession. Statement-form calls (`router.push('/x')`) are unaffected.
+
 ### Fixed
 
 - **`rshono dev` drains the old server worker instead of terminating it between rebuilds.** A worker stopped

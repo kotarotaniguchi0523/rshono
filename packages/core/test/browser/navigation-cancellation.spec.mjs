@@ -1,5 +1,4 @@
 import { expect, test } from '@playwright/test';
-import { emulateBrowserWithoutPrecommit } from './navigation-probe.mjs';
 
 test('a prevented browser navigation cancels an unapplied fetch and clears pending', async ({ page }) => {
   const errors = [];
@@ -43,7 +42,6 @@ test('a prevented browser navigation cancels an unapplied fetch and clears pendi
 });
 
 test('Back during an unapplied Docs request keeps the home island hydrated', async ({ page }) => {
-  await emulateBrowserWithoutPrecommit(page);
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
   await page.addInitScript(() => {
