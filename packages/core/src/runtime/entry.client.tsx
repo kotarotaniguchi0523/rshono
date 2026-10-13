@@ -695,7 +695,11 @@ let setPayload: (payload: RscPayload, afterCommit?: () => void) => Promise<void>
  */
 let reapplyPayload: () => void = () => {};
 
-/** Runs work inside the nav transition so `useNavigation().pending` stays true across the round-trip. */
+/**
+ * Runs a navigation's work through `useNavigationTransition`'s runner, which tracks the promise it returns so
+ * `useNavigation().pending` stays true across the whole round-trip rather than only inside a React transition.
+ * The default covers the window before hydration, where no root observes `pending`.
+ */
 let startNav: (run: () => void | Promise<void>) => void = (run) => {
   void run();
 };

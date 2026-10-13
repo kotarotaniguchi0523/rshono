@@ -102,10 +102,11 @@ export default async function Profile({ params, ctx }: PageProps<'/profile/:id'>
 ```
 
 - Pages receive `{ url, params, ctx }` — `PageProps<'/profile/:id'>` types `params.id`, and `url` is a real
-  `URL`. The same pair reaches a `'use client'` component from `useNavigation()`, so a read moves across the
-  boundary unchanged — except the fragment, which a browser never sends to the server: `PageProps.url` never
-  has one, while `useNavigation().url.hash` is read from the address bar after hydration and follows in-page
-  links and Back/Forward.
+  `URL`. `params`, and `url` during SSR and hydration, reach a `'use client'` component from
+  `useNavigation()`; after hydration that hook's `url` follows the browser address — in-page links,
+  Back/Forward, the live query — while on a `render: 'static'` page `PageProps.url` stays the build-time
+  URL. The fragment is the one part a browser never sends to the server: it is never in `PageProps.url`,
+  only in the hook's `url.hash` after hydration.
 - **`ctx` is the request context** — `ctx.req`, cookies, env, middleware variables, the proxy-aware URL. It is
   the same object `getRequestContext()` returns from `@rshono/core/server`, handed over so a page needs no
   import. Reading it on a `render: 'static'` page throws: a page rendered once at build time has no request.
