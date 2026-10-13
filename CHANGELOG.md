@@ -13,14 +13,22 @@ those.
 
 ### Changed
 
-- **`useNavigation().router` actions now return a `NavigationOutcome`.** `push`, `replace`, `back`, `forward`
-  and `refresh` return `Promise<NavigationOutcome>` instead of `void`, and `NavigationOutcome` is exported from
-  `@rshono/core/client`. `rendered` resolves once the destination has committed — the point a caller awaiting
-  a navigation actually cares about — `no-op` reports a traversal with no entry to move to, and
-  `document-navigation` reports a browser load taking over; a failed or superseded intercepted navigation
-  still rejects, with `AbortError` on supersession. Statement-form calls (`router.push('/x')`) are unaffected.
+- **`useNavigation().url` follows the browser address after hydration, including the query.** The hook still
+  starts from the server payload, so SSR and hydration render what the payload carried and a prerendered page
+  keeps matching its markup; after hydration `url` tracks `location` — path, query, fragment and all — on
+  every route, including a `render: 'static'` page. `PageProps.url` is unchanged: on a static route it still
+  holds the build-time value, because the server cannot see a request query. `params` is unchanged as well —
+  it describes the page on screen until its replacement commits — so a suspended navigation's `url` can name
+  the destination while `params` still describes the committed page.
 
 ### Fixed
+
+- **Back now cancels a suspended navigation and restores the last committed payload.** A destination whose
+  render was waiting on a client resource could outlive the traversal that abandoned it: the address bar
+  returned to the previous entry while the screen stayed suspended, or the abandoned payload surfaced an
+  abort as a render failure. An urgent traversal now releases the pending payload in favor of the committed
+  one, and `useNavigation().pending` now tracks the navigation's own work rather than only a React
+  transition, so a cancelled round-trip ends it.
 
 - **`rshono dev` drains the old server worker instead of terminating it between rebuilds.** A worker stopped
   with `terminate()` never runs its HTTP server's `close()`, so every response still being served — most

@@ -15,6 +15,7 @@ import type { RscPayload } from './entry.rsc.js';
 import { walkHotUpdates } from './hot-update.js';
 import { RouterContext, type NavigationRouter, type NavigationOutcome } from './navigation.js';
 import { createRscRequest } from './request.js';
+import { startNavigationPayload, useNavigationTransition } from './navigation-transition.js';
 
 const isDev = process.env.NODE_ENV === 'development';
 
@@ -63,6 +64,8 @@ const documentUrl = (): string => location.pathname + location.search;
  * Updated in the layout effect that commits a payload.
  */
 let renderedUrl = documentUrl();
+let renderedModel: RscPayload | undefined;
+const navigationModels = new WeakMap<AbortController, RscPayload>();
 
 /** Guarantees somewhere to attach the fatal overlay: the root container is `document`, so a teardown can take `<body>` with it. */
 function overlayHost(): HTMLElement {
@@ -769,7 +772,11 @@ let setPayload: (payload: RscPayload, afterCommit?: () => void) => Promise<void>
  */
 let reapplyPayload: () => void = () => {};
 
-/** Runs work inside the nav transition so `useNavigation().pending` stays true across the round-trip. */
+/**
+ * Runs a navigation's work through `useNavigationTransition`'s runner, which tracks the promise it returns so
+ * `useNavigation().pending` stays true across the whole round-trip rather than only inside a React transition.
+ * The default covers the window before hydration, where no root observes `pending`.
+ */
 let startNav: (run: () => void | Promise<void>) => void = (run) => {
   void run();
 };
@@ -782,6 +789,12 @@ let startNav: (run: () => void | Promise<void>) => void = (run) => {
  * after the browser has already committed it — so ordering is the runtime's own for those.
  */
 let currentNavigation = 0;
+
+/** An urgent traversal releases a suspended destination in favor of the last committed payload. */
+function restoreCommittedPayload(payload: RscPayload): void {
+  currentNavigation++;
+  void setPayload(payload);
+}
 
 /**
  * A navigation fetch, and whether its payload has been handed to React. An **applied** fetch is deliberately
@@ -878,9 +891,10 @@ function loadPayload(url: string, { signal, afterCommit, attempt }: LoadPayloadO
     }
     // The fetch crossed an await, so its payload update needs a new synchronous transition scope.
     // Keep the commit promise outside the async Action; React tracks the scheduled update until commit.
-    React.startTransition(() => {
+    startNavigationPayload(() => {
       // From here React holds this payload's stream, so a superseded fetch may not be stopped until a newer
       // payload commits — see {@link navigationFetches}.
+      navigationModels.set(controller, nextPayload);
       entry.applied = true;
       committed = setPayload(nextPayload, afterCommit);
       void committed.then(() => (committedSettled = true));
@@ -891,6 +905,7 @@ function loadPayload(url: string, { signal, afterCommit, attempt }: LoadPayloadO
     // Only the older ones: a newer navigation may have started while this payload was in flight, and its
     // fetch is the one the screen is waiting for.
     void committed?.then(() => {
+      if (renderedModel !== nextPayload) return;
       navigationFetches = navigationFetches.filter((fetch) => {
         if (fetch.navigation >= navigation) return true;
         fetch.controller.abort();
@@ -1144,57 +1159,76 @@ async function main() {
   if (canSoftNavigate) readStoredScrollPositions();
   const restored = scrollPointFor(currentEntryKey());
 
+  /** Owns completion and post-commit work even when React retries or supersedes another render. */
+  type RenderRecord = { payload: RscPayload; href: string; committed: Promise<void>; commit: () => void; supersede: () => void };
+  /**
+   * Creates a one-shot completion for this render. Superseding it releases its waiter without
+   * running scroll/focus work; committing runs that work before the browser paints.
+   */
+  function createRender(payload: RscPayload, href: string, afterCommit?: () => void): RenderRecord {
+    const { promise, resolve } = Promise.withResolvers<void>();
+    let finished = false;
+    return {
+      payload,
+      href,
+      committed: promise,
+      commit: () => {
+        if (finished) return;
+        finished = true;
+        afterCommit?.();
+        resolve();
+      },
+      // Supersession releases the old waiter, but never runs its scroll/focus callback.
+      supersede: () => {
+        finished = true;
+        resolve();
+      },
+    };
+  }
+
+  const initialRender = createRender(initialPayload, documentUrl(), restored ? () => scrollToPoint(restored) : undefined);
+
   function BrowserRoot() {
     const [payload, setPayloadState] = React.useState(initialPayload);
-    const [pending, startTransition] = React.useTransition();
+    const [pending, startTransition] = useNavigationTransition(payload, restoreCommittedPayload);
     // The payload the last `setPayload` put on screen or on its way there, so `reapplyPayload` re-renders
     // that one rather than a payload a later navigation or action has already replaced.
     const currentPayload = React.useRef<RscPayload>(initialPayload);
-    // The resolver the payload on screen still owes — see {@link loadPayload}.
-    const pendingCommit = React.useRef<(() => void) | null>(null);
-    // The scroll the payload about to commit owes, set with it so a payload that supersedes another takes
-    // its predecessor's scroll out of the queue along with its commit. Initialised with the reload's offset:
-    // the first layout effect below applies it with the first payload, before the new tree is painted.
-    const pendingScroll = React.useRef<(() => void) | null>(restored ? () => scrollToPoint(restored) : null);
+    const [renders] = React.useState(() => new WeakMap<RscPayload, RenderRecord>([[initialPayload, initialRender]]));
+    const scheduledRender = React.useRef(initialRender);
+    const [revision, reviseCommit] = React.useState(0);
 
-    // Descendant passive effects can start a navigation before the root's passive effects run.
-    // Install the live payload setter and transition runner before any such navigation starts.
     React.useLayoutEffect(() => {
       setPayload = (next, afterCommit) => {
+        const scheduled = createRender(next, documentUrl(), afterCommit);
+        scheduledRender.current.supersede();
+        scheduledRender.current = scheduled;
         currentPayload.current = next;
-        return new Promise<void>((resolve) => {
-          // A payload replaced before it ever painted still has a navigation waiting on it. React commits
-          // only the newest, so the effect below never runs for the one it skipped: release it here.
-          pendingCommit.current?.();
-          pendingCommit.current = resolve;
-          // Replaced rather than kept: a server action's payload carries no `afterCommit`, and the
-          // navigation it superseded must not scroll the page the action is about to replace it with.
-          pendingScroll.current = afterCommit ?? null;
-          setPayloadState(next);
-        });
+        renders.set(next, scheduled);
+        setPayloadState(next);
+        // A restoration to the same payload still owns a new commit and post-commit callback.
+        reviseCommit((value) => value + 1);
+        return scheduled.committed;
       };
-      // A re-dispatch of the payload above, for the retry in `loadPayload`: keeping `pendingCommit` and
-      // `pendingScroll` in place means the navigation already waiting resolves when this render commits,
-      // not when the retry runs.
-      reapplyPayload = () => setPayloadState(currentPayload.current);
+      reapplyPayload = () => {
+        setPayloadState(currentPayload.current);
+        reviseCommit((value) => value + 1);
+      };
       startNav = (run) => startTransition(run);
-    }, [startTransition]);
+    }, [renders, startTransition]);
 
-    /**
-     * Performs the pending scroll and releases the navigation waiting on this payload. A layout effect, so
-     * the new tree is in the DOM and the pre-scroll position is never painted.
-     */
     React.useLayoutEffect(() => {
-      const scroll = pendingScroll.current;
-      pendingScroll.current = null;
-      scroll?.();
-      // What the payload that just committed was rendered for — see {@link renderedUrl}. A redirect never
-      // reaches here, and an action or a dev refresh keeps the URL it was fetched for.
-      renderedUrl = documentUrl();
-      const commit = pendingCommit.current;
-      pendingCommit.current = null;
-      commit?.();
-    }, [payload]);
+      const render = renders.get(payload);
+      if (!render) return;
+      renderedUrl = render.href;
+      renderedModel = payload;
+      render.commit();
+      navigationFetches = navigationFetches.filter((fetch) => {
+        if (fetch.navigation >= currentNavigation || navigationModels.get(fetch.controller) === payload) return true;
+        fetch.controller.abort();
+        return false;
+      });
+    }, [payload, revision, renders]);
 
     // A descendant may navigate from its first passive effect. Intercept it before that effect runs.
     React.useLayoutEffect(() => listenNavigation(), []);

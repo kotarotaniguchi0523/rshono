@@ -31,8 +31,9 @@ export type PathParams<P extends string> =
  * typed key-by-key; without it `params` falls back to an open `Record<string, string>`.
  *
  * `defineRoutes` checks each page's props against `PageProps<path>`, so a mismatched path literal is
- * a type error at the route definition. `url` and `params` mirror what `useNavigation()` gives a
- * `'use client'` component, so a read moves across the server/client line unchanged.
+ * a type error at the route definition. `params`, and `url` during SSR and hydration, mirror what
+ * `useNavigation()` gives a `'use client'` component; after hydration that hook's `url` follows the
+ * browser address instead.
  *
  * @typeParam Path - The literal path this page is mounted at, e.g. `'/profile/:id'`.
  * @typeParam E - The app's Hono {@link Env}, to type {@link RequestContext.var} and
@@ -59,12 +60,12 @@ export interface PageProps<Path extends string = string, E extends Env = Env> {
    *
    * On a `render: 'static'` route this is the build-time URL — rendered once against `siteUrl`, so the
    * origin is `siteUrl`'s and `url.searchParams` is always empty, on first paint and after a soft
-   * navigation alike. **`useNavigation().url` is the same frozen URL, not a way around it**: the payload
-   * carries one `href` and both readings come from it. The fragment is the one part no payload can carry
-   * — a browser never sends `#…` with the request — so this prop never has one, while
-   * `useNavigation().url.hash` is read from the browser after hydration. Mark the route
-   * `render: 'dynamic'` if the page depends on the query; a `'use client'` component that only wants it
-   * after hydration can read `location.search` in an effect.
+   * navigation alike: the payload carries one build-time `href`. **`useNavigation()` reads that payload
+   * during SSR and hydration and then follows the browser address**, so a `'use client'` component can
+   * read the live query with no effect of its own. The fragment is the one part no payload can carry —
+   * a browser never sends `#…` with the request — so this prop never has one, while the hook's `url.hash`
+   * arrives from the address bar after hydration. Mark the route `render: 'dynamic'` if the page's server
+   * render depends on the query.
    */
   url: URL;
   /** Matched route params for this request, e.g. `{ id: '42' }` for `/profile/:id`. */
