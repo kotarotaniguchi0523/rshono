@@ -15,6 +15,7 @@ import type { RscPayload } from './entry.rsc.js';
 import { walkHotUpdates } from './hot-update.js';
 import { RouterContext, type NavigationRouter } from './navigation.js';
 import { createRscRequest } from './request.js';
+import { startNavigationPayload, useNavigationTransition } from './navigation-transition.js';
 
 const isDev = process.env.NODE_ENV === 'development';
 
@@ -694,7 +695,11 @@ let setPayload: (payload: RscPayload, afterCommit?: () => void) => Promise<void>
  */
 let reapplyPayload: () => void = () => {};
 
-/** Runs work inside the nav transition so `useNavigation().pending` stays true across the round-trip. */
+/**
+ * Runs a navigation's work through `useNavigationTransition`'s runner, which tracks the promise it returns so
+ * `useNavigation().pending` stays true across the whole round-trip rather than only inside a React transition.
+ * The default covers the window before hydration, where no root observes `pending`.
+ */
 let startNav: (run: () => void | Promise<void>) => void = (run) => {
   void run();
 };
@@ -707,6 +712,12 @@ let startNav: (run: () => void | Promise<void>) => void = (run) => {
  * after the browser has already committed it — so ordering is the runtime's own for those.
  */
 let currentNavigation = 0;
+
+/** An urgent traversal releases a suspended destination in favor of the last committed payload. */
+function restoreCommittedPayload(payload: RscPayload): void {
+  currentNavigation++;
+  void setPayload(payload);
+}
 
 /**
  * A navigation fetch, and whether its payload has been handed to React. An **applied** fetch is deliberately
@@ -790,7 +801,7 @@ function loadPayload(url: string, signal?: AbortSignal, afterCommit?: () => void
     }
     // The fetch crossed an await, so its payload update needs a new synchronous transition scope.
     // Keep the commit promise outside the async Action; React tracks the scheduled update until commit.
-    React.startTransition(() => {
+    startNavigationPayload(() => {
       // From here React holds this payload's stream, so a superseded fetch may not be stopped until a newer
       // payload commits — see {@link navigationFetches}.
       entry.applied = true;
@@ -1016,7 +1027,7 @@ async function main() {
 
   function BrowserRoot() {
     const [payload, setPayloadState] = React.useState(initialPayload);
-    const [pending, startTransition] = React.useTransition();
+    const [pending, startTransition] = useNavigationTransition(payload, restoreCommittedPayload);
     // The payload the last `setPayload` put on screen or on its way there, so `reapplyPayload` re-renders
     // that one rather than a payload a later navigation or action has already replaced.
     const currentPayload = React.useRef<RscPayload>(initialPayload);
