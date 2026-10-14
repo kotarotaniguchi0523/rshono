@@ -1021,11 +1021,11 @@ function afterCommitFor(event: NavigateEvent): (() => void) | undefined {
 }
 
 /** Puts a payload that was fetched before its navigation committed on screen. */
-function applyPrepared(event: NavigateEvent, prepared: PreparedNavigation): void {
+function applyPrepared(event: NavigateEvent, prepared: PreparedNavigation): Promise<void> {
   const info = event.info as NavigationAttempt | undefined;
   const attempt = info?.mark === attemptMark ? info : undefined;
   const hop = attempt?.hop;
-  void loadPayload(event.destination.url, { signal: event.signal, afterCommit: afterCommitFor(event), attempt, prepared }).then(
+  return loadPayload(event.destination.url, { signal: event.signal, afterCommit: afterCommitFor(event), attempt, prepared }).then(
     () => {
       if (attempt?.hop === hop && !event.signal.aborted) finishAttempt(attempt, { kind: 'rendered', url: new URL(location.href) });
     },
