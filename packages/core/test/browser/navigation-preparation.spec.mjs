@@ -130,6 +130,8 @@ test('native navigation finishes only after a prepared payload commits', async (
   await expect(page.locator('html')).toHaveAttribute('data-navigation-repro-hydrated', 'true');
   await page.evaluate(() => {
     // The testbed button creates the client resource before calling router.push; capture its native result.
+    window.__nativeSuccess = 'waiting';
+    navigation.addEventListener('navigatesuccess', () => (window.__nativeSuccess = 'fired'), { once: true });
     const navigate = navigation.navigate.bind(navigation);
     navigation.navigate = (...args) => {
       const result = navigate(...args);
@@ -147,10 +149,12 @@ test('native navigation finishes only after a prepared payload commits', async (
   await expect(page.getByText('pending: true', { exact: true })).toBeVisible();
   await expect(page.getByText('Initial content', { exact: true })).toBeVisible();
   expect(await page.evaluate(() => window.__nativeFinished)).toBe('waiting');
+  expect(await page.evaluate(() => window.__nativeSuccess)).toBe('waiting');
 
   await page.getByRole('button', { name: 'Resolve', exact: true }).click();
   await expect(page.getByText('Activity content', { exact: true })).toBeVisible();
   await expect.poll(() => page.evaluate(() => window.__nativeFinished)).toBe('resolved');
+  await expect.poll(() => page.evaluate(() => window.__nativeSuccess)).toBe('fired');
 });
 
 test('automatic preparation marks the router pending while an additional browser gate is held', async ({ page }) => {
