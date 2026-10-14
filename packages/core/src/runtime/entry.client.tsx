@@ -1020,7 +1020,7 @@ function afterCommitFor(event: NavigateEvent): (() => void) | undefined {
   return hash === '' ? scrollToTop : () => jumpToAnchor(hash);
 }
 
-/** Puts a payload that was fetched before its navigation committed on screen. */
+/** Applies a prepared payload and resolves after React commits it, keeping native `finished` pending until then. */
 function applyPrepared(event: NavigateEvent, prepared: PreparedNavigation): Promise<void> {
   const info = event.info as NavigationAttempt | undefined;
   const attempt = info?.mark === attemptMark ? info : undefined;
