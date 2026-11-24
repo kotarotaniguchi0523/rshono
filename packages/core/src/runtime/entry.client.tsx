@@ -1,12 +1,7 @@
 import React from 'react';
 import { hydrateRoot } from 'react-dom/client';
-import {
-  createFromFetch,
-  createFromReadableStream,
-  createTemporaryReferenceSet,
-  encodeReply,
-  setServerCallback,
-} from 'react-server-dom-rspack/client.browser';
+// Resolved at build time to the bundler that is compiling this — see `bundler/contract.ts`.
+import { browser } from '@rshono/bundler/browser';
 import {
   cancelNavigationPreparation,
   isPreparedNavigation,
@@ -15,14 +10,12 @@ import {
   type PreparedNavigation,
 } from './navigation-preparation.js';
 import { isControlDigest, parseRedirectDigest } from './control.js';
-import type { DevMessage } from './dev-protocol.js';
 import type { RscPayload } from './entry.rsc.js';
-// Dev-only: its one caller sits behind `import.meta.webpackHot`, which a production build compiles to
-// `false` — so this module is dropped there.
-import { walkHotUpdates } from './hot-update.js';
 import { RouterContext, type NavigationRouter, type NavigationOutcome } from './navigation.js';
 import { createRscRequest } from './request.js';
 import { startNavigationPayload, useNavigationTransition } from './navigation-transition.js';
+
+const { createFromFetch, createFromReadableStream, createTemporaryReferenceSet, encodeReply, setServerCallback } = browser;
 
 const isDev = process.env.NODE_ENV === 'development';
 
@@ -1279,7 +1272,7 @@ async function main() {
   // so it reports an assertion that `tsc` requires. Believe `typecheck`, not the rule.
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
   const cspMeta = document.querySelector('meta[property="csp-nonce"]') as HTMLMetaElement | null;
-  if (cspMeta?.nonce) __webpack_nonce__ = cspMeta.nonce;
+  if (cspMeta?.nonce) browser.setNonce(cspMeta.nonce);
 
   const initialPayload = await createFromReadableStream<RscPayload>(flightStream);
 
@@ -1504,68 +1497,13 @@ async function main() {
     },
   });
 
-  if (import.meta.webpackHot) {
-    initDevRefresh();
+  // Behind `isDev`, which a production build compiles to `false` — so the dev client is dropped there.
+  if (isDev) {
+    browser.connectDevUpdates({
+      refetch: () => loadPayload(window.location.href).catch(() => loadDocument()),
+      loadDocument: () => loadDocument(),
+    });
   }
-}
-
-/**
- * Dev-only refresh client, listening to the CLI's SSE endpoint:
- *
- *   client-built  → hot-apply the waiting updates; anything the page can't be patched up to reloads.
- *   rsc-update    → server component code changed: re-fetch the flight payload, state preserved.
- *   hello         → sent on (re)connect with the latest build hash; a mismatch means a missed event.
- */
-function initDevRefresh() {
-  const hot = import.meta.webpackHot!;
-  let connectedOnce = false;
-  /** The newest build the dev server has announced — what {@link applyClientUpdate} walks towards. */
-  let targetHash: string | undefined;
-
-  function reload(reason: string, error?: unknown): void {
-    console.warn(`[rshono] ${reason} — reloading`, ...(error === undefined ? [] : [error]));
-    loadDocument();
-  }
-
-  async function applyClientUpdate(): Promise<void> {
-    const giveUp = await walkHotUpdates(
-      hot,
-      () => __webpack_hash__,
-      () => targetHash,
-    );
-    if (giveUp) reload(giveUp.reason, giveUp.error);
-  }
-
-  async function handle(message: DevMessage): Promise<void> {
-    switch (message.type) {
-      case 'hello':
-        targetHash = message.hash ?? targetHash;
-        if (connectedOnce) {
-          await applyClientUpdate();
-          await loadPayload(window.location.href).catch(() => loadDocument());
-        }
-        connectedOnce = true;
-        break;
-      case 'client-built':
-        targetHash = message.hash;
-        await applyClientUpdate();
-        break;
-      case 'rsc-update':
-        console.log('[rshono] server components updated');
-        await loadPayload(window.location.href).catch(() => loadDocument());
-        break;
-    }
-  }
-
-  const source = new EventSource('/_rshono/hmr');
-  // Chained rather than handled as they arrive: `hot.check` may only run from `idle`, and a burst of saves
-  // puts several frames on the wire inside the time one takes. Queueing drops nothing, because `targetHash`
-  // is shared — whichever handler runs next walks to the newest build.
-  let queue: Promise<void> = Promise.resolve();
-  source.onmessage = (event: MessageEvent<string>) => {
-    const message = JSON.parse(event.data) as DevMessage;
-    queue = queue.then(() => handle(message)).catch((error) => reload('the dev client failed', error));
-  };
 }
 
 // A bootstrap failure — a truncated initial payload, most likely — would otherwise be an unhandled

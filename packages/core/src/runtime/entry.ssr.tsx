@@ -1,7 +1,8 @@
 import React from 'react';
 import type { ReactFormState } from 'react-dom/client';
 import { renderToReadableStream } from 'react-dom/server';
-import { createFromReadableStream } from 'react-server-dom-rspack/client';
+// Resolved at build time to the bundler that is compiling this — see `bundler/contract.ts`.
+import { ssr } from '@rshono/bundler/ssr';
 import { cameFromPayload, isControlDigest } from './control.js';
 import { injectFlightPayload } from './flight-inject.js';
 import type { RscPayload } from './entry.rsc.js';
@@ -74,7 +75,7 @@ async function renderHTMLInternal(
 
   let payload: Promise<RscPayload>;
   function SsrRoot() {
-    payload ??= createFromReadableStream<RscPayload>(rscForSsr, options.nonce ? { nonce: options.nonce } : undefined);
+    payload ??= ssr.createFromReadableStream<RscPayload>(rscForSsr, options.nonce ? { nonce: options.nonce } : undefined);
     return React.use(payload).root;
   }
 
@@ -93,7 +94,7 @@ async function renderHTMLInternal(
   let htmlStream: ReadableStream<Uint8Array>;
   try {
     htmlStream = await renderToReadableStream(<SsrRoot />, {
-      bootstrapScripts: options.bootstrapScripts,
+      ...ssr.bootstrap(options.bootstrapScripts),
       formState: options.formState,
       signal: options.signal,
       nonce: options.nonce,

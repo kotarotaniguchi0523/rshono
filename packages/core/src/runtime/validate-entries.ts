@@ -1,3 +1,5 @@
+// eslint-disable-next-line @typescript-eslint/triple-slash-reference
+/// <reference path="../types/rshono-config.d.ts" />
 /**
  * The two modules an app hands the framework — `src/routes.ts` and `src/server.ts` — checked before
  * anything is built on them.
@@ -317,6 +319,10 @@ export function validateServerApp(exported: unknown): Hono | null {
   return app as Hono;
 }
 
+/** Set by the Vite build (`vite/index.ts`). Read defensively: the unit suite imports this module bare. */
+const viteRsc = typeof __RSHONO_CONFIG__ !== 'undefined' && __RSHONO_CONFIG__.bundler === 'vite';
+const CLIENT_REFERENCE = Symbol.for('react.client.reference');
+
 /**
  * The server component a page module must default-export, checked rather than cast.
  *
@@ -332,6 +338,17 @@ export function assertPageModule(mod: { default?: unknown }, label: string): Ser
   const Page = mod.default as ServerEntry<PageComponent> | undefined;
   if (typeof Page !== 'function') {
     fail(`The page module for ${label} must default-export a server component.`);
+  }
+  if (viteRsc) {
+    // No per-page asset list to look for under Vite — the plugin injects those itself — so the one mistake
+    // this check exists for is recognised directly: a `'use client'` page default-exports a client reference.
+    if ((Page as { $$typeof?: symbol }).$$typeof === CLIENT_REFERENCE) {
+      fail(
+        `The page component for ${label} is a client component ('use client'). ` +
+          "A page must be a server component — wrap the 'use client' component in one instead.",
+      );
+    }
+    return Page;
   }
   if (!Page.entryJsFiles) {
     fail(

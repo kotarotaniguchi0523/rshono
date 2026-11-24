@@ -237,7 +237,7 @@ export function createConfigs(options: RspackConfigOptions): [RspackOptions, Rsp
     },
     resolve: {
       ...resolveBase,
-      alias: { '@': srcDir },
+      alias: { '@rshono/bundler/browser$': join(FRAMEWORK_DIST, 'bundler', 'rspack', 'browser.js'), '@': srcDir },
     },
     module: {
       rules: [swcRule(BROWSER_TARGETS), cssRule(), { test: /\.(png|jpe?g|gif|webp|avif|ico|svg|woff2?|ttf|otf)$/i, type: 'asset' }],
@@ -313,6 +313,9 @@ export function createConfigs(options: RspackConfigOptions): [RspackOptions, Rsp
       alias: {
         '@rshono/routes$': routesFile,
         '@rshono/server-app$': serverAppAlias,
+        // The runtime entries reach the RSC runtime through these — see `bundler/contract.ts`.
+        '@rshono/bundler/rsc$': join(FRAMEWORK_DIST, 'bundler', 'rspack', 'rsc.js'),
+        '@rshono/bundler/ssr$': join(FRAMEWORK_DIST, 'bundler', 'rspack', 'ssr.js'),
         // Split on '/' so a preset can declare a POSIX-looking path and still resolve on Windows.
         '@rshono/deploy$': join(FRAMEWORK_DIST, ...preset.runtimeModule.split('/')),
         '@': srcDir,

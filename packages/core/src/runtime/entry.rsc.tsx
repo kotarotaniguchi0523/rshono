@@ -9,18 +9,8 @@ import type { ReactFormState } from 'react-dom/client';
 // Called directly rather than as `<Page {...props} />`: a spread would drop the non-enumerable `ctx`
 // prop. See `pageProps`.
 import { jsx } from 'react/jsx-runtime';
-// The bare specifier, not `/server.node`: the RSC layer's `conditionNames` picks the build for the
-// deploy target being compiled for.
-import {
-  createTemporaryReferenceSet,
-  decodeAction,
-  decodeFormState,
-  decodeReply,
-  loadServerAction,
-  renderToReadableStream,
-  type ServerEntry,
-  type TemporaryReferenceSet,
-} from 'react-server-dom-rspack/server';
+// Resolved at build time to the bundler that is compiling this — see `bundler/contract.ts`.
+import { rsc } from '@rshono/bundler/rsc';
 // Aliased at build time to the selected preset's runtime — the one place this file knows where it runs.
 import { runtime } from '@rshono/deploy';
 // @ts-expect-error — resolved by the '@rshono/routes' alias to the app's routes.ts
@@ -32,13 +22,17 @@ import { appendVary, etagMatches, varyWith } from '../server/headers.js';
 import { PRERENDER_NONCE_HEADER, setPrerenderFlight } from '../server/prerendered.js';
 import { beginPageRender, getRequestContext, publicUrl, readParams, reportServerError, runWithContext } from './context.js';
 import { cameFromPayload, isControlSignal, RedirectSignal, type ControlSignal } from './control.js';
-import { renderHTML, renderPrerenderHTML, type RenderHTMLOptions } from './entry.ssr.js';
+import type { ServerTemporaryReferenceSet as TemporaryReferenceSet } from '../bundler/contract.js';
+// Types only: the module itself is in another layer or environment, and is reached through `rsc.loadSsr()`.
+import type { renderHTML, RenderHTMLOptions } from './entry.ssr.js';
 import { failureDocument } from './failure-document.js';
 // Type-only, so it is erased — the RSC layer does not take its own instance of the SSR layer's module.
 import type { CancellableTransformer } from './flight-inject.js';
 import { RouterProvider } from './navigation.js';
 import { asksForRsc, isActionRequest, isBrowserFormPost, parseRenderRequest, requestWantsRsc, RSC_VARY_HEADER, wantsRsc } from './request.js';
 import { assertEndpointModule, assertPageModule, assertRouteModules, validateRoutesModule, validateServerApp } from './validate-entries.js';
+
+const { createTemporaryReferenceSet, decodeAction, decodeFormState, decodeReply, loadServerAction, renderToReadableStream } = rsc;
 
 const serverApp = validateServerApp(serverAppModule);
 
@@ -352,7 +346,7 @@ function pageProps(c: Context, errorInfo: ErrorPageInfo | undefined): PageProps 
   return props as PageProps & { error?: ErrorPageInfo };
 }
 
-async function renderComponent(c: Context, Page: ServerEntry<PageComponent>, opts: ComponentRenderOptions): Promise<Response> {
+async function renderComponent(c: Context, Page: PageComponent, opts: ComponentRenderOptions): Promise<Response> {
   // React's renderers must never be handed `c.req.raw.signal`: they add an `abort` listener and only
   // remove it if the abort fires, so on the happy path it stays on a request-lifetime signal and pins the
   // whole rendered tree. The render gets its own controller and the request signal forwards into it —
@@ -370,10 +364,11 @@ async function renderComponent(c: Context, Page: ServerEntry<PageComponent>, opt
   // flight payload has neither — which is what keeps a prerendered one servable under a nonce-based CSP.
   const nonce = opts.isRsc ? undefined : cspNonce(c);
   const props = pageProps(c, opts.errorInfo);
+  const assets = rsc.pageAssets(Page);
   const root = (
     <>
       {nonce && <meta property="csp-nonce" nonce={nonce} />}
-      {Page.entryCssFiles?.map((href) => (
+      {assets?.css.map((href) => (
         <link key={href} rel="stylesheet" href={href} precedence="default" />
       ))}
       {/* `href`, not the `URL`: these props cross into a client component, so they have to be serializable. */}
@@ -432,7 +427,7 @@ async function renderComponent(c: Context, Page: ServerEntry<PageComponent>, opt
   let prerenderFlight: Promise<Uint8Array> | undefined;
   try {
     const renderOptions: RenderHTMLOptions = {
-      bootstrapScripts: Page.entryJsFiles,
+      bootstrapScripts: assets?.js,
       formState: opts.formState,
       signal,
       nonce,
@@ -440,6 +435,7 @@ async function renderComponent(c: Context, Page: ServerEntry<PageComponent>, opt
       onShellError: (error) => reportServerError(error, { source: 'ssr', hono: c, message: '[rshono] SSR shell error:' }),
       onError: (error) => reportServerError(error, { source: 'ssr', hono: c, message: '[rshono] SSR error:' }),
     };
+    const { renderHTML, renderPrerenderHTML } = await rsc.loadSsr();
     if (prerendering) {
       const result = await renderPrerenderHTML(rscStream, renderOptions);
       ssrResult = result;
@@ -530,12 +526,7 @@ function formActionId(formData: FormData): string | null {
  * about the deployment — and a probe that answers "broken" for a healthy app is the one failure direction
  * this must not have.
  */
-const probeActionId = ((): string | undefined => {
-  for (const [id, entry] of Object.entries(__rspack_rsc_manifest__.serverManifest)) {
-    if ((entry.chunks?.length ?? 0) === 0) return id;
-  }
-  return undefined;
-})();
+const probeActionId: string | undefined = rsc.loadableServerActions()[0]?.[0];
 
 /**
  * Whether the app's `'use server'` module is what `decodeAction` could not load, rather than the caller's
@@ -559,19 +550,19 @@ const probeActionId = ((): string | undefined => {
  * prevent. A probe that throws is the deployment being broken for every caller, so a 500 is then right for
  * this one too.
  */
-function cannotLoadServerActions(formData: FormData): boolean {
+async function cannotLoadServerActions(formData: FormData): Promise<boolean> {
   const named = formActionId(formData);
-  const id = named !== null && Object.hasOwn(__rspack_rsc_manifest__.serverManifest, named) ? named : probeActionId;
+  const id = named !== null && (await rsc.hasServerAction(named)) ? named : probeActionId;
   if (id === undefined) return false;
   try {
-    loadServerAction(id);
+    await loadServerAction(id);
     return false;
   } catch {
     return true;
   }
 }
 
-async function renderPage(c: Context, loadPage: () => Promise<ServerEntry<PageComponent>>): Promise<Response> {
+async function renderPage(c: Context, loadPage: () => Promise<PageComponent>): Promise<Response> {
   const request = c.req.raw;
 
   // Ahead of the classification below, and keyed on the request's *shape* rather than on it: every `enctype`
@@ -600,7 +591,7 @@ async function renderPage(c: Context, loadPage: () => Promise<ServerEntry<PageCo
     if (renderRequest.kind === 'rsc-action') {
       // Before the body is decoded, so an unknown id costs nothing to reject. `hasOwn` so `__proto__`
       // does not resolve to a manifest entry.
-      if (!Object.hasOwn(__rspack_rsc_manifest__.serverManifest, renderRequest.actionId)) {
+      if (!(await rsc.hasServerAction(renderRequest.actionId))) {
         return plainRefusal(c, 'Bad Request: unknown server action', 400);
       }
       let args: unknown[];
@@ -621,7 +612,7 @@ async function renderPage(c: Context, loadPage: () => Promise<ServerEntry<PageCo
       // the operator who needs paging nothing at all.
       let action: (...actionArgs: unknown[]) => Promise<unknown>;
       try {
-        action = loadServerAction(renderRequest.actionId);
+        action = await loadServerAction(renderRequest.actionId);
       } catch (error) {
         // Attributed to the action rather than left to the top-level handler's `source: 'request'`: the
         // request was fine, the deployment is not. Then re-thrown, so the app's `error` page answers 500 —
@@ -662,7 +653,7 @@ async function renderPage(c: Context, loadPage: () => Promise<ServerEntry<PageCo
         // `__webpack_require__`s the module the action lives in, so the 400 that is right about a body is
         // wrong whenever the deployment is what failed. Which of the two it was is nowhere on the error, so
         // it is asked directly. See {@link cannotLoadServerActions}.
-        if (cannotLoadServerActions(formData)) {
+        if (await cannotLoadServerActions(formData)) {
           // The original error, not the probe's: this one is the fault the request actually met. Attributed
           // and re-thrown exactly as the `rsc-action` branch does, so the app's `error` page answers 500 and
           // the operator is paged instead of the caller being blamed.
@@ -1100,16 +1091,16 @@ function buildApp(): Hono {
  * decline to evaluate in a build — one that reads a secret out of the environment, say — and a build is not
  * where that gets decided.
  */
-function checkServerActions(): void {
-  const entries = Object.entries(__rspack_rsc_manifest__.serverManifest).filter(([, entry]) => (entry.chunks?.length ?? 0) === 0);
+async function checkServerActions(): Promise<void> {
+  const entries = rsc.loadableServerActions();
   /** Action ids by the module that holds them, in manifest order. */
   const byModule = new Map<string, string[]>();
-  for (const [actionId, entry] of entries) byModule.set(entry.id, [...(byModule.get(entry.id) ?? []), actionId]);
+  for (const [actionId, moduleId] of entries) byModule.set(moduleId, [...(byModule.get(moduleId) ?? []), actionId]);
 
   for (const actionIds of byModule.values()) {
     for (const actionId of actionIds) {
       try {
-        loadServerAction(actionId);
+        await loadServerAction(actionId);
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
         console.warn(
@@ -1133,7 +1124,7 @@ function checkServerActions(): void {
  */
 export const checkAppModules = async (): Promise<void> => {
   await assertRouteModules(routeConfig);
-  checkServerActions();
+  await checkServerActions();
 };
 
 export const app = buildApp();
