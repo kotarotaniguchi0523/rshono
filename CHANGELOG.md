@@ -11,6 +11,23 @@ those.
 
 ## Unreleased
 
+### Added
+
+- **`@rshono/core/vite` — an experimental Vite build, beside the Rspack one.** `rshono()` in a `vite.config.ts`
+  compiles the same runtime with [`@vitejs/plugin-rsc`](https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-rsc)
+  and the official `react-server-dom-webpack`, served by `vite dev` and `vite preview`. Pages, the `RSC: 1`
+  flight variant, the Hono sub-app, endpoints, server functions (called and posted), streaming, `notFound()` /
+  `redirect()` and HMR work; prerendering and the deploy targets do not exist on this path yet, so
+  `render: 'static'` pages are rendered per request. **`rshono build` and `rshono dev` are unchanged and still
+  use Rspack.** This is the first step of moving the framework to Vite — what is done, what is not, and what
+  comes next is in [`packages/core/docs/vite-migration.md`](packages/core/docs/vite-migration.md).
+
+### Changed
+
+- **The runtime reaches its bundler through `@rshono/bundler/*`.** Internal: the three runtime entries no
+  longer import `react-server-dom-rspack` or read Rspack's manifest directly, so the same code can be compiled
+  by either bundler. No behaviour change under Rspack — the Node and browser suites pass unmodified.
+
 ## 1.0.0-rc.29
 
 ### Changed

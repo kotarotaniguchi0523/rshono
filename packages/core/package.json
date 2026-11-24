@@ -35,6 +35,10 @@
       "types": "./dist/runtime/client.d.ts",
       "import": "./dist/runtime/client.js"
     },
+    "./vite": {
+      "types": "./dist/vite/index.d.ts",
+      "import": "./dist/vite/index.js"
+    },
     "./package.json": "./package.json"
   },
   "bin": {
@@ -64,8 +68,12 @@
     "@hono/node-server": "^2.1.8",
     "@rspack/core": "2.2.8",
     "@rspack/plugin-react-refresh": "2.0.2",
+    "@vitejs/plugin-react": "6.3.0",
+    "@vitejs/plugin-rsc": "0.5.39",
     "react-refresh": "0.18.0",
-    "react-server-dom-rspack": "0.1.0"
+    "react-server-dom-rspack": "0.1.0",
+    "react-server-dom-webpack": "19.2.8",
+    "vite": "8.3.8"
   },
   "devDependencies": {
     "@playwright/test": "^1.65.1",

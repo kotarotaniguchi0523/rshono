@@ -73,7 +73,7 @@ export default tseslint.config(
   // Playwright specs are Node files whose `page.evaluate` callbacks are serialised and run in the page,
   // so browser globals are genuinely in scope for part of the file and Node globals for the rest.
   {
-    files: ['packages/core/test/browser/**'],
+    files: ['packages/core/test/browser/**', 'packages/core/test/vite.test.mjs'],
     languageOptions: { globals: { ...globals.node, ...globals.browser } },
   },
 
