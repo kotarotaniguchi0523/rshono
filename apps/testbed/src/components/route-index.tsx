@@ -116,6 +116,11 @@ const META: Record<RoutePath, RouteMeta> = {
     title: 'React standard APIs',
     description: '`cache()` within one render, `cacheSignal()` ending with it, and a component `browser()` leaves to the browser.',
   },
+  '/lazy-late': {
+    group: 'Pages & forms',
+    title: 'Lazy, late',
+    description: 'A client component that imports another chunk on a click — the import a deploy can take away.',
+  },
   '/fragment-redirect/:step': {
     group: 'Pages & forms',
     title: 'Fragment redirect',

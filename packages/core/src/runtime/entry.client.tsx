@@ -11,8 +11,16 @@
  *   scroll.ts           scroll and focus across navigations
  */
 import { hydrateRoot } from 'react-dom/client';
-import { CHUNK_RELOAD_KEY } from './chunk-recovery.js';
-import { RECOVERY_GRACE_MS, documentUrl, lateNotFoundKey, showFatal, supported } from './browser/document.js';
+import {
+  RECOVERY_GRACE_MS,
+  documentUrl,
+  isChunkFailure,
+  lateNotFoundKey,
+  showFatal,
+  spendChunkReload,
+  supported,
+  watchChunkFailures,
+} from './browser/document.js';
 import { recoverRoot, refetch, settleRenderIntent } from './browser/navigation.js';
 import { inlineResource } from './browser/page-resource.js';
 import { createAttempt, failPending } from './browser/render-attempt.js';
@@ -38,6 +46,9 @@ async function main() {
   }
 
   // The document's own payload is a resource like any other; only its abort switch is inert.
+  // Before the first payload is read: decoding it is what starts importing chunks.
+  watchChunkFailures();
+
   const resource = inlineResource();
   const payload = await resource.rootReady;
 
@@ -60,13 +71,6 @@ async function main() {
   const initial = createAttempt(resource, payload, documentUrl(), { afterCommit: restored ? () => scrollToPoint(restored) : undefined });
 
   installServerFunctions();
-  // The runtime is up, so its chunks loaded: the next one that does not gets its own reload.
-  try {
-    sessionStorage.removeItem(CHUNK_RELOAD_KEY);
-  } catch {
-    // Storage is unavailable; then the preamble never reloaded on it either.
-  }
-
   hydrateRoot(document, <BrowserRoot initial={initial} />, {
     formState: payload.formState,
     // A `redirect()` or `notFound()` raised inside a payload that was already rendering arrives here as an
@@ -75,6 +79,9 @@ async function main() {
     onCaughtError: (error, errorInfo) => {
       if (settleRenderIntent(error, resource)) return;
       console.error(error, errorInfo.componentStack ?? '');
+      // The app's boundary has a fallback up, and would keep it up for good: the chunk it is standing in for
+      // is not coming. One reload, if this window still has one.
+      if (isChunkFailure(error) && spendChunkReload()) recoverRoot();
     },
     onUncaughtError: (error, errorInfo) => {
       // React unmounts the root on an uncaught error, so whatever happens next needs a document to land in:
@@ -92,7 +99,12 @@ async function main() {
       // load, which the server answers with the app's error page. The panel is for when there is no such
       // recovery (the first render, an action reply) and, after a grace period, for when the load never came.
       const failed = failPending(error);
-      if (failed?.recoversByLoad) setTimeout(() => showFatal(error, errorInfo.componentStack), RECOVERY_GRACE_MS);
+      if (failed?.recoversByLoad) {
+        // That load is the reload for a missing chunk too, so it is counted as one: the document it brings
+        // back, if it has the same hole, shows the failure instead of asking again.
+        if (isChunkFailure(error)) spendChunkReload({ force: true });
+        setTimeout(() => showFatal(error, errorInfo.componentStack), RECOVERY_GRACE_MS);
+      } else if (isChunkFailure(error) && spendChunkReload()) recoverRoot();
       else showFatal(error, errorInfo.componentStack);
     },
   });

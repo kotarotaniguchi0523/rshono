@@ -2647,14 +2647,15 @@ describe('build id', () => {
 
 describe('chunk recovery preamble', async () => {
   const { runInNewContext } = await import('node:vm');
-  const { CHUNK_RELOAD_KEY, chunkRecoveryPreamble } = await import('../dist/runtime/chunk-recovery.js');
+  const { CHUNK_RELOAD_KEY, CHUNK_RELOAD_WINDOW_MS, RUNTIME_UP, chunkRecoveryPreamble } = await import('../dist/runtime/chunk-recovery.js');
   const ENTRY = '/_static/assets/entry-abc123.js';
+  const T0 = 1_800_000_000_000;
 
   /** A window just large enough for the preamble: listeners, a session store, a ready state, a reload count. */
   function page({ readyState = 'complete', storage = 'works', entry = ENTRY } = {}) {
     const listeners = new Map();
     const store = new Map();
-    const state = { reloads: 0 };
+    const state = { reloads: 0, now: T0 };
     const sessionStorage =
       storage === 'throws'
         ? {
@@ -2671,25 +2672,69 @@ describe('chunk recovery preamble', async () => {
       sessionStorage,
       document: { readyState },
       location: { reload: () => void state.reloads++ },
+      Date: { now: () => state.now },
     };
+    sandbox.self = sandbox;
     runInNewContext(chunkRecoveryPreamble(entry), sandbox);
     const fire = (type, event = {}) => (listeners.get(type) ?? []).map(({ fn }) => fn(event));
     return { fire, state, store, listeners, sandbox };
   }
 
-  test('a failed preload reloads the page once, and records that it did', () => {
+  test('a failed preload reloads the page once, and records when', () => {
     const p = page();
     p.fire('vite:preloadError');
     assert.equal(p.state.reloads, 1);
-    assert.equal(p.store.get(CHUNK_RELOAD_KEY), '1');
+    assert.equal(p.store.get(CHUNK_RELOAD_KEY), String(T0));
   });
 
-  test('a second failure in the same session does not reload again', () => {
+  test('a second failure inside the window does not reload again', () => {
     const p = page();
     p.fire('vite:preloadError');
+    p.state.now = T0 + 1000;
     p.fire('vite:preloadError');
     p.fire('error', { target: { tagName: 'SCRIPT', src: `http://example.test${ENTRY}` } });
-    assert.equal(p.state.reloads, 1, 'the key is the count: one reload per session until a boot releases it');
+    p.state.now = T0 + CHUNK_RELOAD_WINDOW_MS - 1;
+    p.fire('vite:preloadError');
+    assert.equal(p.state.reloads, 1, 'what a reload did not fix, another will not');
+    assert.equal(p.store.get(CHUNK_RELOAD_KEY), String(T0), 'and a refused reload does not push the window out');
+  });
+
+  test('a failure after the window is a new incident, with a reload of its own', () => {
+    const p = page();
+    p.fire('vite:preloadError');
+    p.state.now = T0 + CHUNK_RELOAD_WINDOW_MS;
+    p.fire('vite:preloadError');
+    assert.equal(p.state.reloads, 2);
+    assert.equal(p.store.get(CHUNK_RELOAD_KEY), String(T0 + CHUNK_RELOAD_WINDOW_MS));
+  });
+
+  test('the count survives the reload: the document that comes back reads the same store', () => {
+    const first = page();
+    first.fire('vite:preloadError');
+    // The reloaded document: a new script, the same session storage, a moment later.
+    const second = page();
+    second.store.set(CHUNK_RELOAD_KEY, first.store.get(CHUNK_RELOAD_KEY));
+    second.state.now = T0 + 800;
+    second.fire('error', { target: { tagName: 'SCRIPT', src: `http://example.test${ENTRY}` } });
+    assert.equal(second.state.reloads, 0, 'this is the loop the count exists to stop');
+  });
+
+  test('a value that is not a time counts as no reload on record', () => {
+    for (const junk of ['1', 'true', '', 'NaN']) {
+      const p = page();
+      p.store.set(CHUNK_RELOAD_KEY, junk);
+      p.fire('vite:preloadError');
+      assert.equal(p.state.reloads, 1, `${JSON.stringify(junk)} does not hold the reload back`);
+    }
+  });
+
+  test('once the runtime says it is up, the preamble reloads for nothing', () => {
+    const p = page();
+    p.sandbox[RUNTIME_UP] = true;
+    p.fire('vite:preloadError');
+    p.fire('error', { target: { tagName: 'SCRIPT', src: `http://example.test${ENTRY}` } });
+    assert.equal(p.state.reloads, 0, 'a failed import now has an owner, and only the runtime can tell which');
+    assert.equal(p.store.size, 0);
   });
 
   test('the entry script failing to load is the same failure', () => {
@@ -2726,7 +2771,7 @@ describe('chunk recovery preamble', async () => {
     const p = page({ readyState: 'loading' });
     p.fire('vite:preloadError');
     assert.equal(p.state.reloads, 0, 'what has streamed so far is still a readable page');
-    assert.equal(p.store.get(CHUNK_RELOAD_KEY), '1', 'the reload is already spent, so a second failure cannot queue another');
+    assert.equal(p.store.get(CHUNK_RELOAD_KEY), String(T0), 'the reload is already spent, so a second failure cannot queue another');
     p.fire('DOMContentLoaded');
     assert.equal(p.state.reloads, 1);
   });
@@ -2758,7 +2803,7 @@ describe('chunk recovery preamble', async () => {
 });
 
 describe('browser document helpers', async () => {
-  const { CHUNK_RELOAD_KEY } = await import('../dist/runtime/chunk-recovery.js');
+  const { CHUNK_RELOAD_KEY, CHUNK_RELOAD_WINDOW_MS, RUNTIME_UP } = await import('../dist/runtime/chunk-recovery.js');
   const doc = await import('../dist/runtime/browser/document.js');
 
   /** The three globals these helpers read, for one test. */
@@ -2832,17 +2877,68 @@ describe('browser document helpers', async () => {
     });
   });
 
-  test('a reload stands down while the chunk preamble’s own reload is still unredeemed', () => {
-    withBrowser({ storage: new Map([[CHUNK_RELOAD_KEY, '1']]) }, ({ calls }) => {
+  test('a reload is a reload, whatever the chunk count says', () => {
+    // The count bounds reloads made *for a missing chunk*. A build mismatch, or the button on the failure
+    // panel, has its own reason and must not be held back by it.
+    withBrowser({ storage: new Map([[CHUNK_RELOAD_KEY, String(Date.now())]]) }, ({ calls }) => {
       doc.loadDocument();
-      assert.deepEqual(calls, [], 'a second reload for the same missing file is the loop the count prevents');
-      // A navigation somewhere else is not that reload.
-      doc.loadDocument('/elsewhere');
-      assert.deepEqual(
-        calls.map(([name, href]) => [name, href]),
-        [['navigation.navigate', '/elsewhere']],
-      );
+      doc.reloadForBuild('build-z');
+      assert.equal(calls.filter(([name]) => name === 'navigation.reload').length, 2);
     });
+  });
+
+  test('a chunk reload is taken once per window', () => {
+    withBrowser({}, ({ storage }) => {
+      assert.equal(doc.spendChunkReload(), true);
+      const taken = Number(storage.get(CHUNK_RELOAD_KEY));
+      assert.ok(Date.now() - taken < 1000, 'recorded with its time');
+      assert.equal(doc.spendChunkReload(), false);
+      // Half a minute and more ago: a different incident.
+      storage.set(CHUNK_RELOAD_KEY, String(Date.now() - CHUNK_RELOAD_WINDOW_MS - 1));
+      assert.equal(doc.spendChunkReload(), true);
+    });
+  });
+
+  test('a reload somebody else is making for the same chunk is recorded without asking', () => {
+    withBrowser({ storage: new Map([[CHUNK_RELOAD_KEY, String(Date.now() - 5000)]]) }, ({ storage }) => {
+      assert.equal(doc.spendChunkReload(), false, 'inside the window');
+      assert.equal(doc.spendChunkReload({ force: true }), true);
+      assert.ok(Date.now() - Number(storage.get(CHUNK_RELOAD_KEY)) < 1000, 'the window now starts at that reload');
+    });
+  });
+
+  test('with no storage to count in, no chunk reload is ever taken', () => {
+    withBrowser({ throws: true }, () => {
+      assert.equal(doc.spendChunkReload(), false);
+      assert.equal(doc.spendChunkReload({ force: true }), false);
+    });
+  });
+
+  test('the runtime announces itself, and from then on remembers which errors were chunks', () => {
+    const listeners = [];
+    const saved = { addEventListener: globalThis.addEventListener, up: globalThis[RUNTIME_UP] };
+    globalThis.addEventListener = (type, listener) => void listeners.push([type, listener]);
+    try {
+      doc.watchChunkFailures();
+      assert.equal(globalThis[RUNTIME_UP], true, 'which is what stands the preamble down');
+      assert.deepEqual(
+        listeners.map(([type]) => type),
+        ['vite:preloadError'],
+      );
+      const failed = new TypeError('Failed to fetch dynamically imported module');
+      const other = new TypeError('Failed to fetch dynamically imported module');
+      assert.equal(doc.isChunkFailure(failed), false, 'not until Vite says so');
+      listeners[0][1]({ payload: failed });
+      assert.equal(doc.isChunkFailure(failed), true);
+      assert.equal(doc.isChunkFailure(other), false, 'by identity: the same message from elsewhere is not it');
+      // Whatever else arrives on the event is ignored rather than thrown on.
+      for (const payload of [undefined, null, 'a string', 7]) listeners[0][1]({ payload });
+      for (const value of [undefined, null, 'a string', 7]) assert.equal(doc.isChunkFailure(value), false);
+    } finally {
+      globalThis.addEventListener = saved.addEventListener;
+      if (saved.up === undefined) delete globalThis[RUNTIME_UP];
+      else globalThis[RUNTIME_UP] = saved.up;
+    }
   });
 
   test('loadDocument navigates with the history mode it was asked for', () => {

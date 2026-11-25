@@ -209,7 +209,9 @@ test.describe('what is not fetched ahead', () => {
     expect(await intentOn(page, '/transition-probe?visit=ahead')).toEqual(['/transition-probe?visit=ahead']);
   });
 
-  test('router.prefetch() takes the caller at its word about the page on screen, and still refuses what cannot be soft-navigated', async ({ page }) => {
+  test('router.prefetch() takes the caller at its word about the page on screen, and still refuses what cannot be soft-navigated', async ({
+    page,
+  }) => {
     const requests = [];
     page.on('request', (request) => {
       if (request.method() === 'GET' && request.headers().rsc === '1') requests.push(new URL(request.url()).pathname);

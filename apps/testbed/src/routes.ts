@@ -159,6 +159,11 @@ export const routes = defineRoutes({
       component: () => import('./components/react-standard'),
     },
     {
+      // Imports a chunk on a click, long after hydration. See chunk-recovery.spec.mjs.
+      path: '/lazy-late',
+      component: () => import('./components/lazy-late'),
+    },
+    {
       // Redirects that add, change or drop the fragment. See navigation-redirects.spec.mjs.
       path: '/fragment-redirect/:step',
       component: () => import('./components/fragment-redirect'),

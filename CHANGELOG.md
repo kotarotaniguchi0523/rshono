@@ -78,12 +78,22 @@ those.
 - **`build.chunkImportMap` is refused at build time.** Vite's experimental option imports chunks by names
   that only an import map in the document resolves, and rsvhono does not emit one — the build used to
   succeed and no page booted (client environment), or the server bundle failed to load (everywhere).
-- **A document whose scripts will not load reloads itself, once.** An inline preamble ahead of the entry
-  chunk watches for the entry failing to load and for Vite's `vite:preloadError` — a client component's
-  chunk that is gone, typically after a deploy — and reloads the document so the server can hand out a page
-  that names the files it has. Once per tab until a boot succeeds; never while the page is being left; not at
-  all where `sessionStorage` is unusable. It carries the CSP nonce like every other inline script, and is not
-  emitted under `rsvhono dev`. The entry is still React's `bootstrapModules`, so its `modulepreload` is kept.
+- **A document whose scripts will not load reloads itself, once.** Two halves, for two moments. Before the
+  runtime is up, an inline preamble ahead of the entry chunk watches for the entry failing to load and for
+  Vite's `vite:preloadError`, and reloads the document so the server can hand out a page that names the files
+  it has. Once the runtime is up the preamble stands down and the runtime reloads only when React reports a
+  chunk's error _from a render_ — the page on screen, inside an app error boundary or not — because a failed
+  import on its own does not say whose it was:
+  - a payload fetched ahead (`data-prefetch`) that names a missing chunk does nothing to the page on screen
+    (it used to reload it);
+  - a navigation whose page needs a missing chunk recovers by one document load of its destination, and the
+    document that comes back is not reloaded again for the same hole;
+  - a build mismatch reloads on its own count, and is no longer held back by a chunk reload moments before.
+
+  One chunk reload per 30 seconds per tab, recorded as a time in `sessionStorage` and never released early:
+  a working boot does not prove the lazily imported chunks are there. Never while the page is being left;
+  not at all where `sessionStorage` is unusable. The preamble carries the CSP nonce and is not emitted under
+  `rsvhono dev`.
 
 - **`react` in `rsvhono.config.ts`** is passed to the `@vitejs/plugin-react` instance the framework
   registers — `react: { compiler: true }` turns on the React Compiler (Oxc, client code only; needs
@@ -93,7 +103,13 @@ those.
   hover, focus or touch; the click that follows uses that fetch instead of making another. The payload is
   held outside any navigation — the URL does not move, `router.pending` stays false, and a redirect in it is
   not followed unless a navigation takes it over. At most four are kept, for thirty seconds, and any server
-  function throws them away. Still an ordinary `<a>`.
+  function throws them away — at the start of the call and again at its end, whether or not its reply
+  carries a page. Still an ordinary `<a>`, and only fetched ahead when a click on it would soft-navigate:
+  not for `data-native`, `download`, another `target`, a file, another origin, or a jump within the page
+  on screen. `router.prefetch()` refuses only what cannot be soft-navigated.
+- **A redirected navigation scrolls to the fragment of the URL it ends on** — added, changed or dropped by
+  the redirect — instead of the one it started with. After a late redirect followed as a document load, the
+  new document no longer restores the scroll offset of the entry it replaced.
 
 - **In development, the Performance panel has an `rsvhono` track** beside React's: when each payload's root
   arrived and its stream ended, and how long each render took from being handed to React to committing. Not

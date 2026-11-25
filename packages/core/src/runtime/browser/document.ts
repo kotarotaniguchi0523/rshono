@@ -2,7 +2,7 @@
  * The document itself: what URL it is, how to leave it for a new one, and what to paint when it cannot go on.
  * Nothing here knows about payloads or React.
  */
-import { CHUNK_RELOAD_KEY } from '../chunk-recovery.js';
+import { CHUNK_RELOAD_KEY, CHUNK_RELOAD_WINDOW_MS, RUNTIME_UP } from '../chunk-recovery.js';
 export const isDev = process.env.NODE_ENV === 'development';
 
 /**
@@ -167,11 +167,6 @@ export const documentNavigation = Symbol('rsvhono:document-navigation');
  * browser refuses cannot make the next one a full load.
  */
 export function loadDocument(href?: string, { replace = false }: { replace?: boolean } = {}): void {
-  // A chunk would not load, and the document's own preamble has already spent its one reload on that
-  // (`chunk-recovery.ts`). The failed import then surfaces here too, as a render that died — and a second
-  // reload for the same missing file is the loop the preamble's count exists to prevent. The key is released
-  // by a boot that works, so this only holds while nothing has.
-  if (href === undefined && chunkReloadSpent()) return;
   try {
     settle(
       href === undefined
@@ -201,10 +196,37 @@ export function loadDocument(href?: string, { replace = false }: { replace?: boo
  */
 export const RECOVERY_GRACE_MS = 2000;
 
-/** Whether the chunk-recovery preamble has reloaded this tab and no boot has succeeded since. */
-function chunkReloadSpent(): boolean {
+// ── Chunks that will not load, once the runtime is up (`chunk-recovery.ts` has the whole account) ─────────
+
+/** The errors Vite's preload helper announced: each is the very object the failed `import()` rejects with. */
+const chunkFailures = new WeakSet<object>();
+
+/**
+ * Takes over from the document's preamble. From here a failed import is only *remembered*; nothing reloads
+ * until React reports that error from a render, which is what tells a chunk the screen needed from one a
+ * payload fetched ahead merely named.
+ */
+export function watchChunkFailures(): void {
+  (globalThis as unknown as Record<string, unknown>)[RUNTIME_UP] = true;
+  addEventListener('vite:preloadError', (event) => {
+    const { payload } = event as Event & { payload?: unknown };
+    if (typeof payload === 'object' && payload !== null) chunkFailures.add(payload);
+  });
+}
+
+/** Whether a render died of a chunk that would not load, rather than of anything the app did. */
+export const isChunkFailure = (error: unknown): boolean => typeof error === 'object' && error !== null && chunkFailures.has(error);
+
+/**
+ * Takes the one reload a chunk failure is good for in this window, and says whether there was one to take.
+ * `force` records a reload somebody else is about to make for the same failure — a navigation recovering by
+ * its own document load — so the document that comes back does not answer the same hole with another.
+ */
+export function spendChunkReload({ force = false }: { force?: boolean } = {}): boolean {
   try {
-    return sessionStorage.getItem(CHUNK_RELOAD_KEY) !== null;
+    if (!force && Date.now() - Number(sessionStorage.getItem(CHUNK_RELOAD_KEY)) < CHUNK_RELOAD_WINDOW_MS) return false;
+    sessionStorage.setItem(CHUNK_RELOAD_KEY, String(Date.now()));
+    return true;
   } catch {
     return false;
   }
