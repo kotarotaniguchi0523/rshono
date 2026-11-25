@@ -130,4 +130,73 @@ test.describe("setServerFunctionRefresh('explicit')", () => {
     await openRace(page, at('/action-race'));
     expect(await page.evaluate(() => window.__streamed('value'))).toEqual({ now: 'value', later: 'value-later' });
   });
+  /*
+   * What was fetched ahead of a navigation is a rendering from before the function ran. A reply that carries
+   * no page says nothing about the screen — and that is all it says: it is still a mutation, and a payload
+   * fetched before it is still stale. Throwing those away is a separate matter from re-rendering the page.
+   */
+  const prefetchLink = (page, href) =>
+    page.evaluate((to) => {
+      const anchor = Object.assign(document.createElement('a'), { href: to });
+      anchor.dataset.prefetch = '';
+      document.body.append(anchor);
+      anchor.dispatchEvent(new PointerEvent('pointerenter'));
+    }, href);
+
+  test('a reply with no page still throws away what was fetched ahead', async ({ page }) => {
+    await openRace(page, at('/action-race'));
+    const gets = countPayloadGets(page, '/action-race');
+    const renders = await page.locator('[data-race-renders]').textContent();
+    const label = unique('after-prefetch');
+
+    await prefetchLink(page, '/action-race?view=ahead');
+    await expect.poll(() => gets.count).toBe(1);
+    await page.waitForTimeout(200);
+
+    expect(await page.evaluate((name) => window.__race(name, 0), label)).toBe(label);
+    // The contract of a result-only reply: this page is not rendered again, and nothing is re-read for it.
+    await page.waitForTimeout(300);
+    await expect(page.locator('[data-race-renders]')).toHaveText(renders);
+    await expect(entry(page, label)).toHaveCount(0);
+    expect(gets.count).toBe(1);
+
+    await page.evaluate(() => navigation.navigate('/action-race?view=ahead').finished);
+    await expect(entry(page, label), 'the page navigated to was rendered after the mutation').toBeVisible();
+    expect(gets.count).toBe(2);
+  });
+
+  test('a payload fetched ahead while the function was running is thrown away when it finishes', async ({ page }) => {
+    await openRace(page, at('/action-race'));
+    const gets = countPayloadGets(page, '/action-race');
+    const label = unique('during-prefetch');
+
+    // The function sleeps before it applies; the fetch ahead starts and finishes inside that sleep.
+    const call = page.evaluate((name) => window.__race(name, 600), label);
+    await page.waitForTimeout(100);
+    await prefetchLink(page, '/action-race?view=during');
+    await expect.poll(() => gets.count).toBe(1);
+    expect(await call).toBe(label);
+
+    await page.evaluate(() => navigation.navigate('/action-race?view=during').finished);
+    await expect(entry(page, label)).toBeVisible();
+    expect(gets.count).toBe(2);
+  });
+
+  test('a navigation that starts while a function is running does not use a payload from before the call', async ({ page }) => {
+    await openRace(page, at('/action-race'));
+    const gets = countPayloadGets(page, '/action-race');
+    const label = unique('nav-during');
+
+    await prefetchLink(page, '/action-race?view=before');
+    await expect.poll(() => gets.count).toBe(1);
+    await page.waitForTimeout(200);
+
+    const call = page.evaluate((name) => window.__race(name, 300), label);
+    await page.waitForTimeout(50);
+    await page.evaluate(() => navigation.navigate('/action-race?view=before').finished);
+    expect(gets.count, 'it fetched its own, after the call began').toBe(2);
+    await expect(page).toHaveURL(at('/action-race?view=before'));
+    // The caller still gets its value: losing the screen is not losing the reply.
+    expect(await call).toBe(label);
+  });
 });

@@ -13,7 +13,7 @@ import { parseControlIntent } from '../control.js';
 import { createRscRequest } from '../request.js';
 import { documentUrl, reloadForBuild } from './document.js';
 import { followRootIntent, mutationCompleted, navigating, navigationIntent, push, revalidate } from './navigation.js';
-import { requestResource } from './page-resource.js';
+import { discardPrefetched, requestResource } from './page-resource.js';
 import { createAttempt, schedule } from './render-attempt.js';
 
 let lastCall = 0;
@@ -37,6 +37,12 @@ export function installServerFunctions(): void {
     const intent = navigationIntent();
     const call = ++lastCall;
     if (inFlight++ > 0) overlapped = true;
+    // A payload fetched ahead of a navigation is a rendering from before this call. That is true whatever
+    // the reply turns out to carry — a reply with no page says the *screen* needs nothing, not that nothing
+    // changed — so it is dealt with here, apart from everything below about re-rendering. At both ends of the
+    // call: a navigation that starts while it runs fetches its own payload, and one fetched during the run,
+    // which may have been rendered either side of the mutation, does not outlive it.
+    discardPrefetched();
     /** Whether this reply may change the screen: no navigation has been asked for since, and none is under way. */
     const ownsScreen = () => navigationIntent() === intent && !navigating();
 
@@ -95,6 +101,7 @@ export function installServerFunctions(): void {
       if (!result.ok) throw result.error;
       return result.value;
     } finally {
+      discardPrefetched();
       if (--inFlight === 0) {
         if (overlapped && pagesArrived) revalidate();
         overlapped = pagesArrived = false;

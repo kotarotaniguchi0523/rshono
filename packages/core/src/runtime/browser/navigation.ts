@@ -354,8 +354,6 @@ export function revalidate(): void {
  * its result must not be the last thing shown.
  */
 export function mutationCompleted(): void {
-  // Anything fetched ahead was rendered before this mutation, or may have been.
-  discardPrefetched();
   if (converging) stale++;
 }
 
