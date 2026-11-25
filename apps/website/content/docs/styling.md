@@ -17,11 +17,11 @@ fetched after hydration. `*.module.css` gets a class map.
 
 Not as a dependency, not as an optional one. A plain stylesheet needs nothing — but `@import 'tailwindcss'`,
 `@theme` and `@apply` are not plain CSS. A stylesheet that needs a plugin brings the plugin itself: add a
-`postcss.config.mjs` to the project and Vite runs it, with nothing to add to `rshono.config.ts`.
+`postcss.config.mjs` to the project and Vite runs it, with nothing to add to `rsvhono.config.ts`.
 
 ## Tailwind
 
-Three things, and `npx @rshono/create@latest --tailwind` writes all of them:
+Three things, and `npx @rsvhono/create@latest --tailwind` writes all of them:
 
 ```bash
 npm i -D tailwindcss @tailwindcss/postcss postcss

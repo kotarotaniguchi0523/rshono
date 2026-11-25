@@ -7,7 +7,7 @@ the parts that will otherwise cost you an afternoon.
 
 ```bash
 pnpm install
-pnpm --filter @rshono/core build   # the apps import dist/, so nothing else works until this has run
+pnpm --filter @rsvhono/core build   # the apps import dist/, so nothing else works until this has run
 ```
 
 Node **≥ 22.18** and pnpm **11** (the version is pinned in `packageManager`; Corepack will pick it up).
@@ -16,34 +16,34 @@ Node **≥ 22.18** and pnpm **11** (the version is pinned in `packageManager`; C
 
 | Path                  | What it is                                              |
 | --------------------- | ------------------------------------------------------- |
-| `packages/core`       | the framework, and the `rshono` CLI                     |
+| `packages/core`       | the framework, and the `rsvhono` CLI                    |
 | `packages/create`     | the scaffolder                                          |
-| `packages/benchmarks` | rshono vs Next.js vs TanStack Start                     |
-| `apps/website`        | rshono.com, built with rshono                           |
+| `packages/benchmarks` | rsvhono vs Next.js vs TanStack Start                    |
+| `apps/website`        | rshono.com, built with rsvhono                          |
 | `apps/testbed`        | a deliberately over-configured app the e2e suite drives |
 
 The fixture apps under `packages/core/test/fixtures/*` are real workspace members, so they resolve
-`@rshono/core` through `node_modules` exactly the way an installed app does — which is half of what they are
+`@rsvhono/core` through `node_modules` exactly the way an installed app does — which is half of what they are
 there to check.
 
 ## Things that will surprise you
 
 - **Two TypeScripts.** `packages/core` builds with TypeScript 7; the root pins 6 because
   `typescript-eslint` accepts nothing above `<6.1.0`. So **ESLint lints with TS 6 and the build compiles with
-  TS 7**, and `eslint --fix` can produce code the build then rejects. Always run `pnpm --filter @rshono/core
+  TS 7**, and `eslint --fix` can produce code the build then rejects. Always run `pnpm --filter @rsvhono/core
 typecheck` after `pnpm lint:fix`.
 - **`react`, `react-dom` and `react-server-dom-webpack` are pinned exactly and to the same version, in
   `pnpm-workspace.yaml` overrides as well as in the manifests; `vite` and `@vitejs/plugin-rsc` are pinned
-  exactly in `@rshono/core`.** RSC internals are coupled across the three React packages; a
+  exactly in `@rsvhono/core`.** RSC internals are coupled across the three React packages; a
   split resolution fails inside minified React at render time. Don't bump them casually — a bump is a
   release, and the whole suite is the check. Move the manifests, the overrides and the lockfile in one commit:
   a manifest pin is what a consumer resolves and an override is what this repo resolves, so drifting them
   makes the suite green against a resolution nobody can install. `pnpm check:pins` is what holds them
   together, and it runs in CI and again before a release.
 - **The apps import the framework through its published `exports`, which point at `dist/`.** A source change
-  is invisible to them until `pnpm --filter @rshono/core build` has run. `pnpm dev` runs `tsc --watch` for
+  is invisible to them until `pnpm --filter @rsvhono/core build` has run. `pnpm dev` runs `tsc --watch` for
   exactly this.
-- **`rshono dev` and `rshono build` write to different directories** (`.rshono/` and `dist/`) so that running
+- **`rsvhono dev` and `rsvhono build` write to different directories** (`.rsvhono/` and `dist/`) so that running
   one cannot delete the chunks the other is serving. If a dev server seems to be serving stale output, check
   that a build did not just run in another terminal.
 - **Comments carry the reasoning.** Most non-obvious lines in this codebase have a comment saying why, and
@@ -54,12 +54,12 @@ typecheck` after `pnpm lint:fix`.
 ```bash
 pnpm check:pins                        # the exact pins agree: manifests, overrides, lockfile, node_modules
 pnpm lint                              # one ESLint config, every package
-pnpm --filter @rshono/core typecheck
-pnpm --filter @rshono/core test        # unit + minimal-app + postcss + dev + production e2e + deploy targets
-pnpm --filter @rshono/core test:coverage # …the same, against a coverage floor over dist/**
-pnpm --filter @rshono/core test:browser  # Playwright: hydration, soft nav, actions, boundaries
-pnpm --filter @rshono/create test      # every combination of scaffolder options, asserted in memory
-CREATE_RSHONO_E2E=1 pnpm --filter @rshono/create test   # …and really installed and built
+pnpm --filter @rsvhono/core typecheck
+pnpm --filter @rsvhono/core test        # unit + minimal-app + postcss + dev + production e2e + deploy targets
+pnpm --filter @rsvhono/core test:coverage # …the same, against a coverage floor over dist/**
+pnpm --filter @rsvhono/core test:browser  # Playwright: hydration, soft nav, actions, boundaries
+pnpm --filter @rsvhono/create test      # every combination of scaffolder options, asserted in memory
+CREATE_RSVHONO_E2E=1 pnpm --filter @rsvhono/create test   # …and really installed and built
 ```
 
 `test:coverage` is `test` with a floor: it fails when line, branch or function coverage of `dist/**` drops

@@ -14,7 +14,7 @@ export interface RenderHTMLOptions {
    * Called when SSR fails before the shell is sent with an error nothing else has seen, just before
    * {@link renderHTML} re-throws. Reporting is the RSC layer's job: this module is compiled into the SSR
    * layer, which gets its own instance of every module it imports, so a handler registered through
-   * `@rshono/core/server` is not reachable from here.
+   * `@rsvhono/core/server` is not reachable from here.
    *
    * **A defensive floor, and expected to stay quiet.** Every failure React announces reaches
    * {@link RenderHTMLOptions.onError} first, and both of the shapes that then abort the shell are already

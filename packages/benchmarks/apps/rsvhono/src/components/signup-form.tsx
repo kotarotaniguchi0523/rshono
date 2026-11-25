@@ -6,7 +6,7 @@ import { signup, type SignupResult } from '../actions';
 /**
  * Calls the server function directly from client code and renders what came back.
  *
- * Deliberately not `useActionState` / `<form action={fn}>`, which rshono and Next both support: TanStack Start
+ * Deliberately not `useActionState` / `<form action={fn}>`, which rsvhono and Next both support: TanStack Start
  * has no equivalent, and a benchmark comparing three client bundles needs the same component in all three.
  */
 export function SignupForm() {

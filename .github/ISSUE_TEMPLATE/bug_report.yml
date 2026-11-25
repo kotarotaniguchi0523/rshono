@@ -20,9 +20,9 @@ body:
     attributes:
       label: Reproduction
       description: >
-        A link to the smallest app that shows it — `npx @rshono/create@latest` plus your change. Nothing helps
+        A link to the smallest app that shows it — `npx @rsvhono/create@latest` plus your change. Nothing helps
         more; an issue without one may sit until someone can guess their way to it.
-      placeholder: https://github.com/you/rshono-bug
+      placeholder: https://github.com/you/rsvhono-bug
 
   - type: dropdown
     id: command
@@ -30,11 +30,11 @@ body:
       label: Where it happens
       multiple: true
       options:
-        - rshono dev
-        - rshono build
-        - rshono start
+        - rsvhono dev
+        - rsvhono build
+        - rsvhono start
         - a deployed app
-        - npx @rshono/create
+        - npx @rsvhono/create
     validations:
       required: true
 
@@ -42,7 +42,7 @@ body:
     id: deploy
     attributes:
       label: Deploy target
-      description: The `deploy` in `rshono.config.ts`. Several boundaries are implemented per platform, so this often decides the answer.
+      description: The `deploy` in `rsvhono.config.ts`. Several boundaries are implemented per platform, so this often decides the answer.
       options:
         - node (the default)
         - cloudflare
@@ -55,8 +55,8 @@ body:
     id: versions
     attributes:
       label: Versions
-      description: Output of `npx rshono --version`, plus `node --version` and your OS.
-      placeholder: rshono 1.0.0-rc.13, node v22.18.0, macOS 15
+      description: Output of `npx rsvhono --version`, plus `node --version` and your OS.
+      placeholder: rsvhono 1.0.0-rc.13, node v22.18.0, macOS 15
     validations:
       required: true
 
@@ -65,5 +65,5 @@ body:
     attributes:
       label: Before filing
       options:
-        - label: I am on the latest `@rshono/core`
+        - label: I am on the latest `@rsvhono/core`
         - label: '`react` and `react-dom` are installed at the same version (the build says so if not)'

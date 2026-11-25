@@ -3,7 +3,7 @@ import { SignupForm } from './signup-form';
 
 export default function Signup() {
   return (
-    <Layout title="Sign Up — rshono">
+    <Layout title="Sign Up — rsvhono">
       <div className="page">
         <h1>Sign Up</h1>
         <p className="description">

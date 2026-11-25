@@ -13,9 +13,9 @@ for (const method of ['replace', 'push']) {
     // Installed before hydration: a mount-time redirect may finish before page.goto returns, so the
     // first document's identity must survive outside the window being checked at the destination.
     await page.addInitScript(() => {
-      window.__rshonoDocumentId = crypto.randomUUID();
+      window.__rsvhonoDocumentId = crypto.randomUUID();
       if (!sessionStorage.getItem('mount-navigation:first-document')) {
-        sessionStorage.setItem('mount-navigation:first-document', window.__rshonoDocumentId);
+        sessionStorage.setItem('mount-navigation:first-document', window.__rsvhonoDocumentId);
       }
     });
 
@@ -23,7 +23,7 @@ for (const method of ['replace', 'push']) {
     await expect(page).toHaveURL('/users');
     await expect(page.getByRole('heading', { name: 'Users', exact: true })).toBeVisible();
 
-    expect(await page.evaluate(() => window.__rshonoDocumentId)).toBe(
+    expect(await page.evaluate(() => window.__rsvhonoDocumentId)).toBe(
       await page.evaluate(() => sessionStorage.getItem('mount-navigation:first-document')),
     );
     expect(documents.map((url) => new URL(url).pathname)).toEqual(['/mount-navigation']);

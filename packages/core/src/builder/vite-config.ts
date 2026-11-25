@@ -1,8 +1,8 @@
 /**
- * The Vite config behind `rshono build` and `rshono dev`: the three runtime entries compiled by
+ * The Vite config behind `rsvhono build` and `rsvhono dev`: the three runtime entries compiled by
  * `@vitejs/plugin-rsc` into its `rsc`, `ssr` and `client` environments, laid out as
  *
- *   dist/server/        the RSC environment — `main.mjs` is the entry `rshono start` and every platform loads
+ *   dist/server/        the RSC environment — `main.mjs` is the entry `rsvhono start` and every platform loads
  *   dist/server/ssr/    the SSR environment, imported by the RSC one
  *   dist/static/        the client environment, served at `/_static/`
  */
@@ -22,7 +22,7 @@ import {
   type Plugin,
   type ResolvedConfig,
 } from 'vite';
-import type { RshonoConfig } from '../config.js';
+import type { RsvhonoConfig } from '../config.js';
 import type { DeployPreset } from '../deploy/presets.js';
 import { PAGE_MARK } from '../runtime/validate-entries.js';
 import { resolveServerConfig, type ServerConfig } from '../server/server-config.js';
@@ -34,19 +34,19 @@ import { checkReactVersions } from './react-versions.js';
 // This file lives in `dist/builder/`, so everything below is the *built* framework.
 const FRAMEWORK_DIST = join(import.meta.dirname, '..');
 
-const PACKAGE_NAME = '@rshono/core';
+const PACKAGE_NAME = '@rsvhono/core';
 
 export const BUILD_OUT_DIR = 'dist';
 /** Where the client build is served from — and, on the dev server, every module Vite serves. */
 export const STATIC_BASE = '/_static/';
 
-const SERVER_REFERENCES_ID = 'virtual:rshono/server-references';
+const SERVER_REFERENCES_ID = 'virtual:rsvhono/server-references';
 const RESOLVED_SERVER_REFERENCES_ID = '\0' + SERVER_REFERENCES_ID;
 
 export interface ViteConfigOptions {
   rootDir: string;
   isDev: boolean;
-  config: RshonoConfig;
+  config: RsvhonoConfig;
   preset: DeployPreset;
 }
 
@@ -57,9 +57,9 @@ const frameworkFile = (...segments: string[]): string => join(FRAMEWORK_DIST, ..
  * on `node:async_hooks`, three modules away from the line the author wrote.
  */
 const SERVER_ONLY: Record<string, string> = {
-  '@rshono/core/server': [
+  '@rsvhono/core/server': [
     'It is server-only by construction: `getRequestContext()` reads an AsyncLocalStorage store that exists only while a request is being handled.',
-    "In a 'use client' component, read the URL and params with `useNavigation()` from '@rshono/core/client', navigate with the `router` it returns, and take anything else as a prop from the server component that renders this one.",
+    "In a 'use client' component, read the URL and params with `useNavigation()` from '@rsvhono/core/client', navigate with the `router` it returns, and take anything else as a prop from the server component that renders this one.",
     "If this module was not meant to be a client component, the 'use client' directive at the top of it — or of a module it imports — is what put it in the browser bundle.",
   ].join('\n'),
 };
@@ -84,7 +84,7 @@ function warnAboutMissingSecurityMiddleware(srcDir: string, serverAppFile: strin
   if (!serverAppFile) {
     console.warn(
       '  ⚠ No src/server.ts — this build has no CSRF check and no request body cap. Both are Hono middleware\n' +
-        '    (`csrf()`, `bodyLimit()`); `npx @rshono/create` scaffolds a src/server.ts with them registered.',
+        '    (`csrf()`, `bodyLimit()`); `npx @rsvhono/create` scaffolds a src/server.ts with them registered.',
     );
   } else if (!mentions(srcDir, 'bodyLimit')) {
     console.warn(
@@ -99,13 +99,13 @@ function firstExisting(dir: string, names: string[]): string | undefined {
   return names.map((name) => join(dir, name)).find(existsSync);
 }
 
-/** Appended to a page module by {@link rshonoPages}. `jsx(value, props)`, never `createElement` — see there. */
+/** Appended to a page module by {@link rsvhonoPages}. `jsx(value, props)`, never `createElement` — see there. */
 const WRAP_PAGE = `
-import { jsx as __rshono_jsx, jsxs as __rshono_jsxs, Fragment as __rshono_Fragment } from "react/jsx-runtime";
-function __rshono_wrap_page__(value, name) {
+import { jsx as __rsvhono_jsx, jsxs as __rsvhono_jsxs, Fragment as __rsvhono_Fragment } from "react/jsx-runtime";
+function __rsvhono_wrap_page__(value, name) {
   if (typeof value !== "function") return value;
   function __wrapper(props) {
-    return __rshono_jsxs(__rshono_Fragment, { children: [import.meta.viteRsc.loadCss(), __rshono_jsx(value, props)] });
+    return __rsvhono_jsxs(__rsvhono_Fragment, { children: [import.meta.viteRsc.loadCss(), __rsvhono_jsx(value, props)] });
   }
   Object.defineProperty(__wrapper, "name", { value: name });
   Object.defineProperty(__wrapper, ${JSON.stringify(PAGE_MARK)}, { value: true });
@@ -124,9 +124,9 @@ function __rshono_wrap_page__(value, name) {
  * transform (`rscCssTransform.filter` in {@link createViteConfig}) and wrapped here instead, passing the props object
  * through untouched. Registered ahead of the plugin so a hand-written directive is seen before its filter runs.
  */
-function rshonoPages(pageFiles: Set<string>): Plugin {
+function rsvhonoPages(pageFiles: Set<string>): Plugin {
   return {
-    name: 'rshono:pages',
+    name: 'rsvhono:pages',
     async transform(code, id) {
       if (this.environment.name !== 'rsc') return;
       const file = id.split('?', 1)[0];
@@ -139,7 +139,7 @@ function rshonoPages(pageFiles: Set<string>): Plugin {
         pageFiles.add(file);
       }
       const { output } = transformWrapExport(code, ast, {
-        runtime: (value, name, meta) => `__rshono_wrap_page__(${value}, ${JSON.stringify(meta.defaultExportIdentifierName ?? name)})`,
+        runtime: (value, name, meta) => `__rsvhono_wrap_page__(${value}, ${JSON.stringify(meta.defaultExportIdentifierName ?? name)})`,
         filter: (name) => name === 'default',
         ignoreExportAllDeclaration: true,
       });
@@ -176,9 +176,9 @@ function resolveCssPackage(name: string, subpath: string, importer: string): str
  * then fails looking for a file of that name beside the stylesheet. Resolving it here, ahead of Vite's CSS
  * plugin, is the same answer the client environment would have given.
  */
-function rshonoCssPackageImports(): Plugin {
+function rsvhonoCssPackageImports(): Plugin {
   return {
-    name: 'rshono:css-package-imports',
+    name: 'rsvhono:css-package-imports',
     enforce: 'pre',
     transform(code, id) {
       if (this.environment.name === 'client') return;
@@ -198,10 +198,10 @@ function rshonoCssPackageImports(): Plugin {
  * dependency compiled into it. `post`, so it reads plain JavaScript and its `const process` lands after
  * every other transform has had the module.
  */
-function rshonoEnvShadow(env: Record<string, string>, nodeEnv: string, srcDir: string): Plugin {
+function rsvhonoEnvShadow(env: Record<string, string>, nodeEnv: string, srcDir: string): Plugin {
   const appSrcPrefix = srcDir + sep;
   return {
-    name: 'rshono:env-shadow',
+    name: 'rsvhono:env-shadow',
     enforce: 'post',
     transform(code, id) {
       if (this.environment.name !== 'ssr') return;
@@ -213,7 +213,7 @@ function rshonoEnvShadow(env: Record<string, string>, nodeEnv: string, srcDir: s
       // wrong and has no app secret to read.
       if (file.startsWith(appSrcPrefix) && readsGlobalProcess(code)) {
         this.warn(
-          `[rshono] ${relative(srcDir, file)} reads \`process\` through the global object. It is rendered on the server as part ` +
+          `[rsvhono] ${relative(srcDir, file)} reads \`process\` through the global object. It is rendered on the server as part ` +
             'of a client component, where `process.env` is shadowed with the `PUBLIC_`-only view — and that ' +
             'shadow is a binding, so it cannot cover `globalThis.process`. A variable read that way is the real ' +
             'one, and it ends up in the HTML. Read `process.env` directly instead.',
@@ -227,14 +227,14 @@ function rshonoEnvShadow(env: Record<string, string>, nodeEnv: string, srcDir: s
 }
 
 /** Resolves the framework's build-time specifiers, and serves the server-action allowlist. */
-function rshonoCore(aliases: ReadonlyMap<string, string>, routesFile: string, srcDir: string, pageFiles: Set<string>, rootDir: string): Plugin {
+function rsvhonoCore(aliases: ReadonlyMap<string, string>, routesFile: string, srcDir: string, pageFiles: Set<string>, rootDir: string): Plugin {
   let resolvedConfig: ResolvedConfig | undefined;
 
   return {
-    name: 'rshono',
+    name: 'rsvhono',
 
     // The plugin names its own runtime in `optimizeDeps.include`, resolvable from the project root only when
-    // the app installed it. An app installs `@rshono/core`, so each entry is reached through that instead.
+    // the app installed it. An app installs `@rsvhono/core`, so each entry is reached through that instead.
     configEnvironment(_name, config) {
       const include = config.optimizeDeps?.include;
       if (!include || existsSync(join(rootDir, 'node_modules', '@vitejs', 'plugin-rsc'))) return;
@@ -255,7 +255,7 @@ function rshonoCore(aliases: ReadonlyMap<string, string>, routesFile: string, sr
      */
     configureServer(server) {
       const environment = server.environments.rsc;
-      if (!isRunnableDevEnvironment(environment)) throw new Error('[rshono] the rsc environment cannot run modules in this process.');
+      if (!isRunnableDevEnvironment(environment)) throw new Error('[rsvhono] the rsc environment cannot run modules in this process.');
       const entry = frameworkFile('runtime', 'entry.rsc.js');
 
       const listener = getRequestListener(async (request, env) => {
@@ -291,7 +291,7 @@ function rshonoCore(aliases: ReadonlyMap<string, string>, routesFile: string, sr
       handler(source, importer) {
         if (this.environment.name === 'client' && Object.hasOwn(SERVER_ONLY, source)) {
           const where = importer ? relative(rootDir, importer.split('?', 1)[0]) : 'a module in the browser bundle';
-          this.error(`[rshono] ${where} imports '${source}', which the browser bundle cannot have.\n${SERVER_ONLY[source]}`);
+          this.error(`[rsvhono] ${where} imports '${source}', which the browser bundle cannot have.\n${SERVER_ONLY[source]}`);
         }
         if (source === SERVER_REFERENCES_ID) return RESOLVED_SERVER_REFERENCES_ID;
         return aliases.get(source);
@@ -306,7 +306,7 @@ function rshonoCore(aliases: ReadonlyMap<string, string>, routesFile: string, sr
       // The one place this reads the plugin's experimental API, and the same registry its own
       // `virtual:vite-rsc/server-references` is generated from — so the allowlist and the loader agree.
       const manager = resolvedConfig && getPluginApi(resolvedConfig)?.manager;
-      if (!manager) throw new Error('[rshono] @vitejs/plugin-rsc is not registered.');
+      if (!manager) throw new Error('[rsvhono] @vitejs/plugin-rsc is not registered.');
       const references: Record<string, string[]> = {};
       for (const meta of manager.serverReferences.metaMap.values()) references[meta.referenceKey] = [...meta.exportNames].sort();
       return `export default ${JSON.stringify(references)};`;
@@ -362,7 +362,7 @@ export function createViteConfig({ rootDir, isDev, config, preset }: ViteConfigO
 
   const routesFile = firstExisting(srcDir, ['routes.ts', 'routes.tsx']);
   if (!routesFile) {
-    throw new Error(`[rshono] src/routes.ts not found in ${rootDir} — it is the one required file.`);
+    throw new Error(`[rsvhono] src/routes.ts not found in ${rootDir} — it is the one required file.`);
   }
 
   const serverAppFile = firstExisting(srcDir, ['server.ts', 'server.tsx']);
@@ -370,13 +370,13 @@ export function createViteConfig({ rootDir, isDev, config, preset }: ViteConfigO
 
   /** Bare specifier → the file it stands for. */
   const aliases = new Map<string, string>([
-    ['@rshono/routes', routesFile],
-    ['@rshono/server-app', serverAppFile ?? frameworkFile('runtime', 'empty-server-app.js')],
+    ['@rsvhono/routes', routesFile],
+    ['@rsvhono/server-app', serverAppFile ?? frameworkFile('runtime', 'empty-server-app.js')],
     // The dev server is a Node process on this machine whatever the build will target.
-    ['@rshono/deploy', frameworkFile(isDev ? join('deploy', 'dev', 'runtime.js') : preset.runtimeModule)],
+    ['@rsvhono/deploy', frameworkFile(isDev ? join('deploy', 'dev', 'runtime.js') : preset.runtimeModule)],
   ]);
 
-  /** The app's page modules, by file. Shared: filled here and on a routes edit, wrapped by `rshonoPages`, skipped by the RSC plugin. */
+  /** The app's page modules, by file. Shared: filled here and on a routes edit, wrapped by `rsvhonoPages`, skipped by the RSC plugin. */
   const pageFiles = new Set<string>();
   scanPageFiles(routesFile, srcDir, pageFiles);
 
@@ -402,17 +402,17 @@ export function createViteConfig({ rootDir, isDev, config, preset }: ViteConfigO
     clearScreen: false,
     // Warnings and errors; the CLI prints its own progress lines.
     logLevel: 'warn',
-    define: { __RSHONO_CONFIG__: JSON.stringify(serverConfig) },
+    define: { __RSVHONO_CONFIG__: JSON.stringify(serverConfig) },
     resolve: { alias: { '@': srcDir } },
     environments: {
-      // `main.mjs` is the one path `rshono start` and every platform's config name.
+      // `main.mjs` is the one path `rsvhono start` and every platform's config name.
       rsc: {
         ...serverEnvironment(preset, serverDir, 'main.mjs'),
         // Vite leaves this a runtime read in a server build, which bundles the development half of every
         // `if (process.env.NODE_ENV === 'production')` in React beside the production one.
         define: { 'process.env.NODE_ENV': JSON.stringify(browserEnv.NODE_ENV) },
       },
-      // No `define` here: `rshonoEnvShadow` replaces the whole `process` binding in this environment.
+      // No `define` here: `rsvhonoEnvShadow` replaces the whole `process` binding in this environment.
       ssr: serverEnvironment(preset, join(serverDir, 'ssr')),
       client: {
         define: publicProcessEnv,
@@ -434,20 +434,20 @@ export function createViteConfig({ rootDir, isDev, config, preset }: ViteConfigO
     plugins: [
       ...(merged.plugins ?? []),
       react(),
-      rshonoPages(pageFiles),
+      rsvhonoPages(pageFiles),
       rsc({
         entries: {
           rsc: frameworkFile('runtime', 'entry.rsc.js'),
           ssr: frameworkFile('runtime', 'entry.ssr.js'),
           client: frameworkFile('runtime', 'entry.client.js'),
         },
-        // The request path is `configureServer` in `rshonoCore`, not the plugin's own middleware.
+        // The request path is `configureServer` in `rsvhonoCore`, not the plugin's own middleware.
         serverHandler: false,
         rscCssTransform: { filter: (id) => !pageFiles.has(id.split('?', 1)[0]) },
       }),
-      rshonoCore(aliases, routesFile, srcDir, pageFiles, rootDir),
-      rshonoEnvShadow(browserEnv, browserEnv.NODE_ENV, srcDir),
-      rshonoCssPackageImports(),
+      rsvhonoCore(aliases, routesFile, srcDir, pageFiles, rootDir),
+      rsvhonoEnvShadow(browserEnv, browserEnv.NODE_ENV, srcDir),
+      rsvhonoCssPackageImports(),
     ],
   };
 }

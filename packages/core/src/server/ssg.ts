@@ -28,10 +28,10 @@ export function resolveSiteOrigin(siteUrl: string | undefined): string {
   if (!siteUrl) return DEFAULT_SSG_ORIGIN;
   const parsed = URL.parse(siteUrl);
   if (!parsed || (parsed.protocol !== 'http:' && parsed.protocol !== 'https:')) {
-    throw new Error(`[rshono] invalid siteUrl ${JSON.stringify(siteUrl)} — use a full origin, e.g. 'https://example.com'.`);
+    throw new Error(`[rsvhono] invalid siteUrl ${JSON.stringify(siteUrl)} — use a full origin, e.g. 'https://example.com'.`);
   }
   if (parsed.pathname !== '/' || parsed.search || parsed.hash) {
-    throw new Error(`[rshono] siteUrl ${JSON.stringify(siteUrl)} must be a bare origin — a base path is not supported.`);
+    throw new Error(`[rsvhono] siteUrl ${JSON.stringify(siteUrl)} must be a bare origin — a base path is not supported.`);
   }
   return parsed.origin;
 }
@@ -126,7 +126,7 @@ interface PrerenderOptions {
   routes: readonly Route[];
   fetch: (request: Request) => Response | Promise<Response>;
   ssgDir: string;
-  /** The origin absolute URLs in the output are built against — `siteUrl` from `rshono.config.ts`. */
+  /** The origin absolute URLs in the output are built against — `siteUrl` from `rsvhono.config.ts`. */
   siteUrl?: string;
 }
 
@@ -237,7 +237,7 @@ export async function prerenderStaticRoutes(options: PrerenderOptions): Promise<
 
   if (staticRoutes.length > 0 && !options.siteUrl) {
     console.warn(
-      `  ⚠ No siteUrl in rshono.config — prerendered pages are built against ${DEFAULT_SSG_ORIGIN}, so any absolute URL\n` +
+      `  ⚠ No siteUrl in rsvhono.config — prerendered pages are built against ${DEFAULT_SSG_ORIGIN}, so any absolute URL\n` +
         `    they derive from a page's \`url\` prop (canonical tags, og:url, absolute links) will point there.`,
     );
   }
@@ -293,7 +293,7 @@ export async function prerenderStaticRoutes(options: PrerenderOptions): Promise<
       const relPath = ssgFilePath(path, 'html');
       if (relPath === null) {
         throw new Error(
-          `[rshono] Cannot prerender "${path}" for route "${route.path}": a path segment is "." or "..", or cannot be ` +
+          `[rsvhono] Cannot prerender "${path}" for route "${route.path}": a path segment is "." or "..", or cannot be ` +
             'one portable file name. It must not hold \\ / : * ? " < > | or a control character, must not end in ' +
             '"." or a space (Windows stores the name without it, so the page lands where nothing looks for it), ' +
             'and must not be a reserved device name — CON, PRN, AUX, NUL, COM0-9 or LPT0-9, with or without an extension.',
@@ -362,7 +362,7 @@ export async function prerenderStaticRoutes(options: PrerenderOptions): Promise<
   // `onError` reported it when it turned the throw into the 500 counted here.
   if (failures.length > 0) {
     throw new Error(
-      `[rshono] ${failures.length} page${failures.length === 1 ? '' : 's'} failed to render while prerendering:\n` +
+      `[rsvhono] ${failures.length} page${failures.length === 1 ? '' : 's'} failed to render while prerendering:\n` +
         failures.map((failure) => `      • ${failure}`).join('\n') +
         '\n    Prerendering renders a page the way a request does, so this is not a build-only failure — the route' +
         '\n    would answer the same status per request. The error it threw is logged above.',

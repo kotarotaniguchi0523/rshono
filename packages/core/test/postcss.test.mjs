@@ -2,7 +2,7 @@
 // plugin) installs it and adds a `postcss.config.mjs`, which Vite runs. This fixture is the check that the
 // documented setup actually works, end to end — from an `@import "tailwindcss"` in a stylesheet a *server*
 // component imports, where the package has to be resolved from an environment that leaves `node_modules`
-// external (`rshono:css-package-imports`), to compiled utilities in the stylesheet the page links.
+// external (`rsvhono:css-package-imports`), to compiled utilities in the stylesheet the page links.
 //
 // The apps with no PostCSS at all are the rest of the suite.
 import assert from 'node:assert/strict';

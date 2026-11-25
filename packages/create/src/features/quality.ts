@@ -32,7 +32,7 @@ const OXLINT: Feature = {
 
 /**
  * The one feature that changes a dependency the framework otherwise decides: typescript-eslint cannot be
- * installed alongside the TypeScript rshono is tested against, so an ESLint app pins the newest its peer range
+ * installed alongside the TypeScript rsvhono is tested against, so an ESLint app pins the newest its peer range
  * accepts (see {@link ESLINT_TYPESCRIPT}). Its rules are type-aware — the reason to reach for ESLint at all —
  * so the config it ships hands the parser the whole program.
  */

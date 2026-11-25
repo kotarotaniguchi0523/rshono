@@ -1,4 +1,4 @@
-import type { PageProps } from '@rshono/core';
+import type { PageProps } from '@rsvhono/core';
 import { NavigateOnMount } from './navigate-on-mount';
 
 export default function MountNavigation({ url }: PageProps) {

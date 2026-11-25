@@ -4,7 +4,7 @@
  * RSC environment only: it imports the plugin's server runtime.
  */
 import { loadServerAction } from '@vitejs/plugin-rsc/rsc/server';
-import references from 'virtual:rshono/server-references';
+import references from 'virtual:rsvhono/server-references';
 
 const SERVER_REFERENCE = Symbol.for('react.server.reference');
 

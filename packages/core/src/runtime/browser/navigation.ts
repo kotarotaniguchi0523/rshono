@@ -23,7 +23,7 @@ const documentPart = (url: URL): string => url.pathname + url.search;
 // the same code by the same route. A request rides its event as `info`, and carries the caller's promise
 // through the fetch and the commit.
 
-const requestMark = Symbol('rshono:navigation-request');
+const requestMark = Symbol('rsvhono:navigation-request');
 
 type NavigationRequest = {
   mark: typeof requestMark;
@@ -323,7 +323,7 @@ function interceptBeforeCommit(event: NavigateEvent): void {
       try {
         for (;;) {
           if (visited.has(href) || visited.size >= REDIRECT_LIMIT)
-            throw new Error(`[rshono] the payload for ${event.destination.url} redirects in a loop`);
+            throw new Error(`[rsvhono] the payload for ${event.destination.url} redirects in a loop`);
           visited.add(href);
           resource = prepare(href, event.signal);
           const root = await resource.rootReady;
@@ -332,7 +332,7 @@ function interceptBeforeCommit(event: NavigateEvent): void {
           const target = new URL(root.redirect, href);
           if (target.origin !== location.origin || namesAFile(target.href)) {
             recovery = target.href;
-            throw new Error(`[rshono] cannot soft-navigate to ${target.href}`);
+            throw new Error(`[rsvhono] cannot soft-navigate to ${target.href}`);
           }
           discard(resource);
           // Forgotten, so the `catch` below does not read a hop's own discard as the navigation's cancellation.

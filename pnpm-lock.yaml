@@ -37,7 +37,7 @@ importers:
 
   apps/testbed:
     dependencies:
-      '@rshono/core':
+      '@rsvhono/core':
         specifier: workspace:*
         version: link:../../packages/core
       hono:
@@ -49,10 +49,10 @@ importers:
       react-dom:
         specifier: 19.3.1
         version: 19.3.1(react@19.3.1)
-      rshono-test-external-client-dep:
+      rsvhono-test-external-client-dep:
         specifier: workspace:*
         version: link:../../packages/core/test/fixtures/external-client-dep
-      rshono-test-external-dep:
+      rsvhono-test-external-dep:
         specifier: workspace:*
         version: link:../../packages/core/test/fixtures/external-dep
     devDependencies:
@@ -68,7 +68,7 @@ importers:
 
   apps/website:
     dependencies:
-      '@rshono/core':
+      '@rsvhono/core':
         specifier: workspace:*
         version: link:../../packages/core
       '@shikijs/langs':
@@ -179,7 +179,7 @@ importers:
 
   packages/core/test/fixtures/hmr-app:
     dependencies:
-      '@rshono/core':
+      '@rsvhono/core':
         specifier: workspace:*
         version: link:../../..
       hono:
@@ -194,7 +194,7 @@ importers:
 
   packages/core/test/fixtures/minimal-app:
     dependencies:
-      '@rshono/core':
+      '@rsvhono/core':
         specifier: workspace:*
         version: link:../../..
       hono:
@@ -209,7 +209,7 @@ importers:
 
   packages/core/test/fixtures/postcss-app:
     dependencies:
-      '@rshono/core':
+      '@rsvhono/core':
         specifier: workspace:*
         version: link:../../..
       hono:
@@ -237,7 +237,7 @@ importers:
       '@clack/prompts':
         specifier: ^1.9.0
         version: 1.9.0
-      '@rshono/core':
+      '@rsvhono/core':
         specifier: workspace:*
         version: link:../core
       '@types/node':

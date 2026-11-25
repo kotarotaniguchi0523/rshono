@@ -5,14 +5,14 @@ import { TOOL_VERSIONS } from '../versions.js';
 import type { Feature } from './types.js';
 
 /**
- * What a deploy target adds beyond the `deploy` line in `rshono.config.ts`, which the template carries.
+ * What a deploy target adds beyond the `deploy` line in `rsvhono.config.ts`, which the template carries.
  *
- * Thin on purpose: the framework arranges its own output for every platform, and `rshono build` writes the one
+ * Thin on purpose: the framework arranges its own output for every platform, and `rsvhono build` writes the one
  * platform config that has to exist. So a target contributes the commands that run and ship the build, the CLI
  * they need, the directories to gitignore, and a note for the step no command covers.
  *
  * What the three script names promise is documented above `BASE_SCRIPTS` in `scripts.ts`. Only `node` has a
- * `start` — `rshono start` refuses a bundle built for anywhere else — and it needs no `preview`, since `build`
+ * `start` — `rsvhono start` refuses a bundle built for anywhere else — and it needs no `preview`, since `build`
  * then `start` already is one.
  */
 function deployFeatures(pm: PackageManager): Record<DeployTargetName, Feature> {
@@ -22,7 +22,7 @@ function deployFeatures(pm: PackageManager): Record<DeployTargetName, Feature> {
     // Where a Node build goes next is a Dockerfile or a process manager, neither of which this can guess.
     node: {
       id: 'deploy-node',
-      scripts: { start: 'rshono start' },
+      scripts: { start: 'rsvhono start' },
       scriptHelp: { start: 'run the build that exists — what your host calls' },
       platformSetup: [
         'The two commands a host asks for:',
@@ -41,7 +41,7 @@ function deployFeatures(pm: PackageManager): Record<DeployTargetName, Feature> {
       allowBuilds: { esbuild: false, workerd: false },
       // `wrangler dev` is the one preview that runs the code in workerd rather than Node. Both scripts read the
       // wrangler.jsonc the build wrote, so nothing here has to know where the bundle went.
-      scripts: { preview: 'rshono build && wrangler dev', deploy: 'rshono build && wrangler deploy' },
+      scripts: { preview: 'rsvhono build && wrangler dev', deploy: 'rsvhono build && wrangler deploy' },
       scriptHelp: {
         preview: 'build, then run it in workerd — port 8787',
         deploy: 'build, then ship it to Cloudflare',
@@ -58,8 +58,8 @@ function deployFeatures(pm: PackageManager): Record<DeployTargetName, Feature> {
       // `--prod` because the script is called `deploy`: without it the CLI uploads to a throwaway preview URL.
       // `preview` is a Node build run here — the platform cannot run its own prebuilt output on your machine.
       scripts: {
-        preview: 'rshono build --deploy node && rshono start',
-        deploy: `rshono build && ${pm.dlx} vercel deploy --prebuilt --prod`,
+        preview: 'rsvhono build --deploy node && rsvhono start',
+        deploy: `rsvhono build && ${pm.dlx} vercel deploy --prebuilt --prod`,
       },
       scriptHelp: {
         preview: 'build for Node and run that here',
@@ -67,7 +67,7 @@ function deployFeatures(pm: PackageManager): Record<DeployTargetName, Feature> {
       },
       gitignore: ['.vercel/'],
       notes: [
-        '--prebuilt uploads what rshono build assembled; the platform must not rebuild it.',
+        '--prebuilt uploads what rsvhono build assembled; the platform must not rebuild it.',
         'Drop --prod from the deploy script for a preview URL instead.',
       ],
       platformSetup: [
@@ -81,7 +81,7 @@ function deployFeatures(pm: PackageManager): Record<DeployTargetName, Feature> {
     'aws-lambda': {
       id: 'deploy-aws-lambda',
       // No CLI to wrap and no upload to guess at, but `preview` still applies: the bundle is a Node handler.
-      scripts: { preview: 'rshono build --deploy node && rshono start' },
+      scripts: { preview: 'rsvhono build --deploy node && rsvhono start' },
       scriptHelp: { preview: 'build for Node and run that here' },
       notes: ['Use a Function URL in RESPONSE_STREAM mode — a buffered invoke mode drops the streaming.'],
       platformSetup: [

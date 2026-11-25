@@ -59,7 +59,7 @@ describe('a hardened server.ts', () => {
     assert.match(await ssg.text(), /nonce="/);
     // The header the prerender pass reads that fact off (`PRERENDER_NONCE_HEADER`) belongs to the build
     // process alone — a served response must never carry it.
-    assert.equal(ssg.headers.get('x-rshono-prerender-nonce'), null, 'a build-time marker leaked onto a served response');
+    assert.equal(ssg.headers.get('x-rsvhono-prerender-nonce'), null, 'a build-time marker leaked onto a served response');
   });
 
   test('two requests get two nonces — the value is per request, not per build', async () => {
@@ -329,7 +329,7 @@ describe('a server.ts with no csrf()', () => {
 });
 
 // `SSG_CACHE_CONTROL` is `public, max-age=300` and has no config field, deliberately — it is a
-// per-response header and `rshono.config.ts` is compiled into the bundle. Middleware is the interface,
+// per-response header and `rsvhono.config.ts` is compiled into the bundle. Middleware is the interface,
 // and the one thing a reader has to be told is *where* in the middleware it goes.
 describe('a server.ts that overrides the prerendered cache policy', () => {
   const app = serve({ TESTBED_SSG_CACHE: '1' });

@@ -1,4 +1,4 @@
-// Publishes @rshono/core and @rshono/create from this machine, which is the only way this repo releases.
+// Publishes @rsvhono/core and @rsvhono/create from this machine, which is the only way this repo releases.
 //
 // The cost of publishing from a laptop is provenance: npm's attestation is a signed statement of which repo,
 // workflow and commit built each tarball, and it is minted from a CI runner's OIDC token, which no laptop can
@@ -212,13 +212,13 @@ if (options['skip-tests']) {
   warn('--skip-tests: publishing without building, linting, typechecking or testing the tree');
 } else {
   step('Running the gates');
-  forward(pnpm, ['--filter', '@rshono/core', 'build'], 'the framework build failed');
+  forward(pnpm, ['--filter', '@rsvhono/core', 'build'], 'the framework build failed');
   forward(pnpm, ['lint'], 'lint failed');
-  forward(pnpm, ['--filter', '@rshono/core', 'typecheck'], '@rshono/core typecheck failed');
-  forward(pnpm, ['--filter', '@rshono/core', 'test'], '@rshono/core tests failed');
+  forward(pnpm, ['--filter', '@rsvhono/core', 'typecheck'], '@rsvhono/core typecheck failed');
+  forward(pnpm, ['--filter', '@rsvhono/core', 'test'], '@rsvhono/core tests failed');
   forward(pnpm, ['--filter', 'testbed', 'typecheck'], 'testbed typecheck failed');
-  forward(pnpm, ['--filter', '@rshono/create', 'typecheck'], '@rshono/create typecheck failed');
-  forward(pnpm, ['--filter', '@rshono/create', 'test'], '@rshono/create tests failed');
+  forward(pnpm, ['--filter', '@rsvhono/create', 'typecheck'], '@rsvhono/create typecheck failed');
+  forward(pnpm, ['--filter', '@rsvhono/create', 'test'], '@rsvhono/create tests failed');
 }
 
 step(dryRun ? `Packing ${version} (dry run — nothing is uploaded)` : `Publishing ${version} to ${distTag}`);

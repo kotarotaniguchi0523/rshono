@@ -3,8 +3,8 @@ title: Deployment
 description: The settings each platform asks for, four targets behind one interface, and the known limitations.
 ---
 
-`rshono build` targets one platform. Pick it with `deploy` in the config, `--deploy <name>` or
-`RSHONO_DEPLOY`, in that precedence order. The default is `node`. `rshono dev` always runs the Node dev
+`rsvhono build` targets one platform. Pick it with `deploy` in the config, `--deploy <name>` or
+`RSVHONO_DEPLOY`, in that precedence order. The default is `node`. `rsvhono dev` always runs the Node dev
 server whatever you choose.
 
 Each platform below leads with the settings its dashboard asks for, which is what importing a Git
@@ -15,7 +15,7 @@ repository puts in front of you. Commands are written for npm — substitute you
 
 | `deploy`     | Handoff                          | Assets & prerendered pages                                      | After `build`                               |
 | ------------ | -------------------------------- | --------------------------------------------------------------- | ------------------------------------------- |
-| `node`       | binds a port                     | from `dist/` on disk                                            | `rshono start`                              |
+| `node`       | binds a port                     | from `dist/` on disk                                            | `rsvhono start`                             |
 | `cloudflare` | `{ fetch }` default export       | Workers Assets; prerendered pages read via the `ASSETS` binding | `wrangler deploy`                           |
 | `vercel`     | Node `(req, res)` listener       | CDN for assets; prerendered pages inside the function           | `vercel deploy --prebuilt`                  |
 | `aws-lambda` | streaming handler (Function URL) | from the deployment package                                     | zip `dist/`, handler `dist/server/main.mjs` |
@@ -38,9 +38,9 @@ things.
 | Development Command | `npm run dev`   |
 | Node.js version     | 22.18 or newer  |
 
-- The host has to hand the process a **`PORT`**, which rshono binds; `HOST` is honoured too and defaults
+- The host has to hand the process a **`PORT`**, which rsvhono binds; `HOST` is honoured too and defaults
   to `0.0.0.0`. `PORT=0` means any free port rather than the default.
-- `npm start` runs `rshono start`, which runs the build that already exists and never makes one. It
+- `npm start` runs `rsvhono start`, which runs the build that already exists and never makes one. It
   refuses a build made for another target rather than starting a bundle with no listener in it.
 - In a Dockerfile the same pair: `RUN npm run build`, then `CMD ["npm", "start"]`.
 
@@ -60,13 +60,13 @@ Settings**. Only the first two need changing.
 | Node.js Version     | 22.x or newer                                             |
 
 - **Framework Preset has to be Other.** Vercel ships a Hono preset and detects `hono` in your
-  dependencies, so the default guess is wrong for a rshono app and will fight the build.
+  dependencies, so the default guess is wrong for a rsvhono app and will fight the build.
 - **Do not override Output Directory to an empty value.** That is Vercel's documented way to say _skip
   the build step_, and it would ship your repository instead of your app. The build writes
   `.vercel/output` — the function, the static assets and the routing table, a complete deployment — and
   that is what gets served.
 - **There is no start command.** The platform invokes the function per request; nothing binds a port,
-  and `rshono start` refuses this build.
+  and `rsvhono start` refuses this build.
 - **Development Command** only affects `vercel dev`, which this target gains nothing from — run
   `npm run dev`. If you want `vercel dev` anyway it needs `npm run dev -- --port $PORT`, because the
   default under the Other preset is empty and `vercel dev` fails without one.
@@ -79,7 +79,7 @@ Deploying from your machine or from CI instead of the Git integration:
 npm run deploy
 ```
 
-That is `rshono build && vercel deploy --prebuilt --prod`. `--prebuilt` uploads what the build
+That is `rsvhono build && vercel deploy --prebuilt --prod`. `--prebuilt` uploads what the build
 assembled, so the platform runs no build of its own; drop `--prod` for a preview URL. From CI it also
 needs `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` and a CLI token in the environment.
 
@@ -107,7 +107,7 @@ under **Settings → Builds**.
   `nodejs_compat`, which the request context needs for `AsyncLocalStorage` — and never touches it again,
   so it is yours to edit after that.
 - **Bindings** (D1, KV, R2) arrive as `getRequestContext().env`. They are not available under
-  `rshono dev`, which is plain Node — `npm run preview` builds and runs the app in workerd via
+  `rsvhono dev`, which is plain Node — `npm run preview` builds and runs the app in workerd via
   `wrangler dev`, which is the only preview that executes the real thing.
 
 `npm run deploy` does the build and the upload in one step from your machine.
@@ -177,7 +177,7 @@ In production `dist/server/main.mjs` always has React, Hono and the framework bu
 
 The cost on those three: a dependency that cannot be bundled — a native addon, or one that reads its own
 files off disk relative to `__dirname` — fails the **build** rather than the deploy. Reach for the `vite`
-option in `rshono.config.ts` to keep such a package external, or deploy it to `node`.
+option in `rsvhono.config.ts` to keep such a package external, or deploy it to `node`.
 
 A Worker has a further constraint: it resolves no `node_modules` at runtime either way, and a dependency
 needing a real `node:` API beyond `nodejs_compat` will not work there at all.

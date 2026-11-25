@@ -11,7 +11,7 @@ const { output } = await build({
   configFile: false,
   root: dir,
   logLevel: 'warn',
-  define: { __CREATE_RSHONO_VERSION__: JSON.stringify(version) },
+  define: { __CREATE_RSVHONO_VERSION__: JSON.stringify(version) },
   ssr: { noExternal: true },
   build: {
     ssr: true,

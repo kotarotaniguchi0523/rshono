@@ -6,14 +6,14 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const ROOT = join(fileURLToPath(import.meta.url), '..', '..', '..', '..');
 export const TESTBED_DIR = join(ROOT, 'apps', 'testbed');
 export const TESTBED_DIST = join(TESTBED_DIR, 'dist');
-/** Where `rshono dev` builds to — deliberately not `dist/`, so `rshono build` cannot overwrite a running server. */
-export const TESTBED_DEV_DIR = join(TESTBED_DIR, '.rshono');
+/** Where `rsvhono dev` builds to — deliberately not `dist/`, so `rsvhono build` cannot overwrite a running server. */
+export const TESTBED_DEV_DIR = join(TESTBED_DIR, '.rsvhono');
 export const FIXTURES_DIR = join(ROOT, 'packages', 'core', 'test', 'fixtures');
 /** The smallest app the framework accepts: src/routes.ts and nothing else. */
 export const MINIMAL_APP_DIR = join(FIXTURES_DIR, 'minimal-app');
 /** An app whose CSS only compiles if the builder found its `postcss.config.mjs`. */
 export const POSTCSS_APP_DIR = join(FIXTURES_DIR, 'postcss-app');
-const CLI = join(ROOT, 'packages', 'core', 'bin', 'rshono.mjs');
+const CLI = join(ROOT, 'packages', 'core', 'bin', 'rsvhono.mjs');
 
 /** What each command prints once it is listening; the capture group is the port. */
 const READY = {
@@ -62,7 +62,7 @@ export function buildTestbed(config, { env } = {}) {
 }
 
 /**
- * Runs `rshono <args>` to completion — for asserting on a command that is expected to *exit*, where
+ * Runs `rsvhono <args>` to completion — for asserting on a command that is expected to *exit*, where
  * {@link startApp} would only ever reject. Both streams are returned as one string, because which of
  * them a refusal lands on is not the point of any test that uses this.
  */
@@ -108,10 +108,10 @@ export function importAppBundle(dir, cacheKey) {
   return import(pathToFileURL(join(copy, 'dist', 'server', 'main.mjs')).href);
 }
 
-/** Runs `rshono <command>` in `dir` and resolves once it reports the address it is listening on. */
+/** Runs `rsvhono <command>` in `dir` and resolves once it reports the address it is listening on. */
 export function startApp(dir, command, { env = {}, timeoutMs = 60_000 } = {}) {
   const ready = READY[command];
-  if (!ready) throw new Error(`no ready pattern for \`rshono ${command}\` — it would resolve on any output`);
+  if (!ready) throw new Error(`no ready pattern for \`rsvhono ${command}\` — it would resolve on any output`);
   const child = spawn(process.execPath, [CLI, command], {
     cwd: dir,
     env: {

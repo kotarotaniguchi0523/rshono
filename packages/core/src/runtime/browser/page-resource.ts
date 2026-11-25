@@ -86,7 +86,7 @@ async function payloadResponse(request: Request): Promise<Response> {
   // `statusText` at all. Bounded, because this is an error path and the body is not ours to trust.
   const body = await refusalBody(response);
   const status = `${response.status}${response.statusText ? ` ${response.statusText}` : ''}`;
-  throw new Error(`[rshono] the server answered ${status} (${contentType ?? 'no content type'}) instead of a payload${body ? `: ${body}` : ''}`);
+  throw new Error(`[rsvhono] the server answered ${status} (${contentType ?? 'no content type'}) instead of a payload${body ? `: ${body}` : ''}`);
 }
 
 declare global {

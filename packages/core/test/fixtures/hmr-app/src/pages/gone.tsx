@@ -1,4 +1,4 @@
-import { notFound } from '@rshono/core/server';
+import { notFound } from '@rsvhono/core/server';
 
 export default function Gone(): never {
   notFound();

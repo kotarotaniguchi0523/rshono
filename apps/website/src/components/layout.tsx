@@ -6,7 +6,7 @@ import { NavigationProgress } from './navigation-progress';
 import { PackageManagerChoice } from './package-manager-choice';
 
 const GITHUB_URL = 'https://github.com/rshono/rshono';
-const NPM_URL = 'https://www.npmjs.com/package/@rshono/core';
+const NPM_URL = 'https://www.npmjs.com/package/@rsvhono/core';
 
 /**
  * A page renders the whole document, so the shell lives in one component every page wraps its content
@@ -14,7 +14,7 @@ const NPM_URL = 'https://www.npmjs.com/package/@rshono/core';
  *
  * `canonical` is passed rather than derived from the page's `url`, because every page here is
  * prerendered — that prop is the build-time URL, and it is only the right one because `siteUrl` is set
- * in `rshono.config.ts`. Passing it keeps the dependency visible at the call site.
+ * in `rsvhono.config.ts`. Passing it keeps the dependency visible at the call site.
  */
 export function Layout({
   title,
@@ -30,7 +30,7 @@ export function Layout({
   wide?: boolean;
   children: ReactNode;
 }) {
-  const heading = title ? `${title} · rshono` : 'rshono — Hono + Vite + React Server Components';
+  const heading = title ? `${title} · rsvhono` : 'rsvhono — Hono + Vite + React Server Components';
 
   return (
     <html lang="en" className="scroll-smooth">
@@ -93,7 +93,7 @@ function SiteHeader() {
       <div className="mx-auto flex w-full max-w-7xl flex-wrap items-center gap-x-6 gap-y-1 px-6 py-2 sm:h-14 sm:flex-nowrap sm:py-0">
         <a href="/" className="flex shrink-0 items-center gap-2 font-semibold tracking-tight text-zinc-900 no-underline dark:text-white">
           <Logo />
-          rshono
+          rsvhono
         </a>
 
         <nav className="order-last flex w-full items-center gap-5 text-sm sm:order-none sm:w-auto" aria-label="Main">
@@ -122,7 +122,7 @@ function SiteHeader() {
             <a
               href={GITHUB_URL}
               data-native
-              aria-label="rshono on GitHub"
+              aria-label="rsvhono on GitHub"
               title="GitHub"
               className="rounded-md p-2 text-zinc-500 no-underline hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white"
             >
@@ -131,7 +131,7 @@ function SiteHeader() {
             <a
               href={NPM_URL}
               data-native
-              aria-label="@rshono/core on npm"
+              aria-label="@rsvhono/core on npm"
               title="npm"
               className="rounded-md p-2 text-zinc-500 no-underline hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white"
             >
@@ -182,10 +182,10 @@ function SiteFooter() {
       <div className="mx-auto flex w-full max-w-7xl flex-wrap items-center gap-x-6 gap-y-2 px-6 py-8 text-sm text-zinc-500 dark:text-zinc-400">
         <span className="flex items-center gap-2">
           <Logo size={16} />
-          rshono
+          rsvhono
         </span>
         <span>
-          Built with rshono — <a href="/docs/deployment#how-the-build-works">how that works</a>.
+          Built with rsvhono — <a href="/docs/deployment#how-the-build-works">how that works</a>.
         </span>
         <span className="ml-auto flex gap-5">
           <a href={GITHUB_URL} data-native>

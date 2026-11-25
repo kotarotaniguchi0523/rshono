@@ -1,15 +1,15 @@
-import { FRAMEWORK_DEPS, NODE_ENGINE, RSHONO_VERSION } from './generated/framework.js';
+import { FRAMEWORK_DEPS, NODE_ENGINE, RSVHONO_VERSION } from './generated/framework.js';
 
 /** Passed straight through, so everything generated from the framework reaches the rest of the package here. */
-export { FRAMEWORK_DEPS, NODE_ENGINE, RSHONO_VERSION };
+export { FRAMEWORK_DEPS, NODE_ENGINE, RSVHONO_VERSION };
 
 /** The framework range a scaffolded app gets. The two packages are released together, so this is ours. */
-export const RSHONO_RANGE = `^${RSHONO_VERSION}`;
+export const RSVHONO_RANGE = `^${RSVHONO_VERSION}`;
 
 /**
  * Versions for the optional tooling the features can add — the one place in this package where a range is typed
- * by hand, because the framework declares none of these. Everything a scaffolded app needs to *run* rshono comes
- * from {@link FRAMEWORK_DEPS}, generated from rshono's own manifest.
+ * by hand, because the framework declares none of these. Everything a scaffolded app needs to *run* rsvhono comes
+ * from {@link FRAMEWORK_DEPS}, generated from rsvhono's own manifest.
  *
  * Caret ranges, not exact: these are the app's own dev tools, and a scaffold made six months from now should
  * pick up their patch releases.
@@ -37,7 +37,7 @@ export const TOOL_VERSIONS = {
  * {@link FRAMEWORK_DEPS}.
  *
  * typescript-eslint reads TypeScript's compiler API directly, so it accepts `>=4.8.4 <6.1.0` and nothing above;
- * `~6.0.3` is the newest that satisfies it. rshono's declarations compile the same under either, which is what
+ * `~6.0.3` is the newest that satisfies it. rsvhono's declarations compile the same under either, which is what
  * makes this the app's business. When upstream widens its range, this constant is what to delete.
  */
 export const ESLINT_TYPESCRIPT = '~6.0.3';

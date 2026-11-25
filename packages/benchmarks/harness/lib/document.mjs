@@ -73,7 +73,7 @@ const DEV_MARKERS = [
   ['__webpack_require__.$Refresh$', 'webpack refresh hooks'],
   ['/@vite/client', 'Vite dev client'],
   ['__vite_plugin_react', 'Vite React plugin dev runtime'],
-  ['__rshono_dev', 'rshono dev channel'],
+  ['__rsvhono_dev', 'rsvhono dev channel'],
 ];
 
 export function detectDevBuild(html) {

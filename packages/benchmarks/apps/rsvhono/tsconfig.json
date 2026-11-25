@@ -10,8 +10,8 @@
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "verbatimModuleSyntax": true,
-    "types": ["node", "@rshono/core/dist/types/rshono-config.d.ts"],
+    "types": ["node", "@rsvhono/core/dist/types/rsvhono-config.d.ts"],
     "paths": { "@/*": ["./src/*"] }
   },
-  "include": ["src", "rshono.config.ts"]
+  "include": ["src", "rsvhono.config.ts"]
 }

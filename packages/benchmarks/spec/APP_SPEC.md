@@ -4,7 +4,7 @@ The contract every benchmark app implements. A number is only comparable if the 
 is the same on both sides, so this file is the authority: if an app deviates from it, the app is
 wrong, not the spec.
 
-Three implementations live in `../apps/`: `rshono`, `next`, `tanstack-start`.
+Three implementations live in `../apps/`: `rsvhono`, `next`, `tanstack-start`.
 
 ## Rules
 
@@ -33,7 +33,7 @@ Three implementations live in `../apps/`: `rshono`, `next`, `tanstack-start`.
 
 ## Server components
 
-rshono and Next render the **whole document** as a server component tree: layout, route and every
+rsvhono and Next render the **whole document** as a server component tree: layout, route and every
 host element in it are encoded to a flight payload and decoded again on each request.
 
 TanStack Start's RSC support is **opt-in per boundary** — the router, root route and shell stay
@@ -71,7 +71,7 @@ Generated once by `fixtures/generate.mjs` from a fixed seed and committed. Do no
 A marketing-style page: heading, subtitle, three feature cards, a footer. Rendered **once at build
 time** and served from disk.
 
-- rshono: `render: 'static'`
+- rsvhono: `render: 'static'`
 - Next: default (statically rendered at build; no dynamic APIs read)
 - TanStack Start: prerendered via the `prerender` option
 
@@ -87,7 +87,7 @@ Renders all 100 fixture users as a table: id, name, email, role, score. Plus a c
 
 Must be re-rendered per request:
 
-- rshono: `render: 'dynamic'` (the default) and reads `ctx` so it cannot be hoisted
+- rsvhono: `render: 'dynamic'` (the default) and reads `ctx` so it cannot be hoisted
 - Next: `export const dynamic = 'force-dynamic'`
 - TanStack Start: excluded from `prerender`; the table is a server component rendered through
   `renderServerComponent` in the route's `createServerFn` (see **Server components**, below)
@@ -103,7 +103,7 @@ A server-rendered shell that passes fixture data into three client components:
 1. **Counter** — `useState`, a button that increments. The minimal hydration unit.
 2. **Filter** — receives all 100 users as a prop, `useState` for a query string, filters the list
    client-side and renders matches. Exercises a non-trivial serialized payload crossing the boundary.
-3. **SignupForm** — a form calling a server function (rshono: `'use server'` action; Next: `'use server'`
+3. **SignupForm** — a form calling a server function (rsvhono: `'use server'` action; Next: `'use server'`
    action; TanStack Start: `createServerFn`), rendering the returned result. Exercises the
    mutation path.
 
@@ -121,7 +121,7 @@ Text-content checks: `Counter`, `Filter`, `Sign up`, `Ada Lovelace`.
 Returns `{"ok":true,"route":"health"}` with `content-type: application/json`. No React on the path at
 all. Isolates the HTTP layer: router lookup, middleware, response construction.
 
-- rshono: `{ type: 'endpoint' }` route
+- rsvhono: `{ type: 'endpoint' }` route
 - Next: `app/api/health/route.ts`
 - TanStack Start: a server route
 

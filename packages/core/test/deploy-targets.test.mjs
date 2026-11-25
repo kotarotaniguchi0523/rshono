@@ -18,7 +18,7 @@ import { before, describe, test } from 'node:test';
 import { pathToFileURL } from 'node:url';
 import { buildApp, importServerBundle, TESTBED_DIR, TESTBED_DIST } from './helpers.mjs';
 
-const ORIGIN = 'https://rshono.example';
+const ORIGIN = 'https://rsvhono.example';
 
 /**
  * Proves the emitted server output can run where nothing installed it — which is what a serverless
@@ -32,7 +32,7 @@ const ORIGIN = 'https://rshono.example';
  * specifier inside one would survive module evaluation.
  */
 async function assertSelfContained() {
-  const sandbox = mkdtempSync(join(tmpdir(), 'rshono-self-contained-'));
+  const sandbox = mkdtempSync(join(tmpdir(), 'rsvhono-self-contained-'));
   try {
     // The runtime derives the project root from where the bundle sits, so the two levels are load-bearing.
     cpSync(join(TESTBED_DIST, 'server'), join(sandbox, 'dist', 'server'), { recursive: true });
@@ -58,9 +58,9 @@ async function buildFor(target) {
   return importServerBundle(target);
 }
 
-/** What `rshono build` recorded about the build now on disk — what `rshono start` reads to refuse one. */
+/** What `rsvhono build` recorded about the build now on disk — what `rsvhono start` reads to refuse one. */
 function buildMarker() {
-  return JSON.parse(readFileSync(join(TESTBED_DIST, 'rshono-build.json'), 'utf8'));
+  return JSON.parse(readFileSync(join(TESTBED_DIST, 'rsvhono-build.json'), 'utf8'));
 }
 
 /**

@@ -1,15 +1,15 @@
 {
-  "name": "bench-rshono",
+  "name": "bench-rsvhono",
   "version": "0.0.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "rshono build",
-    "start": "rshono start",
-    "dev": "rshono dev"
+    "build": "rsvhono build",
+    "start": "rsvhono start",
+    "dev": "rsvhono dev"
   },
   "dependencies": {
-    "@rshono/core": "file:../../.pack/rshono-core.tgz",
+    "@rsvhono/core": "file:../../.pack/rsvhono-core.tgz",
     "hono": "^4.13.5",
     "react": "19.3.1",
     "react-dom": "19.3.1"

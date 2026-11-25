@@ -26,9 +26,9 @@ export const ROUTES = [
  */
 export const TARGETS = [
   {
-    id: 'rshono',
-    label: 'rshono',
-    dir: path.join(APPS_DIR, 'rshono'),
+    id: 'rsvhono',
+    label: 'rsvhono',
+    dir: path.join(APPS_DIR, 'rsvhono'),
     port: 4101,
     build: ['npm', ['run', 'build']],
     start: ['npm', ['run', 'start']],

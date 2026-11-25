@@ -23,7 +23,7 @@ const quick = hasFlag('quick');
  *
  * V8 sizes the old generation against the *allocation rate* and only collects in earnest near the limit, so at
  * the default after-load RSS measures throughput rather than memory: the fastest server churns the most in the
- * fixed eight seconds and grows the largest heap. Measured on rshono, `/api/health` reached 472 MB RSS of which
+ * fixed eight seconds and grows the largest heap. Measured on rsvhono, `/api/health` reached 472 MB RSS of which
  * a forced GC returned 362 MB; capped, the same route holds flat at 120 MB with throughput unchanged.
  *
  * So the cap does not restrain the servers, it stops the metric rewarding slowness. `--heap=0` opts out, and the

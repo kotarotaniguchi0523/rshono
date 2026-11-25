@@ -5,7 +5,7 @@
  * The install goes into a throwaway directory from the app's package.json with devDependencies omitted, which is
  * what a deploy image contains. Slow — three real npm installs — so `run.mjs` skips it unless passed --footprint.
  *
- * For rshono specifically: `@rspack/core` is in core's `dependencies`, so the bundler lands in a production
+ * For rsvhono specifically: `@rspack/core` is in core's `dependencies`, so the bundler lands in a production
  * install. That is a real cost and this metric shows it.
  */
 import { mkdtemp, rm, readFile, writeFile, readdir } from 'node:fs/promises';
@@ -73,7 +73,7 @@ async function measureSource(dir) {
 
 async function measureProdInstall(target) {
   const pkg = JSON.parse(await readFile(path.join(target.dir, 'package.json'), 'utf8'));
-  const temp = await mkdtemp(path.join(tmpdir(), `rshono-bench-${target.id}-`));
+  const temp = await mkdtemp(path.join(tmpdir(), `rsvhono-bench-${target.id}-`));
   try {
     // `file:` specifiers are relative to the app dir, which the temp dir is not.
     const deps = Object.fromEntries(

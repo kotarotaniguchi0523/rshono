@@ -1,4 +1,4 @@
-import { defineConfig } from '@rshono/core';
+import { defineConfig } from '@rsvhono/core';
 
 // Every option is optional — this file mostly restates the defaults as living documentation.
 // It is deliberately short: it holds only what the *build* decides. The per-request security
@@ -6,7 +6,7 @@ import { defineConfig } from '@rshono/core';
 export default defineConfig({
   // Server
   deploy: 'node', // where `build` targets: node | cloudflare | vercel | aws-lambda
-  siteUrl: 'https://rshono.example', // public origin, baked into prerendered pages' absolute URLs
+  siteUrl: 'https://rsvhono.example', // public origin, baked into prerendered pages' absolute URLs
 
   // Security
   trustProxy: false, // honour X-Forwarded-Host/-Proto — only behind a proxy you control

@@ -1,5 +1,5 @@
 // eslint-disable-next-line @typescript-eslint/triple-slash-reference
-/// <reference path="../types/rshono-config.d.ts" />
+/// <reference path="../types/rsvhono-config.d.ts" />
 /**
  * The two modules an app hands the framework — `src/routes.ts` and `src/server.ts` — checked before
  * anything is built on them.
@@ -11,10 +11,10 @@
  * The mistakes that produced no error at all were worse: a duplicated `path` whose second entry silently
  * never ran, a `staticPaths` on a route that renders per request.
  *
- * The route *table* is checked at module load — during `rshono build`, which imports the server bundle for
- * the prerender pass; at `rshono dev` startup; and when a deployed server boots. The modules the table points
+ * The route *table* is checked at module load — during `rsvhono build`, which imports the server bundle for
+ * the prerender pass; at `rsvhono dev` startup; and when a deployed server boots. The modules the table points
  * *at* cannot be, because they load lazily: {@link assertPageModule} and {@link assertEndpointModule} run on
- * first request, and {@link assertRouteModules} runs both against every route during `rshono build`.
+ * first request, and {@link assertRouteModules} runs both against every route during `rsvhono build`.
  */
 
 import type { Handler, Hono } from 'hono';
@@ -34,13 +34,13 @@ const RENDER_MODES = ['static', 'dynamic'];
  * (`deploy/filesystem.ts`, `deploy/cloudflare/runtime.ts`) and in `cli/dev.ts`, none of which this module
  * can pull in.
  *
- * It is the only one. `/_rshono/hmr` is dev-only and an exact path rather than a prefix, and Cloudflare's
+ * It is the only one. `/_rsvhono/hmr` is dev-only and an exact path rather than a prefix, and Cloudflare's
  * `__ssg` is an asset path no app would name.
  */
 const RESERVED_PREFIX = '/_static';
 
 function fail(message: string): never {
-  throw new Error(`[rshono] ${message}`);
+  throw new Error(`[rsvhono] ${message}`);
 }
 
 /**
@@ -246,7 +246,7 @@ function assertNothingIsShadowed(routes: readonly Route[]): void {
       fail(
         `src/routes.ts: ${name} would never run — the framework serves the client bundle at ${RESERVED_PREFIX}, ` +
           `mounted ahead of the route table and answering that whole subtree, so ${RESERVED_PREFIX} is reserved on every ` +
-          'deploy target and under `rshono dev`. Give the route a path of its own.',
+          'deploy target and under `rsvhono dev`. Give the route a path of its own.',
       );
     }
     const methods = methodsOf(route);
@@ -321,10 +321,10 @@ export function validateServerApp(exported: unknown): Hono | null {
 const CLIENT_REFERENCE = Symbol.for('react.client.reference');
 
 /**
- * The property the build puts on a page's default export — see `rshonoPages` in `vite/index.ts`, which wraps
+ * The property the build puts on a page's default export — see `rsvhonoPages` in `vite/index.ts`, which wraps
  * every page module so its stylesheets render with it and its props arrive untouched.
  */
-export const PAGE_MARK = '$$rshonoPage';
+export const PAGE_MARK = '$$rsvhonoPage';
 
 /**
  * The server component a page module must default-export, checked rather than cast.
@@ -379,7 +379,7 @@ export function assertEndpointModule(mod: { handler?: unknown }, label: string):
 }
 
 /**
- * Resolves every route's own module once and runs the two checks above against it — what `rshono build` does
+ * Resolves every route's own module once and runs the two checks above against it — what `rsvhono build` does
  * once the bundle exists, so a route that cannot serve *any* request fails the build instead of exiting 0 and
  * answering 500 in production for the life of the deployment.
  *
@@ -446,7 +446,7 @@ export async function assertRouteModules(config: RouteConfig): Promise<void> {
   if (failures.length > 1) {
     fail(
       `${failures.length} route modules cannot serve a request:\n` +
-        failures.map((message) => `      • ${message.replace(/^\[rshono\] /, '')}`).join('\n'),
+        failures.map((message) => `      • ${message.replace(/^\[rsvhono\] /, '')}`).join('\n'),
     );
   }
 }

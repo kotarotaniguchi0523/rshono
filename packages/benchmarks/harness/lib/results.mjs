@@ -51,7 +51,7 @@ export async function environment() {
  */
 async function appVersions() {
   const out = {};
-  for (const id of ['rshono', 'next', 'tanstack-start']) {
+  for (const id of ['rsvhono', 'next', 'tanstack-start']) {
     const dir = path.join(ROOT, 'apps', id);
     const lock = path.join(dir, 'node_modules');
     if (!existsSync(lock)) {
@@ -64,7 +64,7 @@ async function appVersions() {
 }
 
 const PROBE = {
-  rshono: ['react', 'react-dom', '@rshono/core', 'hono', '@rspack/core', 'react-server-dom-rspack'],
+  rsvhono: ['react', 'react-dom', '@rsvhono/core', 'hono', '@rspack/core', 'react-server-dom-rspack'],
   next: ['react', 'react-dom', 'next'],
   'tanstack-start': ['react', 'react-dom', '@tanstack/react-start', '@tanstack/react-router', 'vite'],
 };

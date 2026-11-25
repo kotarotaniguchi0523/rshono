@@ -6,7 +6,7 @@ import { readPrerendered } from '../server/ssg.js';
 import { createPublicFallback, createStaticAssetsApp } from '../server/static.js';
 import type { DeployRuntime } from './contract.js';
 
-const { isDev, outDir } = __RSHONO_CONFIG__;
+const { isDev, outDir } = __RSVHONO_CONFIG__;
 
 // The server bundle is minified and ships a source map, so this is what makes a production stack trace point
 // at the original TypeScript. Done here rather than left to `--enable-source-maps` because a serverless host
@@ -24,7 +24,7 @@ if (typeof process !== 'undefined' && typeof process.setSourceMapsEnabled === 'f
  * elsewhere — so walk up to that `server` directory rather than count levels.
  */
 function findRootDir(): string {
-  if (__RSHONO_CONFIG__.rootDir) return __RSHONO_CONFIG__.rootDir;
+  if (__RSVHONO_CONFIG__.rootDir) return __RSVHONO_CONFIG__.rootDir;
   let dir = import.meta.dirname;
   while (basename(dir) !== 'server' && dirname(dir) !== dir) dir = dirname(dir);
   return join(dir, '..', '..');

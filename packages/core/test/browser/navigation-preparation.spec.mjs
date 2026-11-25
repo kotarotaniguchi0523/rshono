@@ -175,7 +175,7 @@ test('a prepared payload whose render fails settles the native navigation', asyn
   await expect(page.getByText('(hydrated ✓)')).toBeVisible();
   await startNativeNavigation(page, 'push', '/crash?render=1');
 
-  await expect(page.locator('[data-rshono-fatal]')).toBeVisible();
+  await expect(page.locator('[data-rsvhono-fatal]')).toBeVisible();
   await expect.poll(() => navigationResult(page).then((result) => result?.state)).toBe('resolved');
 });
 

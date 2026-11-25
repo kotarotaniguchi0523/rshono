@@ -1,4 +1,4 @@
-import type { PageProps } from '@rshono/core';
+import type { PageProps } from '@rsvhono/core';
 import { NavInfo } from './nav-info';
 import { ObservedNavigationRepro } from './navigation-repro';
 

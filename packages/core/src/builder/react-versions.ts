@@ -48,7 +48,7 @@ function minor(version: string): string {
  * version this release was tested with.
  *
  * The mismatch is an error because it never works. A different minor is only a warning: upstream declares
- * `^19.1.0` and may well be right, and refusing to build would make rshono the reason an app cannot take a
+ * `^19.1.0` and may well be right, and refusing to build would make rsvhono the reason an app cannot take a
  * React release — a worse failure than the one it would prevent.
  *
  * @param rootDir - The project root, so resolution follows the *app's* `node_modules` rather than the
@@ -64,7 +64,7 @@ export function checkReactVersions(rootDir: string): void {
 
   if (react !== reactDom) {
     throw new Error(
-      `[rshono] react ${react} and react-dom ${reactDom} resolve to different versions.\n` +
+      `[rsvhono] react ${react} and react-dom ${reactDom} resolve to different versions.\n` +
         '  React Server Components couple them: the RSC runtime emits a payload the matching react-dom parses, ' +
         'so a split resolution fails inside React while rendering rather than here.\n' +
         '  Install both at the same version. If a transitive dependency is what split them, pin them — ' +
@@ -75,7 +75,7 @@ export function checkReactVersions(rootDir: string): void {
   const tested = testedReactVersion();
   if (tested && minor(tested) !== minor(react)) {
     console.warn(
-      `  ⚠ react ${react} is not the ${minor(tested)}.x this rshono was tested against. The RSC runtime is pinned\n` +
+      `  ⚠ react ${react} is not the ${minor(tested)}.x this rsvhono was tested against. The RSC runtime is pinned\n` +
         '    to an exact version and reaches into React internals, so a different minor can fail at render time.',
     );
   }

@@ -1,6 +1,6 @@
 'use server-entry';
 
-import type { PageProps } from '@rshono/core';
+import type { PageProps } from '@rsvhono/core';
 import { fakeDB } from '../db';
 import { Layout } from './layout';
 import { NavInfo } from './nav-info';
@@ -9,10 +9,10 @@ export default async function Documentation({ params, url }: PageProps<'/docs/:s
   const [doc, docs] = await Promise.all([fakeDB.getDoc(params.slug), fakeDB.listDocs()]);
 
   return (
-    <Layout title={`${doc?.title ?? 'Docs'} — rshono`}>
+    <Layout title={`${doc?.title ?? 'Docs'} — rsvhono`}>
       {/*
         The absolute URL of a prerendered page is decided at build time — there is no request to
-        read a Host from — so this is what `siteUrl` in rshono.config exists for. Without it the
+        read a Host from — so this is what `siteUrl` in rsvhono.config exists for. Without it the
         canonical tag baked into this file would point at localhost. React 19 hoists the link into
         <head> on its own.
       */}

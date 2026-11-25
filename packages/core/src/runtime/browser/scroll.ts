@@ -12,7 +12,7 @@ export type ScrollPoint = { x: number; y: number };
 const scrollPositions = new Map<string, ScrollPoint>();
 
 /** The `sessionStorage` key holding {@link scrollPositions}. */
-const SCROLL_STORAGE_KEY = 'rshono:scroll';
+const SCROLL_STORAGE_KEY = 'rsvhono:scroll';
 
 /** How many entries are kept in that snapshot; the oldest falls out first — `Map` iteration order. */
 const SCROLL_STORAGE_LIMIT = 50;

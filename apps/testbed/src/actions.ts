@@ -1,6 +1,6 @@
 'use server';
 
-import { getRequestContext, redirect } from '@rshono/core/server';
+import { getRequestContext, redirect } from '@rsvhono/core/server';
 import { fakeDB, type User } from './db';
 
 // Not exported — a 'use server' module may only export async functions.

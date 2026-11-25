@@ -1,5 +1,5 @@
 // Everything except `src/routes.ts` is optional — this app proves it by leaving all of it out: no
-// server.ts, no public/, no rshono.config, no notFound page, no error page, and the bare-array
+// server.ts, no public/, no rsvhono.config, no notFound page, no error page, and the bare-array
 // `defineRoutes` shorthand. The rest of the suite runs against one richly-configured testbed, which
 // is exactly the app that would never catch "the framework assumes X exists".
 import assert from 'node:assert/strict';
@@ -116,8 +116,8 @@ test('the security and caching defaults apply with no config file at all', async
 
 test('with no server.ts there is no CSRF check — that is `csrf()` from hono, and this app has none', async () => {
   // The framework used to run an origin check of its own, configured by `checkOrigin` in
-  // rshono.config.ts. It is Hono's `csrf()` now, registered in src/server.ts, which this app does not
-  // have — so a cross-origin POST reaches the route rather than being refused. `create-rshono`
+  // rsvhono.config.ts. It is Hono's `csrf()` now, registered in src/server.ts, which this app does not
+  // have — so a cross-origin POST reaches the route rather than being refused. `create-rsvhono`
   // scaffolds that middleware into every new app; an app hand-written down to routes.ts opts in.
   //
   // No `Sec-Fetch-Site`, so this is a non-browser client: nothing labelled it cross-site, and nothing
@@ -178,7 +178,7 @@ test('a browser-shaped form post from another origin cannot reach a server actio
 
 // What the framework *refuses*, which for this app is the other half of the same claim: `src/routes.ts`
 // and `src/server.ts` are the two modules it cannot type-check, so both are validated at load. Each of
-// these used to be either a `TypeError` from inside a minified bundle, naming neither rshono nor the file
+// these used to be either a `TypeError` from inside a minified bundle, naming neither rsvhono nor the file
 // the developer has to open, or — for the duplicate path — a clean exit 0 with the second entry dead.
 const throwaway = [];
 after(() => {
@@ -189,14 +189,14 @@ after(() => {
  * The minimal app with `src/routes.ts` replaced, somewhere disposable — a build that must fail, run safely.
  *
  * **Inside the fixture**, not in the OS temp directory, and with no `node_modules` of its own: these two
- * cases run a real Rspack build, and `@rshono/core` is the one package it cannot resolve from the
+ * cases run a real Rspack build, and `@rsvhono/core` is the one package it cannot resolve from the
  * *framework's* `node_modules` — it is reachable only through the app's. Nesting the copy one level down
  * means the resolver walks up and finds the fixture's real `node_modules`, with no link of any kind in the
  * way.
  *
  * That link used to be a Windows-only build failure. A `'junction'` to the fixture's `node_modules` from a
  * temp directory on another volume is not traversed by the bundler's resolver there, so the build died on
- * `Can't resolve '@rshono/core'` before it could reach the validation these cases are about — while
+ * `Can't resolve '@rsvhono/core'` before it could reach the validation these cases are about — while
  * `react` and `hono`, which the framework's own `node_modules` answers for, resolved fine and hid the
  * shape of it.
  *
@@ -212,11 +212,11 @@ function appWithRoutes(routesSource) {
 }
 
 const HOME_AND = (second) =>
-  `import { defineRoutes } from '@rshono/core';\nexport const routes = defineRoutes([\n  { path: '/', component: () => import('./pages/home') },\n${second}]);\n`;
+  `import { defineRoutes } from '@rsvhono/core';\nexport const routes = defineRoutes([\n  { path: '/', component: () => import('./pages/home') },\n${second}]);\n`;
 
 test('a rebuild drops a public/ file that is no longer there', () => {
   // `dist/public` was the one directory the build assembled with `cpSync` and no `rm` first, so a file
-  // deleted from `public/` survived in the output and went on being served by `rshono start` — for good,
+  // deleted from `public/` survived in the output and went on being served by `rsvhono start` — for good,
   // since nothing else ever touched it. Every other output directory here is cleared: `dist/ssg` and both
   // CDN presets' own trees, each with a comment saying why. Deleting `public/` outright was the worse
   // half: the copy is conditional, so the whole of the old tree stayed.
@@ -274,7 +274,7 @@ test('a second route claiming a path the table already answers fails the build, 
   const dir = appWithRoutes(HOME_AND("  { path: '/', component: () => import('./pages/manual') },\n"));
   const { status, output } = runCli(dir, ['build']);
   assert.equal(status, 1, `the build must not exit 0:\n${output}`);
-  assert.match(output, /\[rshono\] src\/routes\.ts: routes\[1\] \("\/"\) would never run — routes\[0\] \("\/"\) already answers GET, POST \//);
+  assert.match(output, /\[rsvhono\] src\/routes\.ts: routes\[1\] \("\/"\) would never run — routes\[0\] \("\/"\) already answers GET, POST \//);
   assert.doesNotMatch(output, /is not iterable|Cannot read properties/, 'and not by handing over a TypeError from a minified bundle');
   assert.doesNotMatch(
     output,
@@ -312,7 +312,7 @@ test("a 'use server' module that cannot be evaluated is a build warning, not a 5
 
 test('the one required file missing is one line, from `build` and from `dev` alike', () => {
   // `src/routes.ts` is the file this whole fixture exists to say is required, so its absence is the likeliest
-  // first-run failure there is — and it used to get the worst output of any of them. The `[rshono]` message
+  // first-run failure there is — and it used to get the worst output of any of them. The `[rsvhono]` message
   // was only turned into a line by a `phase()` helper inside `build.ts`, wrapped around three later stages;
   // `createConfigs` raises this one *before* the first of them, and `dev` never had the helper at all. Both
   // fell through to `main().catch`'s bare `console.error(error)` — a raw `Error` object with
@@ -325,27 +325,27 @@ test('the one required file missing is one line, from `build` and from `dev` ali
 
   for (const command of ['build', 'dev']) {
     const { status, output } = runCli(dir, [command], { env: { PORT: '0' } });
-    assert.equal(status, 1, `\`rshono ${command}\` must exit 1:\n${output}`);
-    assert.match(output, /✗ \[rshono\] src\/routes\.ts not found/, `\`rshono ${command}\` must name the file that is missing`);
+    assert.equal(status, 1, `\`rsvhono ${command}\` must exit 1:\n${output}`);
+    assert.match(output, /✗ \[rsvhono\] src\/routes\.ts not found/, `\`rsvhono ${command}\` must name the file that is missing`);
     assert.match(output, /it is the one required file/, 'and say why it matters');
     assert.doesNotMatch(
       output,
       /\n\s+at /,
-      `\`rshono ${command}\` must not print a stack — node:internal and framework frames are not the user’s to read`,
+      `\`rsvhono ${command}\` must not print a stack — node:internal and framework frames are not the user’s to read`,
     );
   }
 });
 
 test('a failure that is not the app’s keeps its stack, because that stack is the report', () => {
-  // The other half of the rule: only a `[rshono]`-prefixed message is a message for the user. Anything else
+  // The other half of the rule: only a `[rsvhono]`-prefixed message is a message for the user. Anything else
   // is a bug in the framework, and flattening it to one line would throw away the only thing that locates it.
   // A config module that throws is the cheapest way to raise one from inside the CLI's own call path.
   const dir = appWithRoutes(HOME_AND(''));
-  writeFileSync(join(dir, 'rshono.config.ts'), "throw new Error('not an rshono message');\n");
+  writeFileSync(join(dir, 'rsvhono.config.ts'), "throw new Error('not an rsvhono message');\n");
 
   const { status, output } = runCli(dir, ['build']);
   assert.equal(status, 1);
-  assert.match(output, /not an rshono message/);
+  assert.match(output, /not an rsvhono message/);
   assert.match(output, /\n\s+at /, 'a framework fault has to keep the frames that say where it came from');
 });
 
@@ -354,7 +354,7 @@ test('a src/server.ts that does not default-export a Hono app fails the build, n
   writeFileSync(join(dir, 'src', 'server.ts'), 'export default { notAHono: true };\n');
   const { status, output } = runCli(dir, ['build']);
   assert.equal(status, 1, `the build must not exit 0:\n${output}`);
-  assert.match(output, /\[rshono\] src\/server\.ts must `export default` a Hono app/);
+  assert.match(output, /\[rsvhono\] src\/server\.ts must `export default` a Hono app/);
   assert.doesNotMatch(output, /Cannot read properties of undefined/, "Hono's own failure names nothing the developer wrote");
   assert.doesNotMatch(output, /\n\s+at /, 'and as a line, not an Error object');
 });
@@ -368,7 +368,7 @@ test('a src/server.ts that does not default-export a Hono app fails the build, n
  */
 test('four route modules that can never serve a request fail the build, naming all four', () => {
   const dir = appWithRoutes(
-    `import { defineRoutes } from '@rshono/core';
+    `import { defineRoutes } from '@rsvhono/core';
 export const routes = defineRoutes([
   { path: '/', component: () => import('./pages/home') },
   { path: '/clientpage', component: () => import('./pages/clientpage') },
@@ -384,7 +384,7 @@ export const routes = defineRoutes([
 
   const { status, output } = runCli(dir, ['build']);
   assert.equal(status, 1, `the build must not exit 0:\n${output}`);
-  assert.match(output, /\[rshono\] 4 route modules cannot serve a request:/);
+  assert.match(output, /\[rsvhono\] 4 route modules cannot serve a request:/);
   assert.match(output, /• The page component for "\/clientpage" is a client component \('use client'\)/);
   assert.match(output, /• The page module for "\/noexport" must default-export a server component\./);
   assert.match(output, /• The page module for "\/static-broken" must default-export a server component\./);
@@ -405,7 +405,7 @@ test('a static page that throws at build time fails the build, rather than being
   const dir = appWithRoutes(HOME_AND("  { path: '/boom', render: 'static', component: () => import('./pages/boom') },\n"));
   const { status, output } = runCli(dir, ['build']);
   assert.equal(status, 1, `the build must not exit 0:\n${output}`);
-  assert.match(output, /\[rshono\] 1 page failed to render while prerendering:/);
+  assert.match(output, /\[rsvhono\] 1 page failed to render while prerendering:/);
   assert.match(output, /• "\/boom" rendered 500/);
   assert.match(output, /minimal app blew up on purpose/, "the page's own error is in the log, from the render that threw");
   assert.doesNotMatch(output, /will SSR per request/, 'because it will not — it will 500 per request');
@@ -413,13 +413,13 @@ test('a static page that throws at build time fails the build, rather than being
 });
 
 /*
- * The one common mistake the *client* compiler could not explain. `@rshono/core/server` is server-only —
+ * The one common mistake the *client* compiler could not explain. `@rsvhono/core/server` is server-only —
  * `getRequestContext()` is an AsyncLocalStorage lookup — so the browser bundle cannot have it, and the build
  * is right to fail. What it used to fail with was the resolver's report of the first `node:` builtin three
  * modules down: `Reading from "node:async_hooks" is not handled by plugins (Unhandled scheme)`, with no file
- * path, no issuer, and no mention of rshono or of the import that caused it.
+ * path, no issuer, and no mention of rsvhono or of the import that caused it.
  */
-test("a 'use client' module importing @rshono/core/server fails the build naming the file, not node:async_hooks", () => {
+test("a 'use client' module importing @rsvhono/core/server fails the build naming the file, not node:async_hooks", () => {
   const dir = appWithRoutes(HOME_AND("  { path: '/leaky', component: () => import('./pages/leaky') },\n"));
   writeFileSync(
     join(dir, 'src', 'pages', 'leaky.tsx'),
@@ -427,14 +427,14 @@ test("a 'use client' module importing @rshono/core/server fails the build naming
   );
   writeFileSync(
     join(dir, 'src', 'pages', 'widget.tsx'),
-    "'use client';\nimport { getRequestContext } from '@rshono/core/server';\nexport function Widget() {\n  return <p>{getRequestContext().url.pathname}</p>;\n}\n",
+    "'use client';\nimport { getRequestContext } from '@rsvhono/core/server';\nexport function Widget() {\n  return <p>{getRequestContext().url.pathname}</p>;\n}\n",
   );
 
   const { status, output } = runCli(dir, ['build']);
   assert.equal(status, 1, `the build must not exit 0:\n${output}`);
   // Rspack colours its own "ERROR in <file>" line, so the escapes land between the words.
   const plain = output.replaceAll(new RegExp(String.fromCharCode(27) + '\\[\\d+m', 'g'), '');
-  assert.match(plain, /\[rshono\] src[\\/]pages[\\/]widget\.tsx imports '@rshono\/core\/server', which the browser bundle cannot have\./);
+  assert.match(plain, /\[rsvhono\] src[\\/]pages[\\/]widget\.tsx imports '@rsvhono\/core\/server', which the browser bundle cannot have\./);
   assert.match(output, /useNavigation\(\)/, 'and what to use instead');
   assert.doesNotMatch(output, /node:async_hooks|Unhandled scheme/, 'the resolver report names a builtin the author never wrote');
 });
@@ -456,7 +456,7 @@ test("a 'use client' page is refused whether or not something else comes first i
 
     const { status, output } = runCli(dir, ['build']);
     assert.equal(status, 1, `${JSON.stringify(head)}: the build must not exit 0:\n${output}`);
-    assert.match(output, /\[rshono\] The page component for "\/client" is a client component \('use client'\)/, 'the framework names the page');
+    assert.match(output, /\[rsvhono\] The page component for "\/client" is a client component \('use client'\)/, 'the framework names the page');
     assert.match(output, /wrap the 'use client' component in one instead/, 'and says what to do about it');
     assert.doesNotMatch(output, /build complete/, `${JSON.stringify(head)}: nothing that reads as the build having worked`);
   }
@@ -506,7 +506,7 @@ test('a prerendered document merges the app’s Vary rather than replacing it', 
 /*
  * A disconnect aborts `c.req.raw.signal`, and both renders are handed that signal, so what they reject with
  * is the abort. The two render callbacks treat that as "the client leaving, not a fault"; the top-level
- * handler did not, so every closed tab was reported — `[rshono] request error: ... aborted` on stderr and to
+ * handler did not, so every closed tab was reported — `[rsvhono] request error: ... aborted` on stderr and to
  * whatever `onServerError` forwards. The page awaits ahead of the shell so the abort lands inside the render
  * rather than after it.
  */
@@ -529,7 +529,7 @@ test('a client that disconnects mid-render is not reported as a request error', 
     await new Promise((resolve) => setTimeout(resolve, 2000));
 
     const logged = getOutput().slice(before);
-    assert.doesNotMatch(logged, /\[rshono\] request error/, `a disconnect must not be reported as a request error:\n${logged}`);
+    assert.doesNotMatch(logged, /\[rsvhono\] request error/, `a disconnect must not be reported as a request error:\n${logged}`);
   } finally {
     await stopServer(appChild);
   }
@@ -549,7 +549,7 @@ test('a client that disconnects mid-render is not reported as a request error', 
  */
 test("a disconnect during the error page's own render is not reported as a request error", async () => {
   const dir = appWithRoutes(
-    `import { defineRoutes } from '@rshono/core';
+    `import { defineRoutes } from '@rsvhono/core';
 export const routes = defineRoutes({
   routes: [{ path: '/boom', component: () => import('./pages/boom') }],
   error: { component: () => import('./pages/slow-error') },
@@ -574,7 +574,7 @@ export const routes = defineRoutes({
 
     const logged = getOutput().slice(before);
     assert.doesNotMatch(logged, /the error page failed to render/, `the error page's aborted render must not be reported:\n${logged}`);
-    assert.doesNotMatch(logged, /\[rshono\] request error/, `nor may the abort be re-tagged as a request error:\n${logged}`);
+    assert.doesNotMatch(logged, /\[rsvhono\] request error/, `nor may the abort be re-tagged as a request error:\n${logged}`);
   } finally {
     await stopServer(appChild);
   }

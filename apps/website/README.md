@@ -1,10 +1,10 @@
 # website
 
-The rshono website — landing page and documentation, built with rshono.
+The rsvhono website — landing page and documentation, built with rsvhono.
 
 ```bash
 pnpm --filter website dev        # dev server with HMR, http://localhost:3000
-pnpm --filter website build      # production build (deploy target from rshono.config.ts)
+pnpm --filter website build      # production build (deploy target from rsvhono.config.ts)
 pnpm --filter website typecheck  # tsc --noEmit
 pnpm --filter website lint       # eslint . (lint:fix to write)
 ```
@@ -27,9 +27,9 @@ delete.
 ```
 content/docs/       the documentation, one markdown file per page
 eslint.config.mjs   flat config, type-aware — see the TypeScript pin above
-rshono.config.ts    deploy target, siteUrl, and the one Vite plugin this app needs
+rsvhono.config.ts    deploy target, siteUrl, and the one Vite plugin this app needs
 src/
-  routes.ts         the route table — the one file rshono requires
+  routes.ts         the route table — the one file rsvhono requires
   server.ts         trailing-slash redirects and the error funnel
   content/
     docs.ts         the page list, in sidebar order — an import and a line per page
@@ -43,12 +43,12 @@ src/
 ## Everything runs at build time
 
 Every page is `render: 'static'`, so the markdown parse, the Shiki highlight and the table of contents
-all happen once during `rshono build`. A documentation page is finished HTML by the time a browser sees
+all happen once during `rsvhono build`. A documentation page is finished HTML by the time a browser sees
 it, and the only client JavaScript it ships is two islands of well under 1 KB each: copy buttons on code
 blocks, and the package manager choice below.
 
 That is also why no page reads `ctx`: a prerendered page has no request to read one from. `url` is the
-build-time URL, which is the right canonical only because `siteUrl` is set in `rshono.config.ts`.
+build-time URL, which is the right canonical only because `siteUrl` is set in `rsvhono.config.ts`.
 
 ## Adding a documentation page
 
@@ -67,7 +67,7 @@ Frontmatter is YAML, so a `description` that starts with a quote needs quoting:
 Write the command **once, in npm form**. A fenced shell block whose every line is an `npx …` or
 `npm i …` command is replaced at build time with a four-tab selector — npm, pnpm, yarn, bun — carrying
 every variant, and nothing in the markdown says so. A block with a line that has no exact counterpart
-(`rshono dev`, `pnpm --filter …`) does not match and renders as an ordinary code block, which is the
+(`rsvhono dev`, `pnpm --filter …`) does not match and renders as an ordinary code block, which is the
 lever for opting out: say it in a way that is not translatable.
 
 `src/content/package-managers.ts` owns the table, the two translatable command shapes and the markup.
@@ -90,7 +90,7 @@ Every page is served twice: as HTML, and as its own source.
 | `/llms.txt`        | [llms.txt](https://llmstxt.org) index of every page |
 | `/llms-full.txt`   | every page concatenated, in reading order           |
 
-The markdown is **imported**, not read from disk — an `asset/source` rule in `rshono.config.ts` bundles
+The markdown is **imported**, not read from disk — an `asset/source` rule in `rsvhono.config.ts` bundles
 it. That is what lets the `.md` endpoints work on a target with no filesystem, and it means the bytes
 served are the same bytes the prerender parsed.
 
@@ -100,6 +100,6 @@ no content for.
 
 ## Deploying
 
-The target is `deploy` in `rshono.config.ts`. Build for somewhere else without editing the file with
-`rshono build --deploy <name>`, or `RSHONO_DEPLOY=<name>` in CI. `dev` always runs the Node dev server,
+The target is `deploy` in `rsvhono.config.ts`. Build for somewhere else without editing the file with
+`rsvhono build --deploy <name>`, or `RSVHONO_DEPLOY=<name>` in CI. `dev` always runs the Node dev server,
 whatever the target.

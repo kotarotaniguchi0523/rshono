@@ -9,8 +9,8 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-const CLI = join(fileURLToPath(import.meta.url), '..', '..', 'bin', 'create-rshono.mjs');
-const workspace = mkdtempSync(join(tmpdir(), 'create-rshono-cli-'));
+const CLI = join(fileURLToPath(import.meta.url), '..', '..', 'bin', 'create-rsvhono.mjs');
+const workspace = mkdtempSync(join(tmpdir(), 'create-rsvhono-cli-'));
 after(() => rmSync(workspace, { recursive: true, force: true }));
 
 function create(args, { cwd = workspace } = {}) {
@@ -124,14 +124,14 @@ test('flags reach the generated project, with no prompt in a non-interactive run
 
   const target = join(workspace, 'flagged');
   const manifest = JSON.parse(readFileSync(join(target, 'package.json'), 'utf8'));
-  assert.match(readFileSync(join(target, 'rshono.config.ts'), 'utf8'), /deploy: 'vercel'/);
+  assert.match(readFileSync(join(target, 'rsvhono.config.ts'), 'utf8'), /deploy: 'vercel'/);
   assert.ok(existsSync(join(target, 'postcss.config.mjs')));
   assert.ok(existsSync(join(target, 'biome.json')));
   assert.ok(manifest.devDependencies['@biomejs/biome'] && manifest.devDependencies.tailwindcss);
   // The closing summary points at the app's own script rather than restating the command inside it, and
   // the target's note is what explains the one flag that script cannot do without.
   assert.match(result.output, /npm run deploy/, 'the closing summary should say how to deploy it');
-  assert.match(result.output, /--prebuilt uploads what rshono build assembled/, 'and why the flag is in the script');
+  assert.match(result.output, /--prebuilt uploads what rsvhono build assembled/, 'and why the flag is in the script');
 });
 
 test('--no-git leaves no repository, and the scaffold is not committed by accident', () => {

@@ -47,7 +47,7 @@ describe('a production build', async () => {
 
   test('ctx reaches a page that imports a stylesheet', async () => {
     // The RSC plugin wraps a server component whose module imports CSS, and re-creates the element from its
-    // enumerable props — which drops the non-enumerable `ctx`. Pages are wrapped by `rshono:pages` instead.
+    // enumerable props — which drops the non-enumerable `ctx`. Pages are wrapped by `rsvhono:pages` instead.
     const html = await (await fetch(`${base}/?q=hello`, { headers: { cookie: 'probe=seen' } })).text();
     assert.match(html, /data-ctx-cookie="seen"/);
     assert.match(html, /data-ctx-method="GET"/);
@@ -77,7 +77,7 @@ describe('a production build', async () => {
   });
 });
 
-describe('rshono dev', async () => {
+describe('rsvhono dev', async () => {
   const { child, base } = await startApp(APP_DIR, 'dev', { env: ENV });
   after(() => stopServer(child));
   const browser = await launchBrowser();

@@ -14,8 +14,8 @@ import { isPageRoute, type Route } from '../router.js';
  * - **vercel** — `{ handle: 'filesystem' }` sits ahead of the catch-all in `config.json`, by construction.
  * - **cloudflare** — Workers Assets is checked first, which the generated `wrangler.jsonc` says out loud.
  *
- * So an app with `public/about.html` and a page route at `/about.html` renders the page under `rshono dev`
- * and `rshono start`, and serves the file on those two — a behaviour difference discovered by deploying. A
+ * So an app with `public/about.html` and a page route at `/about.html` renders the page under `rsvhono dev`
+ * and `rsvhono start`, and serves the file on those two — a behaviour difference discovered by deploying. A
  * `public/index.html` beside a page route at `/` is the same collision, on the one path every app has.
  *
  * The framework cannot reorder either platform, so this is a build-time warning: the build knows both sides
@@ -88,5 +88,5 @@ export function warnAboutPublicCollisions(collisions: string[], target: string):
   if (collisions.length === 0) return;
   console.warn(`  ⚠ ${collisions.length} public/ file(s) shadow a route on ${target}, where the CDN answers before the app is invoked:`);
   for (const line of collisions) console.warn(`    ${line}`);
-  console.warn(`    Under \`rshono dev\` and \`rshono start\` the route wins instead, so this only appears once deployed.`);
+  console.warn(`    Under \`rsvhono dev\` and \`rsvhono start\` the route wins instead, so this only appears once deployed.`);
 }

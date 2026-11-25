@@ -1,4 +1,4 @@
-import type { HTTPMethod, Route } from '@rshono/core';
+import type { HTTPMethod, Route } from '@rsvhono/core';
 import { routes } from '../routes';
 
 /**

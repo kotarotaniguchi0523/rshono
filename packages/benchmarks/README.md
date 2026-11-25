@@ -1,14 +1,14 @@
-# @rshono/benchmarks
+# @rsvhono/benchmarks
 
-One application, implemented three times — [`@rshono/core`](../core), Next.js App Router, TanStack
+One application, implemented three times — [`@rsvhono/core`](../core), Next.js App Router, TanStack
 Start — and measured on what the framework costs rather than on who renders React faster.
 
 ```bash
-pnpm --filter @rshono/benchmarks setup:apps   # build + pack core, install all three apps
-pnpm --filter @rshono/benchmarks bench        # everything, then write results/latest.md
+pnpm --filter @rsvhono/benchmarks setup:apps   # build + pack core, install all three apps
+pnpm --filter @rsvhono/benchmarks bench        # everything, then write results/latest.md
 ```
 
-**Re-run `setup:apps` after every change to `packages/core`.** The rshono app installs the framework
+**Re-run `setup:apps` after every change to `packages/core`.** The rsvhono app installs the framework
 from a packed tarball, not a workspace link (see `harness/install.mjs` for why), and nothing re-packs
 it except that command — so a `bench` after an unpacked change measures whatever core was current the
 last time you ran it. Every runner now refuses to start when the installed core differs from what this
@@ -22,7 +22,7 @@ taken too. Hence `setup:apps` and `clean:apps`.
 
 ## Why not a throughput shootout
 
-All three render through the same React and stream through the same `react-dom`. rshono's render path
+All three render through the same React and stream through the same `react-dom`. rsvhono's render path
 is a thin shell over `react-server-dom-rspack` and `react-dom/server` — the same two packages Next
 drives, and the same `react-dom` TanStack Start drives. A requests-per-second headline over that
 shared machinery mostly measures whose HTTP layer is in front of it, and any gap it does show is as
@@ -99,33 +99,33 @@ These are limitations of the comparison, not of the frameworks. Read them before
 3. **TanStack Start is served by `vite preview`.** That is the official way to run its production
    build locally, but it is a connect-based preview server, not a deployment target — a real
    TanStack deploy goes through a platform preset. Its `/` throughput in particular (a prerendered
-   file served by preview middleware) should not be read as its deployed static performance. rshono
+   file served by preview middleware) should not be read as its deployed static performance. rsvhono
    and Next are both served by their own production servers, which is the asymmetry to keep in mind.
 4. **TanStack Start is a client-router-first framework.** Its components run in the browser too, so
    the fixture is reached through `createServerFn` rather than imported directly — otherwise all 100
    users would be bundled into the client graph and the payload number would measure a mistake. Its
    loader data is then serialized into the document for the client router to hydrate, which an RSC
    framework does not pay. That is an architectural difference, not a defect.
-5. **rshono pays a production-install cost the other two don't.** `@rspack/core` sits in
-   `@rshono/core`'s `dependencies` rather than `devDependencies` — the bundler is what the CLI it ships
+5. **rsvhono pays a production-install cost the other two don't.** `@rspack/core` sits in
+   `@rsvhono/core`'s `dependencies` rather than `devDependencies` — the bundler is what the CLI it ships
    builds with — so it lands in a production install. `footprint.mjs` measures it.
-6. **rshono is built on experimental `rspack.experiments.rsc` and a pre-1.0 `react-server-dom-rspack`.**
+6. **rsvhono is built on experimental `rspack.experiments.rsc` and a pre-1.0 `react-server-dom-rspack`.**
    Those move under it, which is why this is CI infrastructure to re-run per release rather than a
    number to publish once.
 7. **Not measured:** client-side navigation (three different protocols; measuring it badly is worse
    than not measuring it), HMR round-trip (needs a browser asserting the patch arrived), real
    serverless cold start (platform overhead is a property of the platform), progressive enhancement
-   (rshono and Next have it, TanStack has no equivalent, so the shared client component deliberately
+   (rsvhono and Next have it, TanStack has no equivalent, so the shared client component deliberately
    doesn't use it).
 
 ## Runners
 
 Each writes its own section into `results/latest.json` and can run alone. Pass target ids to narrow:
-`node harness/payload.mjs rshono next`.
+`node harness/payload.mjs rsvhono next`.
 
 | Command                | Notes                                                                                                                              |
 | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `pnpm setup:apps`      | Builds `@rshono/core`, packs it to a tarball, installs all three apps. Run after core changes.                                     |
+| `pnpm setup:apps`      | Builds `@rsvhono/core`, packs it to a tarball, installs all three apps. Run after core changes.                                    |
 | `pnpm bench`           | Every stage, then a snapshot and a report. `--footprint` adds the install measurement.                                             |
 | `pnpm bench:build`     | `--trials=N` (default 3).                                                                                                          |
 | `pnpm bench:payload`   | `--strict` exits non-zero on a failed spec check.                                                                                  |
@@ -145,12 +145,12 @@ the website cannot import it — a fresh clone would have nothing to read. `site
 copy into `apps/website/content/benchmarks.md` instead:
 
 ```bash
-pnpm --filter @rshono/benchmarks bench
-pnpm --filter @rshono/benchmarks site:publish
+pnpm --filter @rsvhono/benchmarks bench
+pnpm --filter @rsvhono/benchmarks site:publish
 ```
 
 Only the measured tables are copied. The framing on that page — what the numbers mean, the caveats, the
-rows rshono loses — is authored JSX in `apps/website/src/components/benchmarks.tsx`, so regenerating data
+rows rsvhono loses — is authored JSX in `apps/website/src/components/benchmarks.tsx`, so regenerating data
 can never overwrite prose that took judgement. Re-running `bench` without `site:publish` leaves the site
 showing the previous run, which is why the published file carries the date it was measured.
 
@@ -161,11 +161,11 @@ those onto Next and TanStack Start would benchmark a configuration nobody ships,
 installed with plain `npm` into isolated `node_modules` — which is also what makes the footprint
 numbers mean anything.
 
-The rshono app installs `@rshono/core` from a packed tarball rather than a `file:` link. A link
+The rsvhono app installs `@rsvhono/core` from a packed tarball rather than a `file:` link. A link
 resolves core's own `react` import to `packages/core/node_modules/react` while the app's components
 resolve to their own copy: two real paths, two React instances, and a null hook dispatcher the moment
 a client component is server-rendered. A tarball extracts into the app's `node_modules`, so everything
-walks up to one React — and it is what `npm i @rshono/core` actually does.
+walks up to one React — and it is what `npm i @rsvhono/core` actually does.
 
 ### Load generator
 

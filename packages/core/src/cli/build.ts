@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createBuilder } from 'vite';
 import { BUILD_OUT_DIR, createViteConfig } from '../builder/vite-config.js';
-import type { RshonoConfig } from '../config.js';
+import type { RsvhonoConfig } from '../config.js';
 import { writeBuildMarker } from '../deploy/build-marker.js';
 import type { DeployPreset } from '../deploy/presets.js';
 import type { Route } from '../router.js';
@@ -14,12 +14,12 @@ import { exit } from './exit.js';
 
 interface BuildOptions {
   rootDir: string;
-  config: RshonoConfig;
+  config: RsvhonoConfig;
   /** The platform to build for, already resolved from the flag, the environment and the config. */
   preset: DeployPreset;
 }
 
-/** What `rshono build` uses the app's own server bundle for, once it has compiled it. */
+/** What `rsvhono build` uses the app's own server bundle for, once it has compiled it. */
 interface ServerBundle {
   app: Hono;
   routes: readonly Route[];
@@ -39,7 +39,7 @@ export async function buildCommand(options: BuildOptions): Promise<void> {
   // Emptied here rather than by Vite: the SSR environment's output sits inside the RSC environment's.
   await rm(join(distDir, 'server'), { recursive: true, force: true });
   await rm(join(distDir, 'static'), { recursive: true, force: true });
-  // Outside the `try`: what this throws is a one-line `[rshono]` message about the app, for the CLI to print.
+  // Outside the `try`: what this throws is a one-line `[rsvhono]` message about the app, for the CLI to print.
   const viteConfig = createViteConfig({ rootDir, isDev: false, config, preset });
   try {
     const builder = await createBuilder(viteConfig);
@@ -52,7 +52,7 @@ export async function buildCommand(options: BuildOptions): Promise<void> {
   const publicDir = join(rootDir, 'public');
   // From scratch, and unconditionally, like every other directory this build assembles. `cpSync` only
   // adds, so a file deleted from `public/` used to survive in `dist/public` and go on being served by
-  // `rshono start` for good — and deleting `public/` outright left the whole of the old tree there, since
+  // `rsvhono start` for good — and deleting `public/` outright left the whole of the old tree there, since
   // the copy below is the only thing that touches it. The two CDN presets clear their own output but read
   // *this* directory, so a stale file propagated into their assets as well, past a comment promising it
   // could not.
@@ -67,11 +67,11 @@ export async function buildCommand(options: BuildOptions): Promise<void> {
 
   const ssgDir = join(distDir, 'ssg');
   await rm(ssgDir, { recursive: true, force: true });
-  process.env.RSHONO_PRERENDER = '1';
+  process.env.RSVHONO_PRERENDER = '1';
   // The bundle's module scope is where `src/routes.ts` and `src/server.ts` are validated.
   //
   // This and the two stages below are what the *app* can fail — the two entry modules here, each route's own
-  // module next, and a page that throws while prerendering after that. Each raises a `[rshono]` message
+  // module next, and a page that throws while prerendering after that. Each raises a `[rsvhono]` message
   // written for whoever is running the build, and `main().catch` in `cli/index.ts` is what prints it as the
   // one line it is. These used to be wrapped in a `phase()` helper that did the same thing three times and
   // nowhere else, which left `createConfigs` above — where a missing `src/routes.ts` is found — printing a

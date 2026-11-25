@@ -1,4 +1,4 @@
-import type { PageProps } from '@rshono/core';
+import type { PageProps } from '@rsvhono/core';
 import { summary, users } from '../data';
 import { Layout } from './layout';
 

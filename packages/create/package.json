@@ -1,14 +1,14 @@
 {
-  "name": "@rshono/create",
+  "name": "@rsvhono/create",
   "version": "1.0.0-rc.29",
-  "description": "Scaffold a new rshono app — Hono + Vite + React Server Components",
+  "description": "Scaffold a new rsvhono app — Hono + Vite + React Server Components",
   "author": "Lasse <lasse@lassetange.com> (https://www.lassetange.com)",
   "license": "MIT",
   "keywords": [
     "create",
     "scaffold",
     "starter",
-    "rshono",
+    "rsvhono",
     "react-server-components",
     "hono",
     "vite"
@@ -24,7 +24,7 @@
   "homepage": "https://github.com/rshono/rshono",
   "type": "module",
   "bin": {
-    "create-rshono": "./bin/create-rshono.mjs"
+    "create-rsvhono": "./bin/create-rsvhono.mjs"
   },
   "exports": {
     ".": "./dist/api.mjs",
@@ -51,7 +51,7 @@
   },
   "devDependencies": {
     "@clack/prompts": "^1.9.0",
-    "@rshono/core": "workspace:*",
+    "@rsvhono/core": "workspace:*",
     "@types/node": "^26.6.6",
     "typescript": "^7.0.2",
     "vite": "8.3.8"

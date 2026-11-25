@@ -1,5 +1,5 @@
-import type { PageProps } from '@rshono/core';
-import { notFound } from '@rshono/core/server';
+import type { PageProps } from '@rsvhono/core';
+import { notFound } from '@rsvhono/core/server';
 import { docNeighbours, getDoc } from '../content/docs';
 import { renderDoc } from '../content/markdown';
 import { DocsSidebar } from './docs-sidebar';
@@ -15,7 +15,7 @@ import { Layout } from './layout';
  * choice](./package-manager-choice.tsx) the layout mounts.
  *
  * That also means no `ctx`: a prerendered page has no request to read one from. `url` is the build-time
- * URL, which is the right canonical only because `siteUrl` is set in `rshono.config.ts`.
+ * URL, which is the right canonical only because `siteUrl` is set in `rsvhono.config.ts`.
  */
 export default async function Documentation({ params, url }: PageProps<'/docs/:slug'>) {
   const doc = getDoc(params.slug);

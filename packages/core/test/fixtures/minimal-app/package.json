@@ -1,17 +1,17 @@
 {
-  "name": "rshono-fixture-minimal",
+  "name": "rsvhono-fixture-minimal",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Test fixture: the smallest app rshono accepts — src/routes.ts and nothing else.",
+  "description": "Test fixture: the smallest app rsvhono accepts — src/routes.ts and nothing else.",
   "scripts": {
-    "build": "rshono build",
-    "start": "rshono start"
+    "build": "rsvhono build",
+    "start": "rsvhono start"
   },
   "dependencies": {
     "hono": "^4.13.17",
     "react": "19.3.1",
     "react-dom": "19.3.1",
-    "@rshono/core": "workspace:*"
+    "@rsvhono/core": "workspace:*"
   }
 }

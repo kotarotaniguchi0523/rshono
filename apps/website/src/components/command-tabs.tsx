@@ -6,7 +6,7 @@ import { inlineCommandAttributes, renderCommandTabs } from '../content/package-m
  * `@latest` because `npx` will happily run a version it cached weeks ago otherwise, and the scaffolder
  * carries the framework's pins — an old one writes an app pinned to a release that has moved on.
  */
-export const SCAFFOLD_COMMAND = 'npx @rshono/create@latest my-app';
+export const SCAFFOLD_COMMAND = 'npx @rsvhono/create@latest my-app';
 
 /**
  * A command with a package manager selector above it, for a handwritten page.

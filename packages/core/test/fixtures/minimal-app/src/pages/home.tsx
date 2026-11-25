@@ -1,4 +1,4 @@
-import type { PageProps } from '@rshono/core';
+import type { PageProps } from '@rsvhono/core';
 
 export default function Home({ url, ctx }: PageProps) {
   return (

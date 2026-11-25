@@ -1,8 +1,8 @@
-import { defineRoutes } from '@rshono/core';
+import { defineRoutes } from '@rsvhono/core';
 import { DOCS } from './content/docs';
 
 /**
- * The one file rshono requires. It only ever runs on the server, so importing server-only modules from
+ * The one file rsvhono requires. It only ever runs on the server, so importing server-only modules from
  * it — inside `staticPaths`, say — is safe.
  *
  * Every page here is `render: 'static'`: this is a documentation site, so there is nothing per-request

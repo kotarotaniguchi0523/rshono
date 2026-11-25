@@ -1,4 +1,4 @@
-// `rshono start` decides, from what is on disk, whether it can run the build at all.
+// `rsvhono start` decides, from what is on disk, whether it can run the build at all.
 //
 // The gate reads two files, so the fixtures are written directly rather than produced by building the
 // testbed once per platform — the same assertions, without six production builds.
@@ -10,25 +10,25 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, test } from 'node:test';
 
-const CLI = fileURLToPath(new URL('../bin/rshono.mjs', import.meta.url));
+const CLI = fileURLToPath(new URL('../bin/rsvhono.mjs', import.meta.url));
 
 const start = (cwd, { env = {}, args = [] } = {}) =>
   spawnSync(process.execPath, [CLI, 'start', ...args], { cwd, encoding: 'utf8', timeout: 30_000, env: { ...process.env, ...env } });
 
 /**
- * A project directory holding what `rshono start` inspects: the server bundle it would spawn, and the
- * marker `rshono build` leaves recording which platform produced it. `deploy: null` writes no marker,
- * standing in for a build from a version of rshono that predates it.
+ * A project directory holding what `rsvhono start` inspects: the server bundle it would spawn, and the
+ * marker `rsvhono build` leaves recording which platform produced it. `deploy: null` writes no marker,
+ * standing in for a build from a version of rsvhono that predates it.
  */
 function projectWith({ deploy, bundle = 'process.exit(0);\n' } = {}) {
-  const dir = mkdtempSync(join(tmpdir(), 'rshono-start-'));
+  const dir = mkdtempSync(join(tmpdir(), 'rsvhono-start-'));
   mkdirSync(join(dir, 'dist', 'server'), { recursive: true });
   writeFileSync(join(dir, 'dist', 'server', 'main.mjs'), bundle);
-  if (deploy) writeFileSync(join(dir, 'dist', 'rshono-build.json'), JSON.stringify({ deploy }));
+  if (deploy) writeFileSync(join(dir, 'dist', 'rsvhono-build.json'), JSON.stringify({ deploy }));
   return dir;
 }
 
-describe('`rshono start` refuses what it cannot run', () => {
+describe('`rsvhono start` refuses what it cannot run', () => {
   test('a build made for a platform, which has no listener in it and would exit silently', () => {
     const result = start(projectWith({ deploy: 'cloudflare' }));
     assert.equal(result.status, 1);
@@ -38,14 +38,14 @@ describe('`rshono start` refuses what it cannot run', () => {
   });
 
   test('no build at all, naming the command that makes one', () => {
-    const result = start(mkdtempSync(join(tmpdir(), 'rshono-unbuilt-')));
+    const result = start(mkdtempSync(join(tmpdir(), 'rsvhono-unbuilt-')));
     assert.equal(result.status, 1);
     assert.match(result.stderr, /no production build found/);
-    assert.match(result.stderr, /rshono build/);
+    assert.match(result.stderr, /rsvhono build/);
   });
 });
 
-describe('`rshono start` runs what it can', () => {
+describe('`rsvhono start` runs what it can', () => {
   test('a node build', () => {
     const result = start(projectWith({ deploy: 'node' }));
     assert.equal(result.status, 0, result.stderr);
@@ -67,7 +67,7 @@ describe('`rshono start` runs what it can', () => {
 // The port is settled twice — once by the CLI, which puts it in the environment, and once by the bundle,
 // which binds it — so the two readings have to agree. `parsePort` is the single reading (unit-tested in
 // test/unit.test.mjs); these cover the CLI half: what it refuses, and what it hands on untouched.
-describe('`rshono start` and the port', () => {
+describe('`rsvhono start` and the port', () => {
   /** A bundle that reports the environment the CLI left it, instead of binding anything. */
   const echoPort = 'console.log("PORT=" + JSON.stringify(process.env.PORT));\n';
 
@@ -91,7 +91,7 @@ describe('`rshono start` and the port', () => {
     test(`refuses a PORT that is ${label}, before anything binds`, () => {
       const result = start(projectWith({ deploy: 'node', bundle: echoPort }), { env: { PORT: value } });
       assert.equal(result.status, 1);
-      assert.match(result.stderr, /rshono: invalid PORT/, 'reported like every other bad CLI input');
+      assert.match(result.stderr, /rsvhono: invalid PORT/, 'reported like every other bad CLI input');
       assert.match(result.stderr, /0 and 65535/, 'and says what a port is');
       assert.doesNotMatch(result.stderr, /\n\s+at /, 'one line, not a RangeError with a bundler frame in it');
       assert.doesNotMatch(result.stdout, /PORT=/, 'the bundle never ran');
@@ -100,12 +100,12 @@ describe('`rshono start` and the port', () => {
     test(`refuses a --port that is ${label}`, () => {
       const result = start(projectWith({ deploy: 'node', bundle: echoPort }), { args: ['--port', value] });
       assert.equal(result.status, 1);
-      assert.match(result.stderr, /rshono: invalid --port/);
+      assert.match(result.stderr, /rsvhono: invalid --port/);
     });
   }
 
   test('hands HOST to the bundle, which is the command it belongs to', () => {
-    // The counterpart to the `rshono dev` warning: `start` is where `HOST` does something, and it reaches
+    // The counterpart to the `rsvhono dev` warning: `start` is where `HOST` does something, and it reaches
     // the bundle as the environment variable the listener reads.
     const bundle = 'console.log("HOST=" + JSON.stringify(process.env.HOST));\n';
     assert.match(start(projectWith({ deploy: 'node', bundle }), { env: { HOST: '0.0.0.0' } }).stdout, /HOST="0\.0\.0\.0"/);
@@ -123,17 +123,17 @@ describe('HOST belongs to `start`, and `dev` says so', () => {
   // the dispatch, ahead of anything dev does.
   const dev = (env) =>
     spawnSync(process.execPath, [CLI, 'dev'], {
-      cwd: mkdtempSync(join(tmpdir(), 'rshono-nohost-')),
+      cwd: mkdtempSync(join(tmpdir(), 'rsvhono-nohost-')),
       encoding: 'utf8',
       timeout: 60_000,
       env: { ...process.env, ...env },
     });
 
-  test('warns that `rshono dev` ignores it', () => {
+  test('warns that `rsvhono dev` ignores it', () => {
     const result = dev({ HOST: '0.0.0.0' });
-    assert.match(result.stderr, /HOST is ignored by `rshono dev`/, 'setting it must not be a silent no-op');
+    assert.match(result.stderr, /HOST is ignored by `rsvhono dev`/, 'setting it must not be a silent no-op');
     assert.match(result.stderr, /always binds 127\.0\.0\.1/, 'and the message has to say what it does instead');
-    assert.match(result.stderr, /applies to `rshono start`/, 'and where the variable does work');
+    assert.match(result.stderr, /applies to `rsvhono start`/, 'and where the variable does work');
   });
 
   test('says nothing when it is not set', () => {
@@ -155,17 +155,17 @@ describe('the CLI reports a bad flag the way it reports every other bad input', 
   const cli = (args) => spawnSync(process.execPath, [CLI, ...args], { cwd: tmpdir(), encoding: 'utf8', timeout: 30_000 });
 
   for (const [what, args, expected] of [
-    ['an unknown long flag', ['build', '--porf', '3000'], /rshono: Unknown option '--porf'/],
-    ['an unknown short flag', ['build', '-z'], /rshono: Unknown option '-z'/],
-    ['a flag missing its value', ['start', '--port'], /rshono: Option '-p, --port <value>' argument missing/],
-    ['a value given to a boolean flag', ['build', '--help=x'], /rshono: Option '-h, --help' does not take an argument/],
+    ['an unknown long flag', ['build', '--porf', '3000'], /rsvhono: Unknown option '--porf'/],
+    ['an unknown short flag', ['build', '-z'], /rsvhono: Unknown option '-z'/],
+    ['a flag missing its value', ['start', '--port'], /rsvhono: Option '-p, --port <value>' argument missing/],
+    ['a value given to a boolean flag', ['build', '--help=x'], /rsvhono: Option '-h, --help' does not take an argument/],
   ]) {
     test(`refuses ${what}`, () => {
       const result = cli(args);
       assert.equal(result.status, 1);
-      assert.match(result.stderr, expected, 'one line naming the flag, like `rshono: unknown command` beside it');
+      assert.match(result.stderr, expected, 'one line naming the flag, like `rsvhono: unknown command` beside it');
       assert.doesNotMatch(result.stderr, /\n\s+at /, 'and no stack: node:internal frames are not the user’s to read');
-      assert.match(result.stdout, /Usage:\n {2}rshono dev/, 'with the help beneath it, which is where the real flags are listed');
+      assert.match(result.stdout, /Usage:\n {2}rsvhono dev/, 'with the help beneath it, which is where the real flags are listed');
     });
   }
 });

@@ -61,7 +61,7 @@ export function installServerFunctions(): void {
     const result = payload.returnValue;
     if (!result) {
       throw new Error(
-        '[rshono] the server action produced no result — the request failed around it and the server answered with a page instead. Its log has the error.',
+        '[rsvhono] the server action produced no result — the request failed around it and the server answered with a page instead. Its log has the error.',
       );
     }
     if (!result.ok) throw result.error;

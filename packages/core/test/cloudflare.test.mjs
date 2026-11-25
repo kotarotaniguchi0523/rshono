@@ -21,7 +21,7 @@ const STATIC_IMPORTS = /(?:^|[;}])\s*import\s*(?:[^'"]*?\bfrom\s*)?['"]([^'"]+)[
 
 const ASSETS_ROOT = join(TESTBED_DIST, 'cloudflare', 'assets');
 const WRANGLER_CONFIG = join(TESTBED_DIR, 'wrangler.jsonc');
-const ORIGIN = 'https://rshono.example';
+const ORIGIN = 'https://rsvhono.example';
 
 /** Whether the project had a Wrangler config before the build, so the test only removes its own. */
 let hadWranglerConfig = false;
@@ -295,7 +295,7 @@ describe('serving from a Worker', () => {
  *
  * On Workers, because `@hono/node-server` replaces the global `Response` with a lightweight class whose
  * headers are always mutable — `Response.redirect()` included. So `node` and `vercel`, which is dev,
- * `rshono start` and most of this suite, cannot see this bug; `cloudflare` and `aws-lambda` get the
+ * `rsvhono start` and most of this suite, cannot see this bug; `cloudflare` and `aws-lambda` get the
  * platform's own `Response`, whose bag is guarded `immutable`.
  */
 describe('serving an app that has no middleware of its own', () => {

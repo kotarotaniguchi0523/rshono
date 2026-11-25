@@ -6,7 +6,7 @@ export const metadata = { title: 'Benchmark Suite' };
 
 /**
  * Nav uses `next/link` for client-side navigation — the counterpart to TanStack's `<Link>` and to
- * rshono's plain `<a href>`, which its runtime soft-navigates on its own. Same user-visible
+ * rsvhono's plain `<a href>`, which its runtime soft-navigates on its own. Same user-visible
  * behaviour, each framework's idiomatic way of getting it.
  */
 export default function RootLayout({ children }: { children: ReactNode }) {

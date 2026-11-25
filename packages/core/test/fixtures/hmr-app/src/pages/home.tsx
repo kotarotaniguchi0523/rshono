@@ -1,4 +1,4 @@
-import type { PageProps } from '@rshono/core';
+import type { PageProps } from '@rsvhono/core';
 import { Counter } from '../components/counter';
 import './home.css';
 

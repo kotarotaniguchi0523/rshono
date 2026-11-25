@@ -7,16 +7,16 @@
     "node": ">=22.1.0"
   },
   "scripts": {
-    "dev": "rshono dev",
-    "build": "pnpm --filter @rshono/core build && rshono build",
+    "dev": "rsvhono dev",
+    "build": "pnpm --filter @rsvhono/core build && rsvhono build",
     "typecheck": "tsc --noEmit",
-    "start": "rshono start",
+    "start": "rsvhono start",
     "deploy": "pnpm run build && wrangler deploy",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix"
   },
   "dependencies": {
-    "@rshono/core": "workspace:*",
+    "@rsvhono/core": "workspace:*",
     "@shikijs/langs": "^4.6.0",
     "@shikijs/themes": "^4.6.0",
     "gray-matter": "^4.0.3",

@@ -3,7 +3,7 @@
 // whatever Node the user happens to have. A version check inside the CLI bundle would be too late — its imports
 // evaluate before any statement in it.
 //
-// Kept in step with `engines.node` in @rshono/core's manifest, which is what a scaffolded app pins.
+// Kept in step with `engines.node` in @rsvhono/core's manifest, which is what a scaffolded app pins.
 var MINIMUM = [22, 18, 0];
 
 var current = process.versions.node.split('.').map(Number);
@@ -16,12 +16,12 @@ for (var i = 0; i < MINIMUM.length; i++) {
 
 if (older) {
   console.error(
-    '\ncreate-rshono needs Node ' +
+    '\ncreate-rsvhono needs Node ' +
       MINIMUM.join('.') +
       ' or newer — you are on ' +
       process.versions.node +
       '.\n' +
-      'rshono itself requires it (native TypeScript stripping loads rshono.config.ts, and the dev\n' +
+      'rsvhono itself requires it (native TypeScript stripping loads rsvhono.config.ts, and the dev\n' +
       'server needs process.loadEnvFile and Promise.withResolvers), so scaffolding on this version\n' +
       'would produce an app that cannot start.\n',
   );

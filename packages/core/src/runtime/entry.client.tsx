@@ -73,7 +73,7 @@ async function main() {
   // re-read the payload and show it — client state is kept. `import.meta.hot` is `undefined` in a production
   // build, which drops the block.
   import.meta.hot?.on('rsc:update', () => {
-    console.log('[rshono] server components updated');
+    console.log('[rsvhono] server components updated');
     refetch();
   });
 }
@@ -81,6 +81,6 @@ async function main() {
 // A bootstrap failure — a truncated inlined payload, a chunk that would not load — leaves a server-rendered
 // page that looks alive and responds to nothing. Say so.
 main().catch((error) => {
-  console.error('[rshono] the client runtime failed to start:', error);
+  console.error('[rsvhono] the client runtime failed to start:', error);
   showFatal(error);
 });

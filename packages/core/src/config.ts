@@ -2,7 +2,7 @@ import type { UserConfig } from 'vite';
 import type { DeployTarget } from './deploy/contract.js';
 
 /**
- * Project configuration, default-exported from `rshono.config.ts` at the project root (`.js` / `.mjs`
+ * Project configuration, default-exported from `rsvhono.config.ts` at the project root (`.js` / `.mjs`
  * also work). Every field is optional; omit the file entirely to accept all defaults.
  *
  * It holds only what the *build* decides. Per-request concerns — CSRF, CSP, the body cap — are Hono
@@ -10,7 +10,7 @@ import type { DeployTarget } from './deploy/contract.js';
  *
  * @example
  * ```ts
- * import { defineConfig } from '@rshono/core';
+ * import { defineConfig } from '@rsvhono/core';
  *
  * export default defineConfig({
  *   deploy: 'cloudflare',
@@ -20,13 +20,13 @@ import type { DeployTarget } from './deploy/contract.js';
  *
  * @see {@link https://www.rshono.com/docs/configuration | Docs — configuration}
  */
-export interface RshonoConfig {
+export interface RsvhonoConfig {
   /**
-   * The hosting platform `rshono build` targets. Default `'node'` — a long-lived server process run
-   * with `rshono start`.
+   * The hosting platform `rsvhono build` targets. Default `'node'` — a long-lived server process run
+   * with `rsvhono start`.
    *
-   * Overridden by the `--deploy` flag or the `RSHONO_DEPLOY` env var, so one config can build for more
-   * than one place. `rshono dev` ignores it and always runs the Node dev server.
+   * Overridden by the `--deploy` flag or the `RSVHONO_DEPLOY` env var, so one config can build for more
+   * than one place. `rsvhono dev` ignores it and always runs the Node dev server.
    *
    * @see {@link https://www.rshono.com/docs/deployment | Docs — deployment}
    */
@@ -45,7 +45,7 @@ export interface RshonoConfig {
   /**
    * Honour `X-Forwarded-Host` / `X-Forwarded-Proto` when resolving the browser-facing request URL —
    * `getRequestContext().url` and a page's `url` prop. Default `false`; always `true` under
-   * `rshono dev`.
+   * `rsvhono dev`.
    *
    * **Enable it only behind a proxy you control**: any client can send those headers, so with nothing
    * stripping them at the edge one request can point every absolute URL the app builds at an
@@ -87,21 +87,21 @@ export interface RshonoConfig {
 
 /**
  * Types a config object for editor autocomplete, without an explicit annotation. Default-export the
- * result from `rshono.config.ts`.
+ * result from `rsvhono.config.ts`.
  *
- * @param config - The project's {@link RshonoConfig}; every field is optional.
+ * @param config - The project's {@link RsvhonoConfig}; every field is optional.
  * @returns The config, unchanged and fully typed.
  *
  * @example
  * ```ts
- * // rshono.config.ts
- * import { defineConfig } from '@rshono/core';
+ * // rsvhono.config.ts
+ * import { defineConfig } from '@rsvhono/core';
  *
  * export default defineConfig({ deploy: 'cloudflare', siteUrl: 'https://example.com' });
  * ```
  *
  * @see {@link https://www.rshono.com/docs/configuration | Docs — configuration}
  */
-export function defineConfig(config: RshonoConfig): RshonoConfig {
+export function defineConfig(config: RsvhonoConfig): RsvhonoConfig {
   return config;
 }

@@ -7,10 +7,10 @@
  * is no translation table in the client bundle and nothing left to translate at runtime; the
  * [island](../components/package-manager-choice.tsx) does nothing but remember which one you chose.
  *
- * The list is exactly `PACKAGE_MANAGERS` from `@rshono/create` — the four the scaffolder can write a
+ * The list is exactly `PACKAGE_MANAGERS` from `@rsvhono/create` — the four the scaffolder can write a
  * project for. That is not a coincidence: which runner you use is also how it learns which one you use,
  * because every one of them sets `npm_config_user_agent` for the process it spawns. `pnpx
- * @rshono/create` scaffolds a pnpm project without being asked.
+ * @rsvhono/create` scaffolds a pnpm project without being asked.
  */
 
 /** How one package manager spells the commands this site quotes. */
@@ -46,7 +46,7 @@ export const PACKAGE_MANAGERS: readonly PackageManager[] = [
  * The two command shapes worth translating, and nothing else.
  *
  * Narrow on purpose: these two have an exact counterpart in all four package managers, so a translation
- * is a substitution rather than a guess. Anything else — `rshono dev`, `npm view`, a `pnpm --filter`
+ * is a substitution rather than a guess. Anything else — `rsvhono dev`, `npm view`, a `pnpm --filter`
  * command that only makes sense in this repository — fails to match and is left alone.
  */
 const EXEC = /^npx\s+(?=\S)/;

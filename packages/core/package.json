@@ -1,5 +1,5 @@
 {
-  "name": "@rshono/core",
+  "name": "@rsvhono/core",
   "version": "1.0.0-rc.29",
   "description": "Minimalist web framework — Hono + Vite + React Server Components",
   "author": "Lasse <lasse@lassetange.com> (https://www.lassetange.com)",
@@ -38,7 +38,7 @@
     "./package.json": "./package.json"
   },
   "bin": {
-    "rshono": "./bin/rshono.mjs"
+    "rsvhono": "./bin/rsvhono.mjs"
   },
   "files": [
     "dist",

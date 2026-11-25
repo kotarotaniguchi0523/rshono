@@ -13,7 +13,11 @@ those.
 
 ### Changed
 
-- **The bundler is Vite.** `rshono build` and `rshono dev` now run on Vite with
+- **The package is now `rsvhono`.** The npm scope is `@rsvhono/*`, the CLI is `rsvhono`, the config file is
+  `rsvhono.config.ts`, the scaffolder is `create-rsvhono`, and environment variables read `RSVHONO_*`. Nothing
+  answers to the old names; rename the dependency, the config file and the scripts together.
+
+- **The bundler is Vite.** `rsvhono build` and `rsvhono dev` now run on Vite with
   [`@vitejs/plugin-rsc`](https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-rsc) and React's
   own `react-server-dom-webpack`, in place of Rspack and `react-server-dom-rspack`. Routes, pages, server
   functions, the Hono sub-app, prerendering and the four deploy targets behave as before, and the output
@@ -21,7 +25,7 @@ those.
   [`packages/core/docs/vite-migration.md`](packages/core/docs/vite-migration.md) is the full record,
   including what is known to be weaker.
 
-- **`rshono dev` is one Vite dev server.** No worker thread, proxy or `.rshono/` output directory: client
+- **`rsvhono dev` is one Vite dev server.** No worker thread, proxy or `.rshono/` output directory: client
   modules and HMR are served under `/_static/`, and every other request is handled by the app in-process. A
   client edit is Fast Refresh; a server-component edit re-renders the page in place, client state kept.
 
@@ -45,7 +49,7 @@ to render`, when the abort landed in the RSC half of that render.
 
 ### Breaking
 
-- **`rspack` in `rshono.config.ts` is replaced by `vite`** — a Vite config merged over the generated one.
+- **`rspack` in `rsvhono.config.ts` is replaced by `vite`** — a Vite config merged over the generated one.
   `RspackHookContext` is no longer exported. A `vite.config.*` file is not read.
 - **Tailwind needs no build config.** Remove the `postcss-loader` rule and the `postcss-loader` package; Vite
   runs `postcss.config.mjs` itself.

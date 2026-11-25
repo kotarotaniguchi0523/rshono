@@ -37,7 +37,7 @@ import { MINIMAL_APP_DIR, TESTBED_DIR } from './helpers.mjs';
 
 const tempDirs = [];
 function tempDir() {
-  const dir = mkdtempSync(join(tmpdir(), 'rshono-unit-'));
+  const dir = mkdtempSync(join(tmpdir(), 'rsvhono-unit-'));
   tempDirs.push(dir);
   return dir;
 }
@@ -439,7 +439,7 @@ describe('runWithContext', () => {
 // HTTP; these are the parts an app only meets when something else has already gone wrong.
 describe('reportServerError', () => {
   const hono = { req: { raw: new Request('http://example.test/boom') } };
-  const report = (error, source = 'request') => reportServerError(error, { source, hono, message: '[rshono] test:' });
+  const report = (error, source = 'request') => reportServerError(error, { source, hono, message: '[rsvhono] test:' });
 
   /** Runs `body` with `console.error` collected rather than printed — every report writes one. */
   function withStderr(body) {
@@ -469,7 +469,7 @@ describe('reportServerError', () => {
     assert.equal(seen[0].request.url, 'http://example.test/boom', 'the request is derived from the context');
     assert.equal(seen[0].hono, hono);
     assert.equal(typeof seen[0].waitUntil, 'function');
-    assert.match(lines.join('\n'), /\[rshono\] test:/, 'a handler must not replace the stderr log');
+    assert.match(lines.join('\n'), /\[rsvhono\] test:/, 'a handler must not replace the stderr log');
   });
 
   test('reports one fault once, however many stages catch it', () => {
@@ -550,11 +550,11 @@ describe('loadConfig', () => {
     assert.deepEqual(await loadConfig(tempDir()), {}, 'no config file is not an error — every field has a default');
   });
 
-  test('finds rshono.config.{ts,js,mjs} at the root, in that order', async () => {
+  test('finds rsvhono.config.{ts,js,mjs} at the root, in that order', async () => {
     for (const [name, marker] of [
-      ['rshono.config.ts', 'ts'],
-      ['rshono.config.js', 'js'],
-      ['rshono.config.mjs', 'mjs'],
+      ['rsvhono.config.ts', 'ts'],
+      ['rsvhono.config.js', 'js'],
+      ['rsvhono.config.mjs', 'mjs'],
     ]) {
       const dir = tempDir();
       writeFileSync(join(dir, name), `export default { siteUrl: 'https://${marker}.example' };\n`);
@@ -563,14 +563,14 @@ describe('loadConfig', () => {
 
     // Precedence, so a leftover file cannot quietly win: .ts first.
     const dir = tempDir();
-    writeFileSync(join(dir, 'rshono.config.mjs'), "export default { siteUrl: 'https://mjs.example' };\n");
-    writeFileSync(join(dir, 'rshono.config.ts'), "export default { siteUrl: 'https://ts.example' };\n");
+    writeFileSync(join(dir, 'rsvhono.config.mjs'), "export default { siteUrl: 'https://mjs.example' };\n");
+    writeFileSync(join(dir, 'rsvhono.config.ts'), "export default { siteUrl: 'https://ts.example' };\n");
     assert.equal((await loadConfig(dir)).siteUrl, 'https://ts.example');
   });
 
   test('names an explicit --config that is not there, rather than failing later', async () => {
     const missing = join(tempDir(), 'nope.config.mjs');
-    await assert.rejects(loadConfig(tempDir(), missing), /\[rshono\] config file not found: /);
+    await assert.rejects(loadConfig(tempDir(), missing), /\[rsvhono\] config file not found: /);
   });
 
   test('resolves a relative --config against the working directory', async () => {
@@ -587,7 +587,7 @@ describe('loadConfig', () => {
 
   test('says a config with no default export is missing one', async () => {
     const dir = tempDir();
-    writeFileSync(join(dir, 'rshono.config.mjs'), "export const config = { siteUrl: 'https://x.example' };\n");
+    writeFileSync(join(dir, 'rsvhono.config.mjs'), "export const config = { siteUrl: 'https://x.example' };\n");
     await assert.rejects(loadConfig(dir), /must `export default` a config object/);
   });
 
@@ -597,7 +597,7 @@ describe('loadConfig', () => {
   test("explains a .ts config importing a sibling by its '.js' specifier", async () => {
     const dir = tempDir();
     writeFileSync(join(dir, 'shared.ts'), 'export const siteUrl = "https://shared.example";\n');
-    writeFileSync(join(dir, 'rshono.config.ts'), "import { siteUrl } from './shared.js';\nexport default { siteUrl };\n");
+    writeFileSync(join(dir, 'rsvhono.config.ts'), "import { siteUrl } from './shared.js';\nexport default { siteUrl };\n");
     await assert.rejects(loadConfig(dir), (error) => {
       assert.match(error.message, /imports a module Node could not resolve/);
       assert.match(error.message, /does not rewrite a \.js specifier/);
@@ -610,13 +610,13 @@ describe('loadConfig', () => {
     // in place would re-throw it.
     const fixed = tempDir();
     writeFileSync(join(fixed, 'shared.ts'), 'export const siteUrl = "https://shared.example";\n');
-    writeFileSync(join(fixed, 'rshono.config.ts'), "import { siteUrl } from './shared.ts';\nexport default { siteUrl };\n");
+    writeFileSync(join(fixed, 'rsvhono.config.ts'), "import { siteUrl } from './shared.ts';\nexport default { siteUrl };\n");
     assert.equal((await loadConfig(fixed)).siteUrl, 'https://shared.example');
   });
 
   test('lets any other import failure through as itself', async () => {
     const dir = tempDir();
-    writeFileSync(join(dir, 'rshono.config.mjs'), 'throw new Error("config blew up");\n');
+    writeFileSync(join(dir, 'rsvhono.config.mjs'), 'throw new Error("config blew up");\n');
     await assert.rejects(loadConfig(dir), /config blew up/, 'a config that throws must not be dressed up as a resolution hint');
   });
 });
@@ -640,11 +640,11 @@ describe('publicUrl', () => {
     // already set. The query string is what makes the import fresh.
     let trusted;
     before(async () => {
-      globalThis.__RSHONO_CONFIG__ = { trustProxy: true, isDev: false };
+      globalThis.__RSVHONO_CONFIG__ = { trustProxy: true, isDev: false };
       trusted = (await import('../dist/runtime/context.js?trustProxy=1')).publicUrl;
     });
     after(() => {
-      delete globalThis.__RSHONO_CONFIG__;
+      delete globalThis.__RSVHONO_CONFIG__;
     });
 
     test('takes the host and scheme the browser used, and drops the internal port', () => {
@@ -1256,7 +1256,7 @@ describe('prerenderStaticRoutes', () => {
         fetch: () => new Response('nope', { status: 500 }),
       }),
       (error) => {
-        assert.match(error.message, /\[rshono\] 1 page failed to render while prerendering/);
+        assert.match(error.message, /\[rsvhono\] 1 page failed to render while prerendering/);
         assert.match(error.message, /"\/boom" rendered 500/);
         assert.doesNotMatch(error.message, /will SSR per request/, 'because it will not — it will 500 per request');
         return true;
@@ -1444,8 +1444,8 @@ describe('control signals', () => {
   });
 
   test('a notFound digest is a control signal but not a redirect', () => {
-    assert.equal(isControlDigest('RSHONO_NOT_FOUND'), true);
-    assert.equal(parseRedirectDigest('RSHONO_NOT_FOUND'), null);
+    assert.equal(isControlDigest('RSVHONO_NOT_FOUND'), true);
+    assert.equal(parseRedirectDigest('RSVHONO_NOT_FOUND'), null);
   });
 
   test('an unrelated digest is left alone', () => {
@@ -1460,7 +1460,7 @@ describe('control signals', () => {
     // callback. `RedirectSignal` percent-encodes every target, so a malformed escape is corruption rather
     // than a target — and the literal text is the better guess, the same fallback `jumpToAnchor` makes. It
     // stays a redirect either way: answering `null` would make it read as a `notFound()`.
-    const corrupt = 'RSHONO_REDIRECT;307;%E0%A4%A';
+    const corrupt = 'RSVHONO_REDIRECT;307;%E0%A4%A';
     assert.equal(isControlDigest(corrupt), true);
     assert.deepEqual(parseRedirectDigest(corrupt), { location: '%E0%A4%A', status: 307 });
   });
@@ -1498,11 +1498,11 @@ describe('RequestContext enumerability', () => {
   // exist to end. Each must throw and name the API that does work.
   test("Hono's response builders throw instead of doing nothing", () => {
     const ctx = new RequestContext(fakeHonoContext);
-    assert.throws(() => ctx.redirect(), /Use `redirect\(\)` from '@rshono\/core\/server'/);
-    assert.throws(() => ctx.notFound(), /Use `notFound\(\)` from '@rshono\/core\/server'/);
+    assert.throws(() => ctx.redirect(), /Use `redirect\(\)` from '@rsvhono\/core\/server'/);
+    assert.throws(() => ctx.notFound(), /Use `notFound\(\)` from '@rsvhono\/core\/server'/);
     assert.throws(() => ctx.header(), /Use `ctx\.setHeader\(name, value\)`/);
     for (const call of ['json', 'text', 'html', 'body', 'status']) {
-      assert.throws(() => ctx[call](), /\[rshono\]/, `ctx.${call}() must throw rather than silently do nothing`);
+      assert.throws(() => ctx[call](), /\[rsvhono\]/, `ctx.${call}() must throw rather than silently do nothing`);
     }
   });
 
@@ -1585,7 +1585,7 @@ describe('deploy target resolution', () => {
   test('defaults to node, and a blank source is no source at all', () => {
     assert.equal(resolveDeployPreset().name, 'node');
     assert.equal(resolveDeployPreset({}).name, 'node');
-    // An `RSHONO_DEPLOY=` that a CI environment sets but never fills in has to fall through to the
+    // An `RSVHONO_DEPLOY=` that a CI environment sets but never fills in has to fall through to the
     // config file rather than fail the build on the empty string.
     assert.equal(resolveDeployPreset({ env: '' }).name, 'node');
     assert.equal(resolveDeployPreset({ env: '   ' }).name, 'node');
@@ -1612,11 +1612,11 @@ describe('deploy target resolution', () => {
   test('an unknown target fails the build, naming the ones that exist', () => {
     assert.throws(() => resolveDeployPreset({ config: 'fly' }), /unknown deploy target "fly"/);
     assert.throws(() => resolveDeployPreset({ config: 'fly' }), new RegExp(DEPLOY_TARGETS.join(', ')));
-    assert.equal(deployHintFor('fly'), null, 'a dist/ from a newer rshono can carry a name this one lacks');
+    assert.equal(deployHintFor('fly'), null, 'a dist/ from a newer rsvhono can carry a name this one lacks');
   });
 
   // A bare bracket access resolves every `Object.prototype` key to an inherited value, which then passes a
-  // truthiness guard: `RSHONO_DEPLOY=constructor` used to reach the builder and die there on
+  // truthiness guard: `RSVHONO_DEPLOY=constructor` used to reach the builder and die there on
   // `preset.runtimeModule.split('/')` instead of being named as the typo it is.
   test('a prototype key is a typo, not a target', () => {
     for (const key of ['constructor', '__proto__', 'toString', 'valueOf', 'hasOwnProperty']) {
@@ -1635,7 +1635,7 @@ describe('publicRouteCollisions', () => {
 
   /** A `public/` tree on disk, since the check reads one. */
   function publicTree(files) {
-    const dir = mkdtempSync(join(tmpdir(), 'rshono-public-'));
+    const dir = mkdtempSync(join(tmpdir(), 'rsvhono-public-'));
     for (const file of files) {
       mkdirSync(join(dir, dirname(file)), { recursive: true });
       writeFileSync(join(dir, file), 'x');
@@ -1700,16 +1700,16 @@ describe('the generated Vite config', () => {
       config: { vite: { base: '/elsewhere/', root: '/nowhere', define: { __APP__: '1' }, plugins: [appPlugin] } },
     });
     assert.equal(config.define.__APP__, '1', 'app settings are kept');
-    assert.ok('__RSHONO_CONFIG__' in config.define, 'next to the generated ones');
+    assert.ok('__RSVHONO_CONFIG__' in config.define, 'next to the generated ones');
     assert.equal(config.base, '/_static/');
     assert.equal(config.root, MINIMAL_APP_DIR);
     const names = config.plugins.flat(Infinity).map((plugin) => plugin?.name);
-    assert.ok(names.indexOf('app-plugin') < names.indexOf('rshono:pages'), "the app's plugins run ahead of the framework's");
+    assert.ok(names.indexOf('app-plugin') < names.indexOf('rsvhono:pages'), "the app's plugins run ahead of the framework's");
   });
 
   test('a serverless target bundles its dependencies; node leaves them in node_modules', () => {
     const node = createViteConfig({ ...options, config: {} });
-    assert.deepEqual(node.environments.rsc.resolve.noExternal, ['@rshono/core']);
+    assert.deepEqual(node.environments.rsc.resolve.noExternal, ['@rsvhono/core']);
     const lambda = createViteConfig({ ...options, config: {}, preset: resolveDeployPreset({ flag: 'aws-lambda' }) });
     assert.equal(lambda.environments.rsc.resolve.noExternal, true);
     assert.equal(lambda.environments.ssr.resolve.noExternal, true);
@@ -1949,7 +1949,7 @@ describe('the security-middleware build warning', () => {
    * fixture's through a junction, which was both unnecessary and a Windows reparse point for no reason.
    */
   function appWithServer(serverSource) {
-    const dir = mkdtempSync(join(tmpdir(), 'rshono-warn-'));
+    const dir = mkdtempSync(join(tmpdir(), 'rsvhono-warn-'));
     cpSync(join(MINIMAL_APP_DIR, 'package.json'), join(dir, 'package.json'));
     cpSync(join(MINIMAL_APP_DIR, 'src'), join(dir, 'src'), { recursive: true });
     if (serverSource !== null) writeFileSync(join(dir, 'src', 'server.ts'), serverSource);
@@ -1969,7 +1969,7 @@ describe('the security-middleware build warning', () => {
     }
     // The react-version warning is `checkReactVersions`'s, and depends on what `react` happens to resolve
     // to from a bare temp directory — whatever this machine has installed above it, if anything.
-    return lines.filter((line) => !/is not the \d+\.\d+\.x this rshono was tested against/.test(line)).join('\n');
+    return lines.filter((line) => !/is not the \d+\.\d+\.x this rsvhono was tested against/.test(line)).join('\n');
   }
 
   test('an app with no src/server.ts is told it has neither control', () => {
@@ -2019,7 +2019,7 @@ describe('validateRoutesModule', () => {
 
   test('names src/routes.ts when the export is not a route table at all', () => {
     for (const exported of [undefined, null, 42, {}, { routes: 'nope' }]) {
-      rejects(exported, /\[rshono\] src\/routes\.ts must export `routes`/);
+      rejects(exported, /\[rsvhono\] src\/routes\.ts must export `routes`/);
     }
   });
 
@@ -2180,7 +2180,7 @@ describe('validateRoutesModule', () => {
     rejects([at('/_static/thing')], /would never run/, 'and anything below it');
     rejects([{ ...endpoint, path: '/_static/api' }], /would never run/, 'an endpoint is mounted no earlier than a page');
     rejects([at('/_static/*')], /would never run/, 'a wildcard under the prefix is dead the same way');
-    rejects([at('/_static')], /reserved on every deploy target and under `rshono dev`/, 'and says where it is reserved');
+    rejects([at('/_static')], /reserved on every deploy target and under `rsvhono dev`/, 'and says where it is reserved');
 
     // The boundary is the `/`, and only a *literal* path is refused: a parameterised route that happens to
     // match under the prefix loses those requests and answers everything else, which is the router's
@@ -2208,12 +2208,12 @@ describe('validateServerApp', () => {
 
   test('names src/server.ts rather than letting Hono throw from inside app.route()', () => {
     for (const value of [{ notAHono: true }, 'nope', 42, { fetch: () => null }]) {
-      assert.throws(() => validateServerApp({ default: value }), /\[rshono\] src\/server\.ts must `export default` a Hono app/);
+      assert.throws(() => validateServerApp({ default: value }), /\[rsvhono\] src\/server\.ts must `export default` a Hono app/);
     }
   });
 });
 /*
- * The checks a route's *own* module gets. `rshono build` runs these against every route once the bundle
+ * The checks a route's *own* module gets. `rsvhono build` runs these against every route once the bundle
  * exists; before that they only ran on first request, so a page module that could never render — a
  * `'use client'` page, a missing default export — shipped behind a green build and answered 500 for the life
  * of the deployment. The endpoint half had no check at all: it destructured `handler` and called it, which
@@ -2221,7 +2221,7 @@ describe('validateServerApp', () => {
  */
 describe('assertRouteModules', () => {
   /** What a page module's default export looks like once the build has wrapped it. */
-  const serverPage = Object.assign(() => null, { $$rshonoPage: true });
+  const serverPage = Object.assign(() => null, { $$rsvhonoPage: true });
   /** And what a `'use client'` one looks like — a client reference. */
   const clientPage = Object.assign(() => null, { $$typeof: Symbol.for('react.client.reference') });
 
@@ -2241,27 +2241,27 @@ describe('assertRouteModules', () => {
     // thunk, no `'use server-entry'`. Unwrapped, the RSC plugin's stylesheet wrapper could drop its `ctx`.
     await assert.rejects(
       assertRouteModules({ routes: [page('/unmarked', { default: () => null })] }),
-      /\[rshono\] The page component for "\/unmarked" was not built as a page \('use server-entry'\)/,
+      /\[rsvhono\] The page component for "\/unmarked" was not built as a page \('use server-entry'\)/,
     );
   });
 
   test('refuses a page module with no default export', async () => {
     await assert.rejects(
       assertRouteModules({ routes: [page('/noexport', { Page: serverPage })] }),
-      /\[rshono\] The page module for "\/noexport" must default-export a server component\./,
+      /\[rsvhono\] The page module for "\/noexport" must default-export a server component\./,
     );
   });
 
   test("refuses a 'use client' page", async () => {
     await assert.rejects(
       assertRouteModules({ routes: [page('/clientpage', { default: clientPage })] }),
-      /\[rshono\] The page component for "\/clientpage" is a client component/,
+      /\[rsvhono\] The page component for "\/clientpage" is a client component/,
     );
   });
 
   test('refuses an endpoint module that exports anything but `handler`', async () => {
     await assert.rejects(assertRouteModules({ routes: [endpoint('/api/bad', { GET: () => null })] }), (error) => {
-      assert.match(error.message, /\[rshono\] The endpoint module for "\/api\/bad" must export `handler`/);
+      assert.match(error.message, /\[rsvhono\] The endpoint module for "\/api\/bad" must export `handler`/);
       assert.match(error.message, /a method-named export \(`GET`, `POST`\) is never read/, 'the mistake people actually make');
       return true;
     });
@@ -2284,7 +2284,7 @@ describe('assertRouteModules', () => {
         routes: [page('/ok', { default: serverPage }), page('/clientpage', { default: clientPage }), page('/noexport', {})],
       }),
       (error) => {
-        assert.match(error.message, /\[rshono\] 2 route modules cannot serve a request:/);
+        assert.match(error.message, /\[rsvhono\] 2 route modules cannot serve a request:/);
         assert.match(error.message, /• The page component for "\/clientpage"/);
         assert.match(error.message, /• The page module for "\/noexport"/);
         assert.doesNotMatch(error.message, /"\/ok"/, 'a route that is fine must not be listed');
@@ -2323,7 +2323,7 @@ describe('assertRouteModules', () => {
 });
 
 // The CLI's failure paths print the report that says what went wrong and then exit. `process.exit` does not
-// drain a pipe — every CI job, and any `rshono build | tee` — so everything past the 64 KiB pipe buffer used
+// drain a pipe — every CI job, and any `rsvhono build | tee` — so everything past the 64 KiB pipe buffer used
 // to be discarded, cutting a large Rspack error dump mid-error.
 describe('exit', () => {
   const EXIT_MODULE = new URL('../dist/cli/exit.js', import.meta.url).href;

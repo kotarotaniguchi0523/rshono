@@ -43,11 +43,11 @@ const stages = report?.run?.stages?.join(', ') ?? 'a partial run';
 
 const out = `---
 title: Benchmarks
-description: One app built three ways — rshono, Next.js and TanStack Start — measured on payload bytes, build time, cold start and install size.
+description: One app built three ways — rsvhono, Next.js and TanStack Start — measured on payload bytes, build time, cold start and install size.
 ---
 
 _Generated from \`packages/benchmarks\` on ${measuredOn} (${stages}). One run, one machine. Regenerate with
-\`pnpm --filter @rshono/benchmarks bench\` and \`pnpm --filter @rshono/benchmarks site:publish\`._
+\`pnpm --filter @rsvhono/benchmarks bench\` and \`pnpm --filter @rsvhono/benchmarks site:publish\`._
 
 ${body}
 `;
@@ -62,9 +62,9 @@ const loadHeapMb = report?.sections?.load?.settings?.heapMb ?? 0;
  * The scorecard metrics, in the order the page shows them. `anchor` is the id `markdown-it-anchor` gives the
  * matching heading, so every summary row links down to the table it came from.
  *
- * Every metric is emitted with its `winner`, including the ones rshono loses; the website shows only the wins,
+ * Every metric is emitted with its `winner`, including the ones rsvhono loses; the website shows only the wins,
  * and that filter lives in the page component so this file stays a faithful dump and the editorial choice is
- * visible where it is made. Which rows rshono wins is not fixed — `coldstart` has changed hands between runs by
+ * visible where it is made. Which rows rsvhono wins is not fixed — `coldstart` has changed hands between runs by
  * less than the measurement noise — so nothing hard-codes the split.
  */
 const METRICS = [
@@ -291,9 +291,9 @@ const summary = {
 };
 
 await writeFile(summaryDestination, `${JSON.stringify(summary, null, 2)}\n`);
-const wins = metrics.filter((m) => m.winner === 'rshono').length;
+const wins = metrics.filter((m) => m.winner === 'rsvhono').length;
 console.log(
-  `✓ wrote ${path.relative(path.resolve(ROOT, '..', '..'), summaryDestination)} — ${metrics.length} metrics, rshono ahead on ${wins}, behind on ${metrics.length - wins}`,
+  `✓ wrote ${path.relative(path.resolve(ROOT, '..', '..'), summaryDestination)} — ${metrics.length} metrics, rsvhono ahead on ${wins}, behind on ${metrics.length - wins}`,
 );
 
 async function results() {

@@ -7,7 +7,7 @@
 //
 // They once did not. Back when the bundler was Rspack, `6d8e3e4` moved the manifests to `@rspack/core` 2.2.0 /
 // `react-server-dom-rspack` 0.1.0 and left the overrides on 2.1.7 / 0.0.3, so the suite, CI and every fixture ran against one pair while
-// `npm i @rshono/core` would have installed the other — for a month, silently, because a manifest pin is
+// `npm i @rsvhono/core` would have installed the other — for a month, silently, because a manifest pin is
 // what a consumer resolves and an override is what this repo resolves, and no check compared them. That is
 // the whole reason this file exists: the version the suite tests has to be the version a consumer gets.
 //

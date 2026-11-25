@@ -1,4 +1,4 @@
-import { defineConfig } from '@rshono/core';
+import { defineConfig } from '@rsvhono/core';
 
 /**
  * Every field is optional — delete this file to accept all the defaults. The commented lines are the
@@ -10,7 +10,7 @@ import { defineConfig } from '@rshono/core';
  * `src/server.ts`, not config.
  */
 export default defineConfig({
-  /** Where `build` targets. Overridable per build with `--deploy` or `RSHONO_DEPLOY`. */
+  /** Where `build` targets. Overridable per build with `--deploy` or `RSVHONO_DEPLOY`. */
   deploy: 'cloudflare',
 
   /**

@@ -1,4 +1,4 @@
-// `rshono dev`, which is a front-end proxy in front of a worker process that owns the compilers. That
+// `rsvhono dev`, which is a front-end proxy in front of a worker process that owns the compilers. That
 // indirection is what these test: everything has to arrive at the browser as if it were served
 // directly, and dev is also where React's debug channel is live and can leak what prod never would.
 import assert from 'node:assert/strict';
@@ -182,17 +182,17 @@ test('on the dev server an action id is only ever an export of a "use server" mo
 });
 
 /*
- * `.env` and `rshono.config.ts` are read once, at startup, and what a build needs from them is compiled in —
+ * `.env` and `rsvhono.config.ts` are read once, at startup, and what a build needs from them is compiled in —
  * so a rebuild cannot pick up an edit to either, and the failure is invisible: the page rebuilds, is served,
  * and shows the old value. Watching them to say "restart" is the whole of the fix; reloading them for real
  * means re-exec'ing the process, since `process.loadEnvFile` will not override a variable already set.
  *
- * Written as `rshono.config.js` rather than `.env`: the testbed's `.env` is a contributor's own file and must
+ * Written as `rsvhono.config.js` rather than `.env`: the testbed's `.env` is a contributor's own file and must
  * not be clobbered, and this name cannot collide — `loadConfig` prefers the `.ts` that is already there, so
  * even a leftover would change nothing.
  */
 test('dev says a change to a file it compiled in needs a restart', async () => {
-  const marker = join(TESTBED_DIR, 'rshono.config.js');
+  const marker = join(TESTBED_DIR, 'rsvhono.config.js');
   const logsBefore = getOutput().length;
   try {
     writeFileSync(marker, 'export default {};\n');
@@ -201,7 +201,7 @@ test('dev says a change to a file it compiled in needs a restart', async () => {
     rmSync(marker, { force: true });
   }
   const logged = getOutput().slice(logsBefore);
-  assert.match(logged, /rshono\.config\.js changed/, 'the file has to be named');
-  assert.match(logged, /restart `rshono dev`/, 'and what to do about it');
+  assert.match(logged, /rsvhono\.config\.js changed/, 'the file has to be named');
+  assert.match(logged, /restart `rsvhono dev`/, 'and what to do about it');
   assert.match(logged, /read once, when the dev server starts/, 'and why an edit did not do it');
 });

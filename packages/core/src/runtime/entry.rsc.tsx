@@ -18,11 +18,11 @@ import {
   renderToReadableStream,
 } from '@vitejs/plugin-rsc/rsc/server';
 // Aliased at build time to the selected preset's runtime — the one place this file knows where it runs.
-import { runtime } from '@rshono/deploy';
-// @ts-expect-error — resolved by the '@rshono/routes' alias to the app's routes.ts
-import { routes as userRoutes } from '@rshono/routes';
-// @ts-expect-error — resolved by the '@rshono/server-app' alias (src/server.ts or the empty fallback)
-import * as serverAppModule from '@rshono/server-app';
+import { runtime } from '@rsvhono/deploy';
+// @ts-expect-error — resolved by the '@rsvhono/routes' alias to the app's routes.ts
+import { routes as userRoutes } from '@rsvhono/routes';
+// @ts-expect-error — resolved by the '@rsvhono/server-app' alias (src/server.ts or the empty fallback)
+import * as serverAppModule from '@rsvhono/server-app';
 import { isPageRoute, type ErrorPageInfo, type FallbackPage, type PageComponent, type PageProps, type Route } from '../router.js';
 import { appendVary, etagMatches, varyWith } from '../server/headers.js';
 import { PRERENDER_NONCE_HEADER, setPrerenderFlight } from '../server/prerendered.js';
@@ -43,13 +43,13 @@ type TemporaryReferenceSet = ReturnType<typeof createTemporaryReferenceSet>;
 
 const serverApp = validateServerApp(serverAppModule);
 
-// Compiled into the bundle from rshono.config.ts by DefinePlugin; there is no runtime env-var interface.
-const { isDev } = __RSHONO_CONFIG__;
+// Compiled into the bundle from rsvhono.config.ts by DefinePlugin; there is no runtime env-var interface.
+const { isDev } = __RSVHONO_CONFIG__;
 
 /**
  * How long a prerendered page may be reused before revalidating. Also what `public/` files get.
  *
- * Not a config field, deliberately: it is a per-response header, and `rshono.config.ts` is compiled into the
+ * Not a config field, deliberately: it is a per-response header, and `rsvhono.config.ts` is compiled into the
  * bundle — a cache policy you cannot change without a rebuild is the wrong shape. An app that wants a longer
  * `max-age`, or a `stale-while-revalidate`, sets it from middleware **after `await next()`**:
  *
@@ -112,14 +112,14 @@ export type RscPayload = {
 const actionResults = new WeakMap<Context, ActionResult>();
 
 /**
- * Whether this process is `rshono build`'s prerender pass rather than a server answering requests.
+ * Whether this process is `rsvhono build`'s prerender pass rather than a server answering requests.
  *
  * Set by `build.ts` before it imports the app bundle, which inlines its own copy of the module graph — so
  * `process.env` is what crosses that boundary, the same channel `runtime/context.ts` and the `node` runtime
  * already read. Unforgeable from outside: it is an environment variable of the build process, and a deployed
  * server never has one.
  */
-const prerendering = typeof process !== 'undefined' && !!process.env?.RSHONO_PRERENDER;
+const prerendering = typeof process !== 'undefined' && !!process.env?.RSVHONO_PRERENDER;
 
 /**
  * The per-request CSP nonce, if the app asked for one.
@@ -189,7 +189,7 @@ function prerenderNonceHeader(c: Context): Record<string, string> | null {
  *   the day something does produce it.
  *
  * `publicUrl(c)` rather than `c.req.url`, so it honours `trustProxy` and compares against the origin the
- * browser actually used — which behind a proxy, `rshono dev`'s included, is not the one the server was reached
+ * browser actually used — which behind a proxy, `rsvhono dev`'s included, is not the one the server was reached
  * on.
  *
  * **The cost is wider than "an action you meant to allow".** This runs on the request's shape alone, before
@@ -309,7 +309,7 @@ const deferTask: (run: () => void) => void =
 function warnLateControlSignal(c: Context, signal: ControlSignal): void {
   const isRedirect = signal instanceof RedirectSignal;
   console.warn(
-    `[rshono] ${isRedirect ? `redirect(${JSON.stringify(signal.location)})` : 'notFound()'} was called from a boundary that ` +
+    `[rsvhono] ${isRedirect ? `redirect(${JSON.stringify(signal.location)})` : 'notFound()'} was called from a boundary that ` +
       `resolved after the page shell had already been sent (${c.req.method} ${c.req.path}), so it cannot become a real ` +
       `${isRedirect ? '3xx' : '404'}: the response is committed as 200 text/html. A browser with JavaScript follows the ` +
       `digest that rides the payload; one without stays on the Suspense fallback, and a crawler indexes the 200.${
@@ -420,7 +420,7 @@ async function renderComponent(c: Context, Page: PageComponent, opts: ComponentR
         }
         return error.digest;
       }
-      if (!signal.aborted) reportServerError(error, { source: 'render', hono: c, message: '[rshono] render error:' });
+      if (!signal.aborted) reportServerError(error, { source: 'render', hono: c, message: '[rsvhono] render error:' });
     },
   });
 
@@ -438,8 +438,8 @@ async function renderComponent(c: Context, Page: PageComponent, opts: ComponentR
       signal,
       nonce,
       onDone: release,
-      onShellError: (error) => reportServerError(error, { source: 'ssr', hono: c, message: '[rshono] SSR shell error:' }),
-      onError: (error) => reportServerError(error, { source: 'ssr', hono: c, message: '[rshono] SSR error:' }),
+      onShellError: (error) => reportServerError(error, { source: 'ssr', hono: c, message: '[rsvhono] SSR shell error:' }),
+      onError: (error) => reportServerError(error, { source: 'ssr', hono: c, message: '[rsvhono] SSR error:' }),
     };
     const { renderHTML, renderPrerenderHTML } = ssr!;
     if (prerendering) {
@@ -623,7 +623,7 @@ async function renderPage(c: Context, loadPage: () => Promise<PageComponent>): P
         // Attributed to the action rather than left to the top-level handler's `source: 'request'`: the
         // request was fine, the deployment is not. Then re-thrown, so the app's `error` page answers 500 —
         // `reportServerError` de-duplicates, so `onError` reporting it again is a no-op.
-        reportServerError(error, { source: 'action', hono: c, message: '[rshono] server action could not be loaded:' });
+        reportServerError(error, { source: 'action', hono: c, message: '[rsvhono] server action could not be loaded:' });
         throw error;
       }
       try {
@@ -632,7 +632,7 @@ async function renderPage(c: Context, loadPage: () => Promise<PageComponent>): P
         if (isControlSignal(error)) throw error;
         // In production React sends a thrown action error to the client as an opaque marker, so this is
         // the only place the real one is visible.
-        reportServerError(error, { source: 'action', hono: c, message: '[rshono] server action error:' });
+        reportServerError(error, { source: 'action', hono: c, message: '[rsvhono] server action error:' });
         returnValue = { ok: false, error };
         actionStatus = 500;
       }
@@ -663,7 +663,7 @@ async function renderPage(c: Context, loadPage: () => Promise<PageComponent>): P
           // The original error, not the probe's: this one is the fault the request actually met. Attributed
           // and re-thrown exactly as the `rsc-action` branch does, so the app's `error` page answers 500 and
           // the operator is paged instead of the caller being blamed.
-          reportServerError(error, { source: 'action', hono: c, message: '[rshono] server action could not be loaded:' });
+          reportServerError(error, { source: 'action', hono: c, message: '[rsvhono] server action could not be loaded:' });
           throw error;
         }
         return malformedAction(c);
@@ -679,7 +679,7 @@ async function renderPage(c: Context, loadPage: () => Promise<PageComponent>): P
           // because this path has no client boundary and no `useActionState` to hand the error to, so the
           // app's `error` page is the honest answer. `reportServerError` de-duplicates, so the re-throw
           // reaching `onError` does not report it a second time.
-          reportServerError(error, { source: 'action', hono: c, message: '[rshono] server action error:' });
+          reportServerError(error, { source: 'action', hono: c, message: '[rsvhono] server action error:' });
           throw error;
         }
         try {
@@ -697,7 +697,7 @@ async function renderPage(c: Context, loadPage: () => Promise<PageComponent>): P
           // and reporting from here would put an unauthenticated caller back in touch with whoever owns the
           // error tracker — for a request that has already had its effects. In dev it is worth a line, since
           // there the likely cause is a React or bundler version whose form fields this does not understand.
-          if (isDev) console.warn('[rshono] a form post carried form-state fields that could not be decoded; rendering without them:', error);
+          if (isDev) console.warn('[rsvhono] a form post carried form-state fields that could not be decoded; rendering without them:', error);
         }
       }
     }
@@ -747,7 +747,7 @@ function asError(value: unknown): Error {
   } catch {
     described = typeof value;
   }
-  return new Error(`[rshono] a non-Error value was thrown: ${described}`, { cause: value });
+  return new Error(`[rsvhono] a non-Error value was thrown: ${described}`, { cause: value });
 }
 
 function buildApp(): Hono {
@@ -772,7 +772,7 @@ function buildApp(): Hono {
      * naming nothing anyone could act on.
      *
      * Invisible on the targets anyone develops against, which is the whole hazard: `@hono/node-server`
-     * installs a mutable `Response` shim as a global, so `node` and `vercel` — dev, `rshono start` and every
+     * installs a mutable `Response` shim as a global, so `node` and `vercel` — dev, `rsvhono start` and every
      * suite that drives them — cannot see the bug that `cloudflare` and `aws-lambda` will. The framework
      * already knew the mechanism: it is written on `serveAsset` in `cloudflare/runtime.ts`, which repairs the
      * framework's *own* asset responses by hand.
@@ -889,7 +889,7 @@ function buildApp(): Hono {
         // abort as its reason, and this page's own catch would otherwise report it — and render the page
         // again — for a request that has nowhere left to send it. Same call as the top-level handler's.
         if (!c.req.raw.signal.aborted)
-          reportServerError(error, { source: 'render', hono: c, message: '[rshono] the notFound page failed to render:' });
+          reportServerError(error, { source: 'render', hono: c, message: '[rsvhono] the notFound page failed to render:' });
       }
     }
     return plainNotFound(c);
@@ -1015,11 +1015,11 @@ function buildApp(): Hono {
     //
     // Then the abort. A client that has already gone is not the app being wrong, and every render it touches
     // rejects with the abort — the same call `entry.ssr.tsx`'s `onError` and the RSC handler above make.
-    // Without this a disconnect was the one thing reported, as `[rshono] request error: ... aborted`, and the
+    // Without this a disconnect was the one thing reported, as `[rsvhono] request error: ... aborted`, and the
     // error page was rendered for nobody. This sample answers only for the report *here*: the error page's
     // own catch reads the signal again, because that render starts later and the client can leave in between.
     const clientGone = c.req.raw.signal.aborted;
-    if (!cameFromPayload(error) && !clientGone) reportServerError(error, { source: 'request', hono: c, message: '[rshono] request error:' });
+    if (!cameFromPayload(error) && !clientGone) reportServerError(error, { source: 'request', hono: c, message: '[rsvhono] request error:' });
     const isRsc = requestWantsRsc(c.req.raw);
     if (loadErrorPage && (isRsc || acceptsHtml(c))) {
       const errorInfo: ErrorPageInfo = isDev
@@ -1046,8 +1046,8 @@ function buildApp(): Hono {
         // framework declining to act. An author who wrote `notFound()` in their `error` page and read "the
         // error page failed to render: NotFoundSignal" would go looking for the wrong thing.
         const message = isControlSignal(renderError)
-          ? '[rshono] notFound() from the error page is not honoured — it would render the notFound page from inside the error path. The framework 500 answers instead:'
-          : '[rshono] the error page failed to render:';
+          ? '[rsvhono] notFound() from the error page is not honoured — it would render the notFound page from inside the error path. The framework 500 answers instead:'
+          : '[rsvhono] the error page failed to render:';
         // An `error` page whose *own* render threw arrives here as a payload stand-in, its real fault
         // already reported as `render` by the render that produced it. So the line still goes to stderr —
         // with two `render` reports on one request it is what says which of them was the error page — but
@@ -1128,7 +1128,7 @@ async function checkServerActions(): Promise<void> {
  * Everything about the app a build can check without serving a request: every route's own module — page and
  * endpoint alike, `notFound` and `error` included — and then the server actions, which no route reaches.
  *
- * Called by `rshono build` once this bundle is imported for the prerender pass, so a route that could never
+ * Called by `rsvhono build` once this bundle is imported for the prerender pass, so a route that could never
  * serve a request fails the build rather than answering 500 in production. Exported from here rather than
  * driven from the CLI because both halves read module-scope state — `routeConfig`, and the manifest the RSC
  * plugin injects — neither of which leaves this bundle.
@@ -1141,10 +1141,10 @@ export const checkAppModules = async (): Promise<void> => {
 export const app = buildApp();
 
 /**
- * The app, handed to whatever is hosting it: this binds a port and exports nothing where rshono owns the
+ * The app, handed to whatever is hosting it: this binds a port and exports nothing where rsvhono owns the
  * process, and *is* the export the platform looks for where the host owns it — so one entry serves both.
  *
- * `app` and `routes` stay named exports either way, because `rshono build` imports them to prerender
+ * `app` and `routes` stay named exports either way, because `rsvhono build` imports them to prerender
  * `render: 'static'` routes.
  */
 export default runtime.serveApp(app);

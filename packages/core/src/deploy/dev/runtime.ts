@@ -3,7 +3,7 @@ import type { DeployRuntime } from '../contract.js';
 import { fileSystemRuntime } from '../filesystem.js';
 
 /**
- * `rshono dev`: Vite owns the listener and serves every client module under `/_static/`, and every
+ * `rsvhono dev`: Vite owns the listener and serves every client module under `/_static/`, and every
  * other request goes to the RSC entry's default export (`configureServer` in `builder/vite-config.ts`) — which is what `serveApp` returns here. The same
  * runtime whatever the deploy target: the dev server is always a Node process on this machine.
  */

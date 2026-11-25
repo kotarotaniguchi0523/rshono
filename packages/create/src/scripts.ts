@@ -16,8 +16,8 @@ import type { PackageManager } from './pm.js';
  * - **`deploy`** builds, then ships it — where the platform has one command that does the shipping.
  */
 export const BASE_SCRIPTS: Record<string, string> = {
-  dev: 'rshono dev',
-  build: 'rshono build',
+  dev: 'rsvhono dev',
+  build: 'rsvhono build',
   typecheck: 'tsc --noEmit',
 };
 

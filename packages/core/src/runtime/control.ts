@@ -5,8 +5,8 @@
  * digest with no message — so the redirect target is encoded into it. The server matches the class, the
  * client matches the string.
  */
-const REDIRECT_PREFIX = 'RSHONO_REDIRECT;';
-const NOT_FOUND_DIGEST = 'RSHONO_NOT_FOUND';
+const REDIRECT_PREFIX = 'RSVHONO_REDIRECT;';
+const NOT_FOUND_DIGEST = 'RSVHONO_NOT_FOUND';
 
 export class RedirectSignal extends Error {
   readonly digest: string;
@@ -14,7 +14,7 @@ export class RedirectSignal extends Error {
     readonly location: string,
     readonly status: number,
   ) {
-    super(`[rshono] redirect to ${location}`);
+    super(`[rsvhono] redirect to ${location}`);
     this.name = 'RedirectSignal';
     this.digest = `${REDIRECT_PREFIX}${status};${encodeURIComponent(location)}`;
   }
@@ -23,7 +23,7 @@ export class RedirectSignal extends Error {
 export class NotFoundSignal extends Error {
   readonly digest = NOT_FOUND_DIGEST;
   constructor() {
-    super('[rshono] notFound');
+    super('[rsvhono] notFound');
     this.name = 'NotFoundSignal';
   }
 }

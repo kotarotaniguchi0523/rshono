@@ -89,7 +89,7 @@ test("an action's reply does not repaint a page the visitor has since left", asy
   await page.waitForLoadState('networkidle');
   await expect(page).toHaveURL('/profile/1');
   await expect(page.getByRole('heading', { name: /Ada Lovelace/ })).toBeVisible();
-  await expect(page.locator('[data-rshono-fatal]')).toHaveCount(0);
+  await expect(page.locator('[data-rsvhono-fatal]')).toHaveCount(0);
   expect(errors).toEqual([]);
 
   // Losing the screen is not losing the mutation.

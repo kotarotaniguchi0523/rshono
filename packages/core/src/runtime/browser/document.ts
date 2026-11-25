@@ -27,10 +27,10 @@ function overlayHost(): HTMLElement {
 function paintOverlay(fill: (box: HTMLElement) => void): void {
   setTimeout(() => {
     const host = overlayHost();
-    host.querySelector('[data-rshono-fatal]')?.remove();
+    host.querySelector('[data-rsvhono-fatal]')?.remove();
 
     const box = document.createElement('div');
-    box.setAttribute('data-rshono-fatal', '');
+    box.setAttribute('data-rsvhono-fatal', '');
     box.setAttribute('role', 'alert');
     box.style.cssText =
       'position:fixed;inset:0;z-index:2147483647;overflow:auto;padding:1.5rem;background:#18181b;color:#f4f4f5;' +
@@ -153,7 +153,7 @@ export function settle(result: NavigationResult): void {
  * the runtime's own. A symbol because the identity has to survive the trip through the browser intact:
  * `NavigateEvent.info` hands the value back by reference, so only the navigation that was given it matches.
  */
-export const documentNavigation = Symbol('rshono:document-navigation');
+export const documentNavigation = Symbol('rsvhono:document-navigation');
 
 /**
  * Performs a navigation the router below must **not** intercept, and returns having asked for it.
@@ -212,7 +212,7 @@ export function loadDocument(href?: string, { replace = false }: { replace?: boo
 export const RECOVERY_GRACE_MS = 2000;
 
 /** The `sessionStorage` key bounding the recovery reload for one URL. Spent here, released in {@link main}. */
-export const lateNotFoundKey = (): string => `rshono:late-not-found:${documentUrl()}`;
+export const lateNotFoundKey = (): string => `rsvhono:late-not-found:${documentUrl()}`;
 
 /**
  * Spends the one reload a late `notFound()` gets, or paints if it has already been spent for this URL.
@@ -253,6 +253,6 @@ export function reloadOnceForLateNotFound(): void {
   // browser, held by a `beforeunload` — which used to leave the visitor on a Suspense fallback with nothing
   // coming and nothing said. The panel is the honest answer in that case too.
   setTimeout(() => {
-    if (!document.querySelector('[data-rshono-fatal]')) showLateNotFound();
+    if (!document.querySelector('[data-rsvhono-fatal]')) showLateNotFound();
   }, RECOVERY_GRACE_MS);
 }

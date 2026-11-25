@@ -1,5 +1,5 @@
 import { Suspense } from 'react';
-import type { PageProps } from '@rshono/core';
+import type { PageProps } from '@rsvhono/core';
 import { Layout } from './layout';
 
 /**
@@ -21,7 +21,7 @@ async function SlowTarget() {
 
 export default function AnchorStream(_props: PageProps) {
   return (
-    <Layout title="Anchor stream — rshono">
+    <Layout title="Anchor stream — rsvhono">
       <div className="page">
         <p data-anchor-shell>shell</p>
         <Suspense fallback={<p data-anchor-loading>waiting…</p>}>

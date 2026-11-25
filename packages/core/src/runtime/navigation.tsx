@@ -129,7 +129,7 @@ export function useNavigationPathname(): string | undefined {
  * @example
  * ```tsx
  * 'use client';
- * import { useNavigation } from '@rshono/core/client';
+ * import { useNavigation } from '@rsvhono/core/client';
  *
  * export function NextPage() {
  *   const { url, router } = useNavigation();
@@ -147,14 +147,14 @@ export function useNavigationPathname(): string | undefined {
  * @throws If called outside a page's React tree, where there is no navigation
  *   context to read.
  *
- * @see {@link https://www.rshono.com/docs/api#rshonocoreclient | Docs — `@rshono/core/client`}
+ * @see {@link https://www.rshono.com/docs/api#rsvhonocoreclient | Docs — `@rsvhono/core/client`}
  * @see {@link https://www.rshono.com/docs/pages#client-components | Docs — client components}
  */
 export function useNavigation(): NavigationState {
   const value = useContext(NavigationContext);
   if (!value) {
     throw new Error(
-      "[rshono] useNavigation() must be called inside a 'use client' component rendered by a page. In a server component, read the URL from getRequestContext() instead.",
+      "[rsvhono] useNavigation() must be called inside a 'use client' component rendered by a page. In a server component, read the URL from getRequestContext() instead.",
     );
   }
   const router = useContext(RouterContext);

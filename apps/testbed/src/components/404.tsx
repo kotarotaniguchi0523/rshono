@@ -1,5 +1,5 @@
-import type { PageProps } from '@rshono/core';
-import { notFound, redirect } from '@rshono/core/server';
+import type { PageProps } from '@rsvhono/core';
+import { notFound, redirect } from '@rsvhono/core/server';
 import { Layout } from './layout';
 
 export default function NotFound({ url }: PageProps) {
@@ -12,7 +12,7 @@ export default function NotFound({ url }: PageProps) {
   if (boom === 'redirect') redirect('/users');
 
   return (
-    <Layout title="404 — rshono">
+    <Layout title="404 — rsvhono">
       <div className="page">
         <h1>404 — nothing here</h1>
         <p className="description">

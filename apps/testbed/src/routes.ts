@@ -1,4 +1,4 @@
-import { defineRoutes } from '@rshono/core';
+import { defineRoutes } from '@rsvhono/core';
 
 export const routes = defineRoutes({
   routes: [

@@ -1,16 +1,16 @@
 ---
 title: Configuration & security
-description: rshono.config.ts — every field, the secret boundary, and what is hardened by default.
+description: rsvhono.config.ts — every field, the secret boundary, and what is hardened by default.
 ---
 
-An optional `rshono.config.ts` (`.js` / `.mjs` also work) at the project root tunes the framework. Every
+An optional `rsvhono.config.ts` (`.js` / `.mjs` also work) at the project root tunes the framework. Every
 field is optional; delete the file to accept all defaults.
 
 ```ts
-import { defineConfig } from '@rshono/core';
+import { defineConfig } from '@rsvhono/core';
 
 export default defineConfig({
-  deploy: 'node', // hosting platform to build for (--deploy or RSHONO_DEPLOY override)
+  deploy: 'node', // hosting platform to build for (--deploy or RSVHONO_DEPLOY override)
   siteUrl: 'https://example.com', // public origin, baked into prerendered pages' absolute URLs
   trustProxy: false, // honour X-Forwarded-Host/-Proto — only behind a proxy you control
   vite: { plugins: [] }, // escape hatch: Vite config merged over the generated one
@@ -78,9 +78,9 @@ data down.
 with safe defaults; keep `.env.local` gitignored.
 
 Both are read **once, when the process starts**, and the `PUBLIC_` view of them is compiled into the bundle by
-`DefinePlugin` — so `rshono dev` does not pick up an edit to either. A rebuild is not enough and does not
+`DefinePlugin` — so `rsvhono dev` does not pick up an edit to either. A rebuild is not enough and does not
 look like a failure: the page rebuilds, serves, and shows the old value. Restart the dev server. It watches
-both files and says so when one changes, and the same holds for `rshono.config.ts`, which is read once too.
+both files and says so when one changes, and the same holds for `rsvhono.config.ts`, which is read once too.
 
 `getRequestContext().env` is that same environment, plus the platform's own runtime bindings where it has
 them — `deploy: 'cloudflare'`, where a KV namespace or a Worker secret arrives per request and wins over a
@@ -102,12 +102,12 @@ The framework runs no CSRF check, body cap or CSP of its own. All three are Hono
 register in `src/server.ts`, which is mounted **ahead of the page routes** — so anything registered
 there wraps page renders and server actions, not just your own handlers.
 
-`create-rshono` scaffolds the first two into every new app. An app written by hand down to
+`create-rsvhono` scaffolds the first two into every new app. An app written by hand down to
 `src/routes.ts` has neither until it adds them.
 
 ```ts
 // src/server.ts
-import { publicUrl } from '@rshono/core/server';
+import { publicUrl } from '@rsvhono/core/server';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { csrf } from 'hono/csrf';
@@ -159,12 +159,12 @@ keeps its own status, rather than being rendered as the 500 page. See
 `X-Forwarded-Host` and `X-Forwarded-Proto` are client-supplied and **not trusted by default**. Honouring
 them blindly lets anyone who can reach the server dictate the origin of every absolute URL the app
 builds, poisoning canonical tags, emails, redirects and any shared cache in front. Set
-`trustProxy: true` only when a proxy you control sets them. `rshono dev` forces it on for its own
+`trustProxy: true` only when a proxy you control sets them. `rsvhono dev` forces it on for its own
 localhost-bound proxy.
 
 It governs the browser-facing URL the framework builds — a page's `url` prop and
 `getRequestContext().url`. Middleware is handed Hono's `c` and reads `c.req.url` on its own, so where a
-middleware needs the public origin, give it `publicUrl(c)` from `@rshono/core/server`.
+middleware needs the public origin, give it `publicUrl(c)` from `@rsvhono/core/server`.
 
 Leave it off on [`vercel`](/docs/deployment#vercels-request-handoff), where the request already arrives with the scheme
 and host the browser used — that platform's edge sets them, and the function cannot be reached around
@@ -192,7 +192,7 @@ default, and with no directives a shared cache is free to store one user's page 
 next. Set your own value from middleware and it is left alone. **Prerendered pages** keep
 `public, max-age=300` and a weak `ETag`.
 
-Those two values are not config fields: a cache policy is a per-response header, and `rshono.config.ts`
+Those two values are not config fields: a cache policy is a per-response header, and `rsvhono.config.ts`
 is compiled into the bundle, so a value you cannot change without a rebuild would be the wrong shape.
 Middleware is the interface — and for a **prerendered** page it has to run **after `await next()`**:
 
@@ -230,7 +230,7 @@ server.use(secureHeaders());
 ```
 
 Put Hono's `NONCE` placeholder in `scriptSrc` and the policy becomes per-request: Hono mints a nonce and
-rshono stamps that value onto the bootstrap scripts, the inlined flight payload and dynamically loaded
+rsvhono stamps that value onto the bootstrap scripts, the inlined flight payload and dynamically loaded
 chunks.
 
 ```ts
@@ -256,7 +256,7 @@ server.use(
 ```
 
 Two things the framework does for you. React Refresh compiles updates with `eval`, so `script-src` is
-widened with `'unsafe-eval'` under `rshono dev` and never in a build — one policy serves both. And while
+widened with `'unsafe-eval'` under `rsvhono dev` and never in a build — one policy serves both. And while
 a nonce is in play the document for a static route is
 [rendered per request](/docs/routing#static-rendering), since a prerendered file is fixed bytes and
 cannot carry a fresh one. That is decided per request: a policy with no `NONCE` in it keeps its

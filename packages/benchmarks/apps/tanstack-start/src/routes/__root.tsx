@@ -4,7 +4,7 @@ import appCss from '../styles.css?url';
 
 /**
  * Nav uses TanStack's `<Link>` for client-side navigation — the counterpart to `next/link` and to
- * rshono's plain `<a href>`, which its runtime soft-navigates on its own.
+ * rsvhono's plain `<a href>`, which its runtime soft-navigates on its own.
  */
 export const Route = createRootRoute({
   head: () => ({

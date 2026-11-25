@@ -1,8 +1,8 @@
-import { onServerError, publicUrl } from '@rshono/core/server';
+import { onServerError, publicUrl } from '@rsvhono/core/server';
 // A dependency outside the set the framework bundles unconditionally — so the serverless targets, which
 // upload a directory rather than install one, have something real to prove they bundled. See the endpoint
 // at the bottom of this file and `assertSelfContained` in packages/core/test/deploy-targets.test.mjs.
-// Unscoped on purpose: the externals policy bundles anything under `@rshono/` unconditionally, so a
+// Unscoped on purpose: the externals policy bundles anything under `@rsvhono/` unconditionally, so a
 // scoped name here would be bundled whatever the preset decided and prove nothing.
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
@@ -10,7 +10,7 @@ import { csrf } from 'hono/csrf';
 import { requestId } from 'hono/request-id';
 import { NONCE, secureHeaders } from 'hono/secure-headers';
 import { trimTrailingSlash } from 'hono/trailing-slash';
-import { EXTERNAL_DEP_MARKER } from 'rshono-test-external-dep';
+import { EXTERNAL_DEP_MARKER } from 'rsvhono-test-external-dep';
 import { fakeDB } from './db';
 
 /**
@@ -74,18 +74,18 @@ if (maxBodyBytes > 0) {
 // `publicUrl(c)` rather than Hono's default same-origin comparison, which reads `c.req.url` — the
 // address the server was *reached* on. Behind a proxy that terminates TLS or rewrites `Host` that is
 // the internal one, and a legitimate post would be refused whenever the browser did not also send a
-// `Sec-Fetch-Site` to settle it. `rshono dev` is exactly such a proxy, so this is not a
+// `Sec-Fetch-Site` to settle it. `rsvhono dev` is exactly such a proxy, so this is not a
 // production-only concern. Honours `trustProxy`, so it is still `c.req.url` where no proxy is declared.
 if (csrfEnabled) {
   server.use(csrf({ origin: (origin, c) => origin === publicUrl(c).origin || allowedOrigins.includes(origin) }));
 }
 
 // A strict nonce-based CSP. `NONCE` is what makes it per-request: Hono mints a nonce, puts it on the
-// context, and rshono stamps that value onto the bootstrap scripts and the `<meta>` React hydrates
+// context, and rsvhono stamps that value onto the bootstrap scripts and the `<meta>` React hydrates
 // from. A `render: 'static'` route falls back to rendering per request while this is on, because a
 // prerendered file is fixed bytes and cannot carry a fresh nonce.
 //
-// Nothing here mentions `'unsafe-eval'`: rshono widens `script-src` with it under `rshono dev`, where
+// Nothing here mentions `'unsafe-eval'`: rsvhono widens `script-src` with it under `rsvhono dev`, where
 // React Refresh needs it, and never in a build.
 if (hardened) {
   server.use(

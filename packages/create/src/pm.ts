@@ -47,8 +47,8 @@ export function packageManager(name: PackageManagerName, version?: string): Pack
 
 /**
  * Which package manager invoked us. All four set `npm_config_user_agent` on the process they spawn — `pnpm/11.9.0
- * npm/? node/v22.14.0 darwin arm64` — so `pnx @rshono/create` scaffolds a pnpm project without asking, exact
- * version included. Falls back to npm, which is also what a bare `node bin/create-rshono.mjs` gets.
+ * npm/? node/v22.14.0 darwin arm64` — so `pnx @rsvhono/create` scaffolds a pnpm project without asking, exact
+ * version included. Falls back to npm, which is also what a bare `node bin/create-rsvhono.mjs` gets.
  */
 export function detectPackageManager(userAgent = process.env.npm_config_user_agent): PackageManager {
   const [spec] = (userAgent ?? '').split(' ');

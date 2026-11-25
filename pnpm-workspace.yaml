@@ -1,7 +1,7 @@
 packages:
   - 'packages/*'
   - 'apps/*'
-  # Test fixture apps. Real workspace members so they resolve `@rshono/core` through node_modules exactly
+  # Test fixture apps. Real workspace members so they resolve `@rsvhono/core` through node_modules exactly
   # the way an installed app does — which is half of what they are there to check.
   - 'packages/*/test/fixtures/*'
 # RSC internals are coupled across builds: react-server-dom-webpack reaches into

@@ -1,13 +1,13 @@
 ---
 title: Routing
-description: src/routes.ts — the one file rshono requires, and the only place routes are declared.
+description: src/routes.ts — the one file rsvhono requires, and the only place routes are declared.
 ---
 
 Routes are an explicit table, not a directory scan. One file lists every page and endpoint, matched in
 order.
 
 ```ts
-import { defineRoutes } from '@rshono/core';
+import { defineRoutes } from '@rsvhono/core';
 
 export const routes = defineRoutes({
   routes: [

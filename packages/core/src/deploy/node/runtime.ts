@@ -35,12 +35,12 @@ export const runtime: DeployRuntime = {
 
   serveApp(app: Hono): undefined {
     // The prerender pass renders through `app.fetch` directly, and a bound port would keep the build alive.
-    if (process.env.RSHONO_PRERENDER) return;
+    if (process.env.RSVHONO_PRERENDER) return;
 
     const address = listenAddress();
     const server = serve({ fetch: app.fetch, ...address }, (info) => {
       const host = address.hostname === WILDCARD_HOST ? 'localhost' : address.hostname;
-      console.log(`  ➜ rshono serving on http://${host}:${info.port}`);
+      console.log(`  ➜ rsvhono serving on http://${host}:${info.port}`);
     });
 
     // Stop accepting connections, let the in-flight ones finish, then exit — or exit anyway at the bound.

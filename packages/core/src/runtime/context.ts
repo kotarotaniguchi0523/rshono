@@ -1,13 +1,13 @@
-// `__RSHONO_CONFIG__` is a global const, and an `import` cannot bring one into scope — a path reference is
+// `__RSVHONO_CONFIG__` is a global const, and an `import` cannot bring one into scope — a path reference is
 // the only way to reach it, which is the whole reason that file is separate. See its header.
 // eslint-disable-next-line @typescript-eslint/triple-slash-reference
-/// <reference path="../types/rshono-config.d.ts" />
+/// <reference path="../types/rsvhono-config.d.ts" />
 /**
  * The request context: {@link getRequestContext} and the {@link RequestContext} it returns, the
  * {@link redirect} / {@link notFound} control-flow helpers, and the {@link onServerError} reporting
  * funnel — plus the `@internal` plumbing that binds a request to the async context.
  *
- * The public half is re-exported by `runtime/server.ts`, which is what `@rshono/core/server` resolves
+ * The public half is re-exported by `runtime/server.ts`, which is what `@rsvhono/core/server` resolves
  * to; an app imports that.
  */
 
@@ -51,7 +51,7 @@ export function beginPageRender(c: Context): void {
 /** The shared refusal for a response write that arrived too late — the message names where it belongs instead. */
 function tooLateToWrite(call: string): never {
   throw new Error(
-    `[rshono] ${call} was called while rendering a page, which is too late to affect the response. ` +
+    `[rsvhono] ${call} was called while rendering a page, which is too late to affect the response. ` +
       'A page streams, so its response head is already committed by the time the component runs — the ' +
       'write would land on a full page load and be silently dropped on a soft navigation. Do it from a ' +
       "'use server' action instead; or, in middleware and { type: 'endpoint' } routes — which are handed " +
@@ -62,7 +62,7 @@ function tooLateToWrite(call: string): never {
 /** The shared refusal for a Hono `Context` member a page has no way to use. See the stubs on {@link RequestContext}. */
 function notOnContext(call: string, instead: string): never {
   throw new Error(
-    `[rshono] ctx.${call} does not exist. A page returns JSX and the framework builds the response from it, ` +
+    `[rsvhono] ctx.${call} does not exist. A page returns JSX and the framework builds the response from it, ` +
       `so Hono's response builders have nothing to return to. ${instead}`,
   );
 }
@@ -78,7 +78,7 @@ function processEnv(): Record<string, string | undefined> {
 
 // Set by `build.ts` before it imports the app bundle, which inlines its own copy of this module — so
 // `process.env` is what crosses that boundary rather than a module-level flag.
-const prerendering = typeof process !== 'undefined' && !!process.env?.RSHONO_PRERENDER;
+const prerendering = typeof process !== 'undefined' && !!process.env?.RSVHONO_PRERENDER;
 
 /**
  * Runs `fn` with `c` bound as the ambient request context, so {@link getRequestContext} resolves to it
@@ -110,11 +110,11 @@ function firstForwardedValue(header: string | undefined): string | undefined {
 }
 
 // Read through `typeof`: DefinePlugin inlines this into the server bundle, but the module is also the
-// public `@rshono/core/server` entry, which tooling can load without one. Absent means don't trust.
-const trustProxy = typeof __RSHONO_CONFIG__ !== 'undefined' && __RSHONO_CONFIG__.trustProxy;
+// public `@rsvhono/core/server` entry, which tooling can load without one. Absent means don't trust.
+const trustProxy = typeof __RSVHONO_CONFIG__ !== 'undefined' && __RSVHONO_CONFIG__.trustProxy;
 
 // Read the same way, for the same reason. Absent means the platform passes no bindings — see the getter.
-const envBindings = typeof __RSHONO_CONFIG__ !== 'undefined' && __RSHONO_CONFIG__.envBindings;
+const envBindings = typeof __RSVHONO_CONFIG__ !== 'undefined' && __RSVHONO_CONFIG__.envBindings;
 
 /**
  * The browser-facing {@link URL} for a request, resolved from Hono's {@link Context} — a fresh
@@ -122,7 +122,7 @@ const envBindings = typeof __RSHONO_CONFIG__ !== 'undefined' && __RSHONO_CONFIG_
  *
  * `c.req.url` is the internal address the server was reached on, which is wrong behind a proxy;
  * `X-Forwarded-Host` / `-Proto` correct it, but only when `trustProxy` is enabled in
- * `rshono.config.ts` — they are client-supplied, so trusting them unconditionally would let anyone
+ * `rsvhono.config.ts` — they are client-supplied, so trusting them unconditionally would let anyone
  * dictate the origin of every absolute URL the app builds.
  *
  * This is the form for **middleware**, which is handed `c` and runs outside the request context — and
@@ -135,7 +135,7 @@ const envBindings = typeof __RSHONO_CONFIG__ !== 'undefined' && __RSHONO_CONFIG_
  * @example
  * ```ts
  * // src/server.ts — a CSRF check that still works behind a proxy that rewrites Host
- * import { publicUrl } from '@rshono/core/server';
+ * import { publicUrl } from '@rsvhono/core/server';
  * import { csrf } from 'hono/csrf';
  *
  * server.use(csrf({ origin: (origin, c) => origin === publicUrl(c).origin }));
@@ -190,7 +190,7 @@ export type EnvVars<E extends Env> = E['Bindings'] & Record<string, string | und
  *
  * @example
  * ```tsx
- * import { getRequestContext } from '@rshono/core/server';
+ * import { getRequestContext } from '@rsvhono/core/server';
  *
  * export default async function Whoami() {
  *   const ctx = getRequestContext();
@@ -199,7 +199,7 @@ export type EnvVars<E extends Env> = E['Bindings'] & Record<string, string | und
  * }
  * ```
  *
- * @see {@link https://www.rshono.com/docs/api#rshonocoreserver | Docs — `@rshono/core/server`}
+ * @see {@link https://www.rshono.com/docs/api#rsvhonocoreserver | Docs — `@rsvhono/core/server`}
  * @see {@link https://hono.dev/docs/api/context | Hono — Context}, reachable in full via {@link RequestContext.hono}
  */
 export class RequestContext<E extends Env = Env> {
@@ -280,7 +280,7 @@ export class RequestContext<E extends Env = Env> {
    * same instance — treat it as read-only.
    *
    * `X-Forwarded-Host` / `-Proto` are honoured only when `trustProxy` is enabled in
-   * `rshono.config.ts`, since any client can send them.
+   * `rsvhono.config.ts`, since any client can send them.
    *
    * @example `const tab = getRequestContext().url.searchParams.get('tab');`
    *
@@ -422,17 +422,17 @@ export class RequestContext<E extends Env = Env> {
   // strikes them through in autocomplete; the unread `..._args` is so `ctx.redirect('/x')` reaches the
   // thrown message rather than an arity error.
 
-  /** @deprecated Not available on a page's context — use `redirect()` from `@rshono/core/server`. */
+  /** @deprecated Not available on a page's context — use `redirect()` from `@rsvhono/core/server`. */
   redirect(..._args: unknown[]): never {
     return notOnContext(
       'redirect(location, status?)',
-      "Use `redirect()` from '@rshono/core/server', which throws a signal the framework turns into a real redirect.",
+      "Use `redirect()` from '@rsvhono/core/server', which throws a signal the framework turns into a real redirect.",
     );
   }
 
-  /** @deprecated Not available on a page's context — use `notFound()` from `@rshono/core/server`. */
+  /** @deprecated Not available on a page's context — use `notFound()` from `@rsvhono/core/server`. */
   notFound(..._args: unknown[]): never {
-    return notOnContext('notFound()', "Use `notFound()` from '@rshono/core/server', which aborts the render and shows the app's not-found page.");
+    return notOnContext('notFound()', "Use `notFound()` from '@rsvhono/core/server', which aborts the render and shows the app's not-found page.");
   }
 
   /** @deprecated A page renders JSX. For a JSON response, use an `{ type: 'endpoint' }` route. */
@@ -491,7 +491,7 @@ export class RequestContext<E extends Env = Env> {
  * @example
  * ```ts
  * 'use server';
- * import { getRequestContext, redirect } from '@rshono/core/server';
+ * import { getRequestContext, redirect } from '@rsvhono/core/server';
  *
  * export async function login(form: FormData) {
  *   getRequestContext().cookies.set('session', String(form.get('email')), { httpOnly: true });
@@ -499,12 +499,12 @@ export class RequestContext<E extends Env = Env> {
  * }
  * ```
  *
- * @see {@link https://www.rshono.com/docs/api#rshonocoreserver | Docs — `@rshono/core/server`}
+ * @see {@link https://www.rshono.com/docs/api#rsvhonocoreserver | Docs — `@rsvhono/core/server`}
  */
 export function getRequestContext<E extends Env = Env>(): RequestContext<E> {
   if (prerendering) {
     throw new Error(
-      "[rshono] getRequestContext() was called while prerendering a `render: 'static'` route. A static page " +
+      "[rsvhono] getRequestContext() was called while prerendering a `render: 'static'` route. A static page " +
         'is rendered once at build time, so it has no per-request context to read (URL, cookies, ' +
         "headers, env). Change this route to `render: 'dynamic'` so it renders per request, or remove " +
         'the getRequestContext() call.',
@@ -513,7 +513,7 @@ export function getRequestContext<E extends Env = Env>(): RequestContext<E> {
   const c = contextStorage.getStore();
   if (!c) {
     throw new Error(
-      '[rshono] getRequestContext() was called outside a request. It only works inside a server component or a server action, not at module load.',
+      '[rsvhono] getRequestContext() was called outside a request. It only works inside a server component or a server action, not at module load.',
     );
   }
   let ctx = wrappers.get(c);
@@ -634,7 +634,7 @@ function keepAlive(c: Context, promise: Promise<unknown>): void {
   // Caught here rather than left to the platform: under `--unhandled-rejections=strict` a rejected report
   // would end the process, and a failed report must never be worse than no report.
   const settled = Promise.resolve(promise).catch((error) => {
-    console.error('[rshono] a promise passed to the onServerError waitUntil rejected:', error);
+    console.error('[rsvhono] a promise passed to the onServerError waitUntil rejected:', error);
   });
   try {
     c.executionCtx.waitUntil(settled);
@@ -666,7 +666,7 @@ const alreadyReported = new WeakSet<object>();
  * ```ts
  * // src/server.ts
  * import * as Sentry from '@sentry/node';
- * import { onServerError } from '@rshono/core/server';
+ * import { onServerError } from '@rsvhono/core/server';
  *
  * onServerError((error, { source, request, hono, waitUntil }) => {
  *   // `waitUntil` so a serverless invocation is not frozen before the report is sent.
@@ -710,6 +710,6 @@ export function reportServerError(error: unknown, info: { source: ServerErrorSou
       waitUntil: (promise) => keepAlive(info.hono, promise),
     });
   } catch (handlerError) {
-    console.error('[rshono] the onServerError handler threw:', handlerError);
+    console.error('[rsvhono] the onServerError handler threw:', handlerError);
   }
 }

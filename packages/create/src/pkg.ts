@@ -2,7 +2,7 @@ import type { Feature } from './features/index.js';
 import type { Answers } from './options.js';
 import type { PackageManager } from './pm.js';
 import { buildScripts } from './scripts.js';
-import { FRAMEWORK_DEPS, NODE_ENGINE, RSHONO_RANGE } from './versions.js';
+import { FRAMEWORK_DEPS, NODE_ENGINE, RSVHONO_RANGE } from './versions.js';
 
 /** Field order in the emitted file — the conventional reading order, and stable so snapshots are too. */
 const FIELD_ORDER = ['name', 'version', 'private', 'type', 'engines', 'packageManager', 'scripts', 'dependencies', 'devDependencies'];
@@ -15,7 +15,7 @@ function sorted<T>(record: Record<string, T>): Record<string, T> {
  * pnpm's settings for the new app, or `null` when no feature has anything to put in them.
  *
  * It exists for one field, `allowBuilds`: pnpm fails an install until the project has said whether a
- * dependency's install script should run. Nothing rshono installs has one, so most apps get no file. A file
+ * dependency's install script should run. Nothing rsvhono installs has one, so most apps get no file. A file
  * rather than a `pnpm` key in `package.json`, which pnpm 11 no longer reads.
  */
 export function buildPnpmSettings(features: Feature[]): string | null {
@@ -40,7 +40,7 @@ export function buildPnpmSettings(features: Feature[]): string | null {
  */
 export function buildPackageJson(answers: Answers, features: Feature[], pm: PackageManager): string {
   const dependencies: Record<string, string> = {
-    '@rshono/core': RSHONO_RANGE,
+    '@rsvhono/core': RSVHONO_RANGE,
     hono: FRAMEWORK_DEPS.hono,
     react: FRAMEWORK_DEPS.react,
     'react-dom': FRAMEWORK_DEPS['react-dom'],
@@ -61,7 +61,7 @@ export function buildPackageJson(answers: Answers, features: Feature[], pm: Pack
     version: '0.1.0',
     private: true,
     type: 'module',
-    // Generated from the framework's own manifest, so the app's floor cannot drift below rshono's.
+    // Generated from the framework's own manifest, so the app's floor cannot drift below rsvhono's.
     engines: { node: NODE_ENGINE },
     scripts: buildScripts(features),
     dependencies: sorted(dependencies),

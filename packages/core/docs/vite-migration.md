@@ -1,6 +1,6 @@
 # Rspack → Vite
 
-`@rshono/core` used to be built on Rspack's native RSC support. It is now built on Vite, with
+`@rsvhono/core` used to be built on Rspack's native RSC support. It is now built on Vite, with
 [`@vitejs/plugin-rsc`](https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-rsc) and React's
 own `react-server-dom-webpack`. This is the record of that replacement: what was measured, what changed
 shape, what is known to be weaker than before, and what the original design still asks for.
@@ -9,13 +9,13 @@ The Rspack path is gone, not kept beside this one. There is no compatibility lay
 
 ## What was measured
 
-|                                                                                                                                                                                         | Before (Rspack, `1fec4c7`) | After (Vite)                                                |
-| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------- | ----------------------------------------------------------- |
-| Node suite (`node --test test/*.test.mjs`)                                                                                                                                              | 370 pass                   | 352 pass, 0 fail                                            |
-| Browser suite (Playwright, 95 cases, unchanged)                                                                                                                                         | 95 pass                    | 95 pass                                                     |
-| `@rshono/create` suite                                                                                                                                                                  | —                          | 39 pass                                                     |
-| `@rshono/create` end to end (`CREATE_RSHONO_E2E=1`): a scaffolded app installed from the packed tarball, under npm and under pnpm, typechecked and built; Tailwind; every deploy target | —                          | 4 of 6 run, 4 pass — the two lint-preset cases were not run |
-| `apps/website` (`cloudflare`)                                                                                                                                                           | —                          | builds; `wrangler deploy --dry-run` bundles it              |
+|                                                                                                                                                                                           | Before (Rspack, `1fec4c7`) | After (Vite)                                                |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------- | ----------------------------------------------------------- |
+| Node suite (`node --test test/*.test.mjs`)                                                                                                                                                | 370 pass                   | 352 pass, 0 fail                                            |
+| Browser suite (Playwright, 95 cases, unchanged)                                                                                                                                           | 95 pass                    | 95 pass                                                     |
+| `@rsvhono/create` suite                                                                                                                                                                   | —                          | 39 pass                                                     |
+| `@rsvhono/create` end to end (`CREATE_RSVHONO_E2E=1`): a scaffolded app installed from the packed tarball, under npm and under pnpm, typechecked and built; Tailwind; every deploy target | —                          | 4 of 6 run, 4 pass — the two lint-preset cases were not run |
+| `apps/website` (`cloudflare`)                                                                                                                                                             | —                          | builds; `wrangler deploy --dry-run` bundles it              |
 
 The Node count went down because tests of deleted machinery went with it — the Rspack config objects, the
 two loaders, the webpack hot-update walker, the dev worker and its SSE channel — and came back as fewer,
@@ -47,16 +47,16 @@ when it finds one. A silent fallback could pair a different version with the pin
 | Was                                                                                           | Is                                                                                             |
 | --------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
 | `builder/rspack-config.ts` — two compiler configs, layers, externals                          | `builder/vite-config.ts` — one Vite config, three environments                                 |
-| `builder/page-entry-loader.cjs` — `'use server-entry'` on page modules                        | `rshono:pages` — wraps page modules; see "The page wrapper"                                    |
-| `builder/env-shadow-loader.cjs`                                                               | `builder/env-shadow.ts` + `rshono:env-shadow`, same algorithm, SSR environment                 |
+| `builder/page-entry-loader.cjs` — `'use server-entry'` on page modules                        | `rsvhono:pages` — wraps page modules; see "The page wrapper"                                   |
+| `builder/env-shadow-loader.cjs`                                                               | `builder/env-shadow.ts` + `rsvhono:env-shadow`, same algorithm, SSR environment                |
 | `builder/server-only-imports.ts`                                                              | a `resolveId` check in the client environment, same message                                    |
 | `cli/dev.ts` — two watchers, a worker thread per rebuild, a proxy, an SSE channel (383 lines) | one Vite dev server (82 lines)                                                                 |
 | `runtime/hot-update.ts`, `runtime/dev-protocol.ts` — the webpack HMR client                   | `import.meta.hot.on('rsc:update')` in `entry.client.tsx`; client edits are Vite's Fast Refresh |
 | `Page.entryJsFiles` / `entryCssFiles`                                                         | nothing to carry: one module entry, CSS injected where a page renders                          |
-| Rspack's `serverManifest` as the action allowlist                                             | `virtual:rshono/server-references` — see "Server actions"                                      |
+| Rspack's `serverManifest` as the action allowlist                                             | `virtual:rsvhono/server-references` — see "Server actions"                                     |
 | the `rspack(config, ctx)` hook                                                                | `vite`, a config merged over the generated one                                                 |
 | `postcss-loader` wired through that hook                                                      | nothing: Vite runs `postcss.config.mjs` itself                                                 |
-| `@rshono/create`'s own Rspack bundle                                                          | a Vite SSR build (`packages/create/scripts/build.mjs`)                                         |
+| `@rsvhono/create`'s own Rspack bundle                                                         | a Vite SSR build (`packages/create/scripts/build.mjs`)                                         |
 
 Unchanged above the bundler: the Hono parent app and request classification, `RequestContext`, control
 signals, abort forwarding, `flight-inject.ts`, the whole navigation client, prerendering
@@ -69,7 +69,7 @@ that reads it kept working.
 **The page wrapper.** For a server component whose module imports CSS, the RSC plugin wraps the export and
 re-creates the element with `createElement(Component, props)`. That copies enumerable props, and a page's
 `ctx` is deliberately non-enumerable — so a page importing a stylesheet rendered with `ctx` undefined. Pages
-are excluded from that transform and wrapped by `rshono:pages` instead, which passes the props object
+are excluded from that transform and wrapped by `rsvhono:pages` instead, which passes the props object
 through and marks the wrapper. `assertPageModule` requires the mark, so a page the build did not recognise —
 wired up some way other than an inline `component: () => import('…')` thunk or a `'use server-entry'`
 directive — fails with a message, at build time and at request time, rather than rendering without `ctx`.
@@ -83,7 +83,7 @@ dependency; it is in one function (`runtime/server-references.ts`) and under tes
 
 **CSS package imports in server environments.** A server component's stylesheet is compiled in the RSC
 environment, which leaves `node_modules` external; Vite's CSS resolver then fails on `@import 'tailwindcss'`.
-`rshono:css-package-imports` resolves such imports to files first.
+`rsvhono:css-package-imports` resolves such imports to files first.
 
 **The dev server's request path.** Vite answers any URL outside its `base` itself, with a 404. So the
 framework registers a middleware ahead of Vite's: `/_static/*` falls through to Vite, everything else is a

@@ -6,13 +6,13 @@ import { expect, test } from '@playwright/test';
  */
 async function markDocument(page) {
   await page.evaluate(() => {
-    window.__rshonoDocumentId = Math.random().toString(36);
-    return window.__rshonoDocumentId;
+    window.__rsvhonoDocumentId = Math.random().toString(36);
+    return window.__rsvhonoDocumentId;
   });
-  return page.evaluate(() => window.__rshonoDocumentId);
+  return page.evaluate(() => window.__rsvhonoDocumentId);
 }
 
-const documentId = (page) => page.evaluate(() => window.__rshonoDocumentId ?? null);
+const documentId = (page) => page.evaluate(() => window.__rsvhonoDocumentId ?? null);
 
 test.describe('hydration', () => {
   test('a client island hydrates and holds its own state', async ({ page }) => {
@@ -354,7 +354,7 @@ test.describe('boundaries', () => {
     // payload carrying the failure is applied — so this asserts the client half of the mechanism.
     await expect(page.locator('[data-section="error"]')).toBeVisible();
     await expect(page.getByRole('heading', { name: 'AsyncBoundary' })).toBeVisible();
-    await expect(page.locator('[data-rshono-fatal]')).toHaveCount(0, { timeout: 1000 });
+    await expect(page.locator('[data-rsvhono-fatal]')).toHaveCount(0, { timeout: 1000 });
   });
 
   test('the happy path resolves the suspended section', async ({ page }) => {
@@ -598,7 +598,7 @@ test.describe('no blank screens', () => {
 
     await page.goto('/crash');
 
-    const overlay = page.locator('[data-rshono-fatal]');
+    const overlay = page.locator('[data-rsvhono-fatal]');
     await expect(overlay).toBeVisible();
     await expect(overlay).toContainText('Something went wrong');
     await expect(overlay.getByRole('button', { name: 'Reload page' })).toBeVisible();
@@ -630,7 +630,7 @@ test.describe('no blank screens', () => {
     await page.evaluate(() => {
       sessionStorage.removeItem('fatal-shown');
       new MutationObserver(() => {
-        if (document.querySelector('[data-rshono-fatal]')) sessionStorage.setItem('fatal-shown', '1');
+        if (document.querySelector('[data-rsvhono-fatal]')) sessionStorage.setItem('fatal-shown', '1');
       }).observe(document, { childList: true, subtree: true });
     });
 
@@ -640,7 +640,7 @@ test.describe('no blank screens', () => {
     // The recovery is the app's error page as a document, not the fatal overlay over a dead tree. The
     // overlay title is a div, so a heading can only be the new document; the id is what proves it is one.
     await expect(page.getByRole('heading', { name: 'Something went wrong' })).toBeVisible();
-    await expect(page.locator('[data-rshono-fatal]')).toHaveCount(0);
+    await expect(page.locator('[data-rsvhono-fatal]')).toHaveCount(0);
     expect(await page.evaluate(() => sessionStorage.getItem('fatal-shown')), 'the panel must not flash over the error page on its way').toBeNull();
     expect(await documentId(page), 'the recovery must rebuild the root with a real document load').not.toBe(before);
 
@@ -661,7 +661,7 @@ test.describe('no blank screens', () => {
 
     await page.getByRole('button', { name: 'Trigger a server error' }).click();
 
-    await expect(page.locator('[data-rshono-fatal]')).toBeVisible();
+    await expect(page.locator('[data-rsvhono-fatal]')).toBeVisible();
     expect(await documentId(page), 'the error is the answer; a reload would discard it').toBe(before);
   });
 });
@@ -717,7 +717,7 @@ test.describe('late control signals', () => {
 
     await page.goto('/late-signal?signal=notfound');
 
-    const overlay = page.locator('[data-rshono-fatal]');
+    const overlay = page.locator('[data-rsvhono-fatal]');
     await expect(overlay).toBeVisible();
     await expect(overlay).toContainText('Page not found');
     // Production must not explain the framework's internals on screen — that is the dev-only branch.
@@ -728,8 +728,8 @@ test.describe('late control signals', () => {
     // The recovery was *spent*, not skipped: the page was asked for twice, and the key that bounds it is
     // what made the second answer terminal rather than a third request.
     expect(documents).toBe(2);
-    expect(await page.evaluate(() => Object.keys(sessionStorage).filter((key) => key.startsWith('rshono:late-not-found:')))).toEqual([
-      'rshono:late-not-found:/late-signal?signal=notfound',
+    expect(await page.evaluate(() => Object.keys(sessionStorage).filter((key) => key.startsWith('rsvhono:late-not-found:')))).toEqual([
+      'rsvhono:late-not-found:/late-signal?signal=notfound',
     ]);
 
     // And it stays stopped: same document 1.5s later, with the panel still on it.
@@ -749,7 +749,7 @@ test.describe('late control signals', () => {
    */
   test('a notFound() page reached twice by soft navigation renders the app 404 both times', async ({ page }) => {
     const notFoundHeading = page.getByRole('heading', { name: '404 — nothing here' });
-    const overlay = page.locator('[data-rshono-fatal]');
+    const overlay = page.locator('[data-rsvhono-fatal]');
 
     // Not a link click: the testbed links only to profiles that exist, and the destination has to be one
     // that raises `notFound()`. A `navigation.navigate` is the same soft navigation a `router.push` makes.

@@ -5,7 +5,7 @@ import { finalizeVercelBuild } from './vercel/build.js';
 
 /** What a preset's {@link DeployPreset.finalize} is told about the build it is arranging. */
 export interface DeployBuildContext {
-  /** The project root — where `rshono build` ran, and what a platform config file is written next to. */
+  /** The project root — where `rsvhono build` ran, and what a platform config file is written next to. */
   rootDir: string;
   /** `<root>/dist`. */
   distDir: string;
@@ -33,7 +33,7 @@ export interface DeployBuildContext {
 export interface DeployPreset {
   readonly name: DeployTarget;
   /**
-   * The module `@rshono/deploy` resolves to, as a path relative to the framework's own `dist/`.
+   * The module `@rsvhono/deploy` resolves to, as a path relative to the framework's own `dist/`.
    * Slash-separated and split on use, so it stays a valid path on Windows too.
    */
   readonly runtimeModule: string;
@@ -61,7 +61,7 @@ export interface DeployPreset {
    * stay external either way.
    *
    * The cost is a dependency that cannot be bundled — a native addon, or one that reads its own files off
-   * disk. Those fail the build rather than the deploy; the `vite` option in `rshono.config.ts` is the way out.
+   * disk. Those fail the build rather than the deploy; the `vite` option in `rsvhono.config.ts` is the way out.
    */
   readonly bundleDependencies?: boolean;
   /** Emit each server environment as one file, with dynamic imports inlined — for a host that cannot load chunks lazily. */
@@ -80,7 +80,7 @@ export interface DeployPreset {
 export const NODE_PRESET: DeployPreset = {
   name: 'node',
   runtimeModule: 'deploy/node/runtime.js',
-  deployHint: 'run `rshono start`',
+  deployHint: 'run `rsvhono start`',
 };
 
 /**
@@ -156,7 +156,7 @@ function presetFor(target: string): DeployPreset | undefined {
 }
 
 /**
- * How to deploy what a given target built, or `null` for a name this rshono does not know — which a `dist/`
+ * How to deploy what a given target built, or `null` for a name this rsvhono does not know — which a `dist/`
  * from a newer version can legitimately carry.
  */
 export function deployHintFor(target: string): string | null {
@@ -167,16 +167,16 @@ export function deployHintFor(target: string): string | null {
 export interface DeploySources {
   /** The `--deploy` flag. */
   flag?: string;
-  /** The `RSHONO_DEPLOY` env var — for a CI job that deploys the same app to more than one place. */
+  /** The `RSVHONO_DEPLOY` env var — for a CI job that deploys the same app to more than one place. */
   env?: string;
-  /** The `deploy` field in `rshono.config.ts`. */
+  /** The `deploy` field in `rsvhono.config.ts`. */
   config?: string;
 }
 
 /**
  * Resolves the preset to build with: the flag wins over the environment, which wins over the config file,
  * which wins over the `node` default. Blank values are ignored at every level, so an unset-but-present
- * `RSHONO_DEPLOY=` in CI falls through rather than failing the build.
+ * `RSVHONO_DEPLOY=` in CI falls through rather than failing the build.
  */
 export function resolveDeployPreset(sources: DeploySources = {}): DeployPreset {
   const target = sources.flag?.trim() || sources.env?.trim() || sources.config?.trim();
@@ -184,7 +184,7 @@ export function resolveDeployPreset(sources: DeploySources = {}): DeployPreset {
 
   const preset = presetFor(target);
   if (!preset) {
-    throw new Error(`[rshono] unknown deploy target ${JSON.stringify(target)} — expected one of: ${DEPLOY_TARGETS.join(', ')}.`);
+    throw new Error(`[rsvhono] unknown deploy target ${JSON.stringify(target)} — expected one of: ${DEPLOY_TARGETS.join(', ')}.`);
   }
   return preset;
 }

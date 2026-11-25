@@ -66,7 +66,7 @@ function keysChanged(a: readonly unknown[], b: readonly unknown[]): boolean {
  *
  * @example
  * ```tsx
- * import { CatchBoundary } from '@rshono/core/client';
+ * import { CatchBoundary } from '@rsvhono/core/client';
  *
  * <CatchBoundary fallback={(error, reset) => (
  *   <div role="alert">
@@ -79,7 +79,7 @@ function keysChanged(a: readonly unknown[], b: readonly unknown[]): boolean {
  * ```
  *
  * @see {@link https://react.dev/reference/react/Component#catching-rendering-errors-with-an-error-boundary | React — error boundaries}
- * @see {@link https://www.rshono.com/docs/api#rshonocoreclient | Docs — `@rshono/core/client`}
+ * @see {@link https://www.rshono.com/docs/api#rsvhonocoreclient | Docs — `@rsvhono/core/client`}
  */
 export class CatchBoundary extends Component<CatchBoundaryProps, CatchBoundaryState> {
   state: CatchBoundaryState = { error: null };
@@ -162,7 +162,7 @@ export interface AsyncBoundaryProps {
  *
  * @example
  * ```tsx
- * import { AsyncBoundary } from '@rshono/core/client';
+ * import { AsyncBoundary } from '@rsvhono/core/client';
  *
  * <AsyncBoundary loading={<Spinner />} error={(e, reset) => <Retry onClick={reset} />}>
  *   <SlowServerComponent />
@@ -170,7 +170,7 @@ export interface AsyncBoundaryProps {
  * ```
  *
  * @see {@link https://react.dev/reference/react/Suspense | React — `<Suspense>`}
- * @see {@link https://www.rshono.com/docs/api#rshonocoreclient | Docs — `@rshono/core/client`}
+ * @see {@link https://www.rshono.com/docs/api#rsvhonocoreclient | Docs — `@rsvhono/core/client`}
  */
 export function AsyncBoundary({ loading, error, onError, resetKeys, children }: AsyncBoundaryProps): ReactNode {
   // The pathname as the key is what makes a navigation mount this boundary rather than reconcile into
