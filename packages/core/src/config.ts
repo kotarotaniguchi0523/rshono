@@ -1,3 +1,4 @@
+import type { Options as ReactPluginOptions } from '@vitejs/plugin-react';
 import type { UserConfig } from 'vite';
 import type { DeployTarget } from './deploy/contract.js';
 
@@ -83,6 +84,19 @@ export interface RsvhonoConfig {
    * @see {@link https://vite.dev/config/ | Vite — configuration reference}
    */
   vite?: UserConfig;
+  /**
+   * Options for the `@vitejs/plugin-react` instance the framework registers — the one place to turn on the
+   * React Compiler, which that plugin runs through Oxc and applies to client code only:
+   *
+   * @example
+   * react: { compiler: { compilationMode: 'annotation' } }
+   *
+   * Needs `oxc-transform-react` installed; the plugin says so if it is not. Adding a second `react()` under
+   * `vite.plugins` instead registers the plugin twice.
+   *
+   * @see {@link https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react | @vitejs/plugin-react}
+   */
+  react?: ReactPluginOptions;
 }
 
 /**

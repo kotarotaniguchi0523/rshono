@@ -766,3 +766,13 @@ test.describe('late control signals', () => {
     await expect(overlay).toHaveCount(0, 'the second visit must recover exactly like the first');
   });
 });
+
+test('a component React leaves to the browser with browser() renders once hydrated, and after a soft navigation', async ({ page }) => {
+  await page.goto('/react-standard');
+  await expect(page.locator('[data-browser-only]')).toHaveText('viewport known');
+  await expect(page.locator('[data-browser-only-fallback]')).toHaveCount(0);
+
+  await page.evaluate(() => navigation.navigate('/users').finished);
+  await page.evaluate(() => navigation.navigate('/react-standard').finished);
+  await expect(page.locator('[data-browser-only]')).toHaveText('viewport known');
+});

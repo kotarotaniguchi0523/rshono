@@ -106,6 +106,11 @@ const META: Record<RoutePath, RouteMeta> = {
     title: 'Reachability',
     description: 'Reaches server functions through a re-export, a lazy client component and a dynamically imported server component.',
   },
+  '/react-standard': {
+    group: 'Streaming & suspense',
+    title: 'React standard APIs',
+    description: '`cache()` within one render, `cacheSignal()` ending with it, and a component `browser()` leaves to the browser.',
+  },
   '/canonical': {
     group: 'Pages & forms',
     title: 'Canonical',

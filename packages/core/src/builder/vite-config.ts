@@ -534,7 +534,7 @@ export function createViteConfig({ rootDir, isDev, config, preset, buildId }: Vi
     base: STATIC_BASE,
     plugins: [
       ...(merged.plugins ?? []),
-      react(),
+      react(config.react),
       rsvhonoPages(pageFiles, srcDir),
       ...(isDev ? [] : [rsvhonoRouteFunctions(pageFiles, srcDir)]),
       rsc({

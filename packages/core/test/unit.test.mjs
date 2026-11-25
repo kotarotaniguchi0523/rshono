@@ -2500,6 +2500,23 @@ describe('shadowProcessEnv', () => {
   });
 });
 
+test('config.react reaches the one React plugin the framework registers, instead of adding a second', () => {
+  const names = (config) =>
+    config.plugins
+      .flat(Infinity)
+      .filter(Boolean)
+      .map((plugin) => plugin.name);
+  const options = { rootDir: MINIMAL_APP_DIR, isDev: false, preset: NODE_PRESET };
+  const plain = names(createViteConfig({ ...options, config: {} }));
+  const compiled = names(createViteConfig({ ...options, config: { react: { compiler: { compilationMode: 'annotation' } } } }));
+  const reactPlugins = (list) => list.filter((name) => name.startsWith('vite:react')).length;
+  assert.ok(reactPlugins(plain) > 0);
+  // The compiler may bring a plugin of its own along; nothing that was there before is there twice.
+  const count = (list, name) => list.filter((each) => each === name).length;
+  for (const name of new Set(plain))
+    assert.equal(count(compiled, name), count(plain, name), `${name} is registered as many times as without the option`);
+});
+
 describe('route-functions: reading the manifest', async () => {
   const { createReferenceValidation, joinRouteFunctions, reachableFunctions, UnreachableServerReferenceError } =
     await import('../dist/runtime/route-functions.js');

@@ -1828,3 +1828,45 @@ describe('what the build put where', () => {
     assert.equal(ssr.split('Object.create(globalThis.process').length - 1, 1);
   });
 });
+
+// ── React's own APIs, on this renderer ───────────────────────────────────────────────────────────────────
+//
+// `cache()`, `cacheSignal()` and `browser()` are React's. The framework adds nothing to them and must not get
+// in their way: these say they behave here as React documents them.
+describe('React standard APIs', () => {
+  const read = async () => {
+    const html = await (await fetch(`${base}/react-standard`)).text();
+    const attr = (name) => new RegExp(`${name}="([^"]*)"`).exec(html)?.[1];
+    return {
+      html,
+      loads: [...html.matchAll(/data-load="(\d+)"/g)].map((match) => Number(match[1])),
+      previous: attr('data-previous-signal'),
+      current: attr('data-this-signal'),
+    };
+  };
+
+  test('cache() is one call per render, shared by its components, and not shared between requests', async () => {
+    const first = await read();
+    const second = await read();
+    assert.equal(first.loads.length, 2, 'two components asked');
+    assert.equal(first.loads[0], first.loads[1], 'and got the same call');
+    assert.equal(second.loads[0], second.loads[1]);
+    assert.equal(second.loads[0], first.loads[0] + 1, 'the next request ran the loader again, once');
+  });
+
+  test('cacheSignal() is given to a render and aborts when that render is over', async () => {
+    await read();
+    const next = await read();
+    assert.equal(next.current, 'given');
+    assert.equal(next.previous, 'aborted', 'the render before this one has finished, and its signal says so');
+  });
+
+  test('browser() leaves a component to the browser without that being reported as a server error', async () => {
+    const before = getOutput().length;
+    const { html } = await read();
+    assert.match(html, /data-browser-only-fallback/, 'the server rendered the fallback');
+    assert.doesNotMatch(html, /data-browser-only=/, 'and not the component');
+    await new Promise((resolve) => setTimeout(resolve, 200)); // the child's stderr reaches us asynchronously
+    assert.doesNotMatch(getOutput().slice(before), /SSR error|render error|error-reporter/, 'a deliberate bailout is not a fault');
+  });
+});

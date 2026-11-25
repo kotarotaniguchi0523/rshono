@@ -149,6 +149,11 @@ export const routes = defineRoutes({
       component: () => import('./components/reachability'),
     },
     {
+      // React's own `cache()`, `cacheSignal()` and `browser()` on this renderer.
+      path: '/react-standard',
+      component: () => import('./components/react-standard'),
+    },
+    {
       // Redirects to its own path with a different query. See navigation-redirects.spec.mjs.
       path: '/canonical',
       component: () => import('./components/canonical'),

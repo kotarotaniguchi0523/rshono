@@ -75,6 +75,10 @@ those.
   all where `sessionStorage` is unusable. It carries the CSP nonce like every other inline script, and is not
   emitted under `rsvhono dev`. The entry is still React's `bootstrapModules`, so its `modulepreload` is kept.
 
+- **`react` in `rsvhono.config.ts`** is passed to the `@vitejs/plugin-react` instance the framework
+  registers — `react: { compiler: true }` turns on the React Compiler (Oxc, client code only; needs
+  `oxc-transform-react`). A second `react()` under `vite.plugins` would register the plugin twice.
+
 - **`setServerFunctionRefresh('explicit')` and `requestRefresh()`.** By default a server function called
   from client code is still answered with the page rendered again. In `'explicit'` mode the reply is the
   return value alone — the page module is not loaded and nothing is rendered — unless the function called
