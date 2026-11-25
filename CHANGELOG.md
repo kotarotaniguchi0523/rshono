@@ -58,7 +58,7 @@ those.
   the page it re-renders is the 404 page, with the action's result in the payload.
 
 - **A page and a server from different builds notice.** Every `rsvhono build` mints one id, compiled into
-  the server and the browser bundle alike and written to `dist/rsvhono-build.json`. The server names its
+  the server bundle, handed to the browser by the document, and written to `dist/rsvhono-build.json`. The server names its
   build on every response (`x-rsvhono-build`); the browser names its own on a server function call.
   - A payload from another build is not decoded — it names chunks the page does not have. The navigation
     ends in a document load of where it was going.

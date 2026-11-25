@@ -2562,42 +2562,59 @@ describe('route-functions: reading the manifest', async () => {
 // ── The pieces the browser and e2e suites reach only through a whole app ───────────────────────────────
 
 describe('build id', () => {
-  // The id is a build-time define, read once at module load, so each case imports its own copy of the module.
-  const load = async (id) => {
-    if (id === undefined) delete globalThis.__RSVHONO_BUILD_ID__;
-    else globalThis.__RSVHONO_BUILD_ID__ = id;
-    try {
-      return await import(`../dist/runtime/build-id.js?case=${encodeURIComponent(String(id))}-${Math.random()}`);
-    } finally {
-      delete globalThis.__RSVHONO_BUILD_ID__;
-    }
+  // The id is a build-time define, read once when the module loads — and this process loaded it long ago,
+  // without one. So each case with an id runs in a process of its own, where the global is set first.
+  const inBuild = (id, body) => {
+    const run = spawnSync(
+      process.execPath,
+      [
+        '--input-type=module',
+        '-e',
+        `globalThis.__RSVHONO_BUILD_ID__ = ${JSON.stringify(id)};
+         globalThis.location = { origin: 'http://example.test' };
+         const build = await import(${JSON.stringify(new URL('../dist/runtime/build-id.js', import.meta.url).href)});
+         const request = await import(${JSON.stringify(new URL('../dist/runtime/request.js', import.meta.url).href)});
+         console.log(JSON.stringify(await (${body})(build, request)));`,
+      ],
+      { encoding: 'utf8' },
+    );
+    assert.equal(run.status, 0, run.stderr);
+    return JSON.parse(run.stdout);
   };
 
-  test('another build is one that names itself and is not this one', async () => {
-    const { BUILD_ID, isOtherBuild } = await load('build-a');
-    assert.equal(BUILD_ID, 'build-a');
-    assert.equal(isOtherBuild('build-b'), true);
-    assert.equal(isOtherBuild('build-a'), false);
+  test('another build is one that names itself and is not this one', () => {
+    const result = inBuild('build-a', (build) => ({
+      id: build.BUILD_ID,
+      other: build.isOtherBuild('build-b'),
+      same: build.isOtherBuild('build-a'),
+    }));
+    assert.deepEqual(result, { id: 'build-a', other: true, same: false });
   });
 
-  test('a request that claims no build is not a mismatch', async () => {
-    const { isOtherBuild } = await load('build-a');
-    for (const absent of [null, undefined, '']) assert.equal(isOtherBuild(absent), false, `${String(absent)} claims nothing`);
+  test('a request that claims no build is not a mismatch', () => {
+    assert.deepEqual(
+      inBuild('build-a', (build) => [null, undefined, ''].map((absent) => build.isOtherBuild(absent))),
+      [false, false, false],
+    );
   });
 
   test('under dev there is no id, and nothing is ever another build', async () => {
-    const { BUILD_ID, isOtherBuild } = await load(undefined);
-    assert.equal(BUILD_ID, undefined);
-    assert.equal(isOtherBuild('anything'), false);
+    // This process is that case: nothing defined the id.
+    const shared = await import('../dist/runtime/build-id.js');
+    assert.equal(shared.BUILD_ID, undefined);
+    assert.equal(shared.isOtherBuild('anything'), false);
+    assert.equal(shared.buildIdPreamble(), '', 'and the document is handed nothing');
   });
 
-  test('a define that is not a string is no id', async () => {
-    const { BUILD_ID } = await load(42);
-    assert.equal(BUILD_ID, undefined);
+  test('a define that is not a string is no id', () => {
+    assert.deepEqual(
+      inBuild(42, (build) => ({ undefinedId: build.BUILD_ID === undefined, other: build.isOtherBuild('x') })),
+      { undefinedId: true, other: false },
+    );
   });
 
   test('the mismatch error is recognisable by code and carries the server’s build', async () => {
-    const { BuildMismatchError, BUILD_HEADER } = await load('build-a');
+    const { BuildMismatchError, BUILD_HEADER } = await import('../dist/runtime/build-id.js');
     const error = new BuildMismatchError('build-b');
     assert.equal(error.code, 'RSVHONO_BUILD_MISMATCH');
     assert.equal(error.name, 'BuildMismatchError');
@@ -2606,32 +2623,25 @@ describe('build id', () => {
     assert.equal(BUILD_HEADER, 'x-rsvhono-build');
   });
 
-  test('the preamble hands the id to the page, and is nothing when there is no id', async () => {
-    const built = await load('build-a');
-    assert.equal(built.buildIdPreamble(), `self.${built.BUILD_GLOBAL}="build-a";`);
-    assert.equal((await load(undefined)).buildIdPreamble(), '');
+  test('the preamble hands the id to the page', () => {
+    assert.equal(
+      inBuild('build-a', (build) => build.buildIdPreamble()),
+      'self.__rsvhonoBuild="build-a";',
+    );
     // An id is hex in practice; the escape is for the day it is not.
-    assert.doesNotMatch((await load('</script>')).buildIdPreamble(), /</);
+    assert.doesNotMatch(
+      inBuild('</script>', (build) => build.buildIdPreamble()),
+      /</,
+    );
   });
 
   test('a server function call carries the build, and a page fetch does not', () => {
-    // Its own process: the id is read when `build-id.js` first loads, and this file loaded it long ago.
-    const run = spawnSync(
-      process.execPath,
-      [
-        '--input-type=module',
-        '-e',
-        `globalThis.__RSVHONO_BUILD_ID__ = 'build-a';
-         globalThis.location = { origin: 'http://example.test' };
-         const { createRscRequest } = await import(${JSON.stringify(new URL('../dist/runtime/request.js', import.meta.url).href)});
-         const call = createRscRequest('/p', { id: 'm#f', body: 'x' });
-         const page = createRscRequest('/p');
-         console.log(JSON.stringify({ call: call.headers.get('x-rsvhono-build'), page: page.headers.get('x-rsvhono-build') }));`,
-      ],
-      { encoding: 'utf8' },
-    );
-    // A GET says nothing about its build: the reply's header is what gets compared.
-    assert.deepEqual(JSON.parse(run.stdout), { call: 'build-a', page: null });
+    const result = inBuild('build-a', (_build, request) => ({
+      call: request.createRscRequest('/p', { id: 'm#f', body: 'x' }).headers.get('x-rsvhono-build'),
+      // A GET says nothing about its build: the reply's header is what gets compared.
+      page: request.createRscRequest('/p').headers.get('x-rsvhono-build'),
+    }));
+    assert.deepEqual(result, { call: 'build-a', page: null });
   });
 });
 
@@ -2856,6 +2866,202 @@ describe('browser document helpers', async () => {
       doc.loadDocument('/b', { replace: true });
       assert.deepEqual(calls, [['location.reload'], ['location.assign', '/a'], ['location.replace', '/b']]);
     });
+  });
+});
+
+describe('the browser failure overlay', async () => {
+  const doc = await import('../dist/runtime/browser/document.js');
+
+  /** As much of a DOM as the overlay touches: a tree of elements with attributes, text, style and listeners. */
+  class FakeElement {
+    constructor(tag) {
+      this.tagName = tag.toUpperCase();
+      this.children = [];
+      this.attributes = new Map();
+      this.listeners = new Map();
+      this.style = { cssText: '' };
+      this.textContent = '';
+      this.parent = null;
+    }
+    appendChild(child) {
+      child.parent = this;
+      this.children.push(child);
+      return child;
+    }
+    remove() {
+      if (this.parent) this.parent.children = this.parent.children.filter((child) => child !== this);
+    }
+    setAttribute(name, value) {
+      this.attributes.set(name, value);
+    }
+    addEventListener(type, listener) {
+      this.listeners.set(type, listener);
+    }
+    /** Only the one selector shape the overlay uses: `[attribute]`. */
+    querySelector(selector) {
+      const name = /^\[([\w-]+)\]$/.exec(selector)[1];
+      for (const child of this.children) {
+        if (child.attributes.has(name)) return child;
+        const found = child.querySelector(selector);
+        if (found) return found;
+      }
+      return null;
+    }
+    get text() {
+      return [this.textContent, ...this.children.map((child) => child.text)].join(' ');
+    }
+  }
+
+  /** Installs a document, a location, a session store and a navigation for one test, and runs its timers. */
+  async function inPage({ empty = false } = {}, fn) {
+    const reloads = [];
+    const storage = new Map();
+    const root = new FakeElement('#document');
+    const fakeDocument = {
+      documentElement: null,
+      body: null,
+      createElement: (tag) => new FakeElement(tag),
+      appendChild(element) {
+        root.appendChild(element);
+        if (element.tagName === 'HTML') {
+          fakeDocument.documentElement = element;
+          const append = element.appendChild.bind(element);
+          element.appendChild = (child) => {
+            if (child.tagName === 'BODY') fakeDocument.body = child;
+            return append(child);
+          };
+        }
+        return element;
+      },
+      querySelector: (selector) => root.querySelector(selector),
+    };
+    if (!empty) fakeDocument.appendChild(new FakeElement('html')).appendChild(new FakeElement('body'));
+    const globals = {
+      document: fakeDocument,
+      location: { pathname: '/late', search: '?x=1' },
+      sessionStorage: { getItem: (k) => (storage.has(k) ? storage.get(k) : null), setItem: (k, v) => void storage.set(k, v) },
+      navigation: {
+        reload: () => {
+          reloads.push('reload');
+          return {};
+        },
+      },
+    };
+    const saved = Object.fromEntries(Object.keys(globals).map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)]));
+    for (const [name, value] of Object.entries(globals)) Object.defineProperty(globalThis, name, { value, configurable: true, writable: true });
+    // The overlay paints on a zero timer; the late-notFound path also arms a long one, which would outlive
+    // this page. Long timers are held for the test to fire by hand instead.
+    const realSetTimeout = globalThis.setTimeout;
+    const held = [];
+    globalThis.setTimeout = (fn, delay, ...rest) => (delay >= 1000 ? held.push(fn) : realSetTimeout(fn, delay, ...rest));
+    const overlay = () => fakeDocument.querySelector('[data-rsvhono-fatal]');
+    /** The overlay paints on a zero timer, so that it lands after whatever React is unmounting. */
+    const painted = () => new Promise((resolve) => realSetTimeout(resolve, 5));
+    try {
+      await fn({ overlay, painted, reloads, storage, held, document: fakeDocument });
+    } finally {
+      globalThis.setTimeout = realSetTimeout;
+      for (const [name, descriptor] of Object.entries(saved)) {
+        if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+        else delete globalThis[name];
+      }
+    }
+  }
+
+  test('outside dev, a fatal error is announced without its message or stack', async () => {
+    await inPage({}, async ({ overlay, painted }) => {
+      doc.showFatal(new Error('SELECT * FROM users failed at db.internal:5432'), '\n    at Secret');
+      await painted();
+      const box = overlay();
+      assert.ok(box, 'the overlay is in the document');
+      assert.equal(box.attributes.get('role'), 'alert');
+      assert.match(box.text, /Something went wrong/);
+      assert.doesNotMatch(box.text, /SELECT|db\.internal|Secret/, 'what failed is the server log’s business, not the visitor’s');
+    });
+  });
+
+  test('its button reloads the document', async () => {
+    await inPage({}, async ({ overlay, painted, reloads }) => {
+      doc.showFatal(new Error('x'));
+      await painted();
+      const button = overlay().children.find((child) => child.tagName === 'BUTTON');
+      assert.equal(button.textContent, 'Reload page');
+      button.listeners.get('click')();
+      assert.deepEqual(reloads, ['reload']);
+    });
+  });
+
+  test('a second failure replaces the first overlay instead of stacking on it', async () => {
+    await inPage({}, async ({ painted, document }) => {
+      doc.showFatal(new Error('one'));
+      await painted();
+      doc.showFatal(new Error('two'));
+      await painted();
+      assert.equal(document.body.children.filter((child) => child.attributes.has('data-rsvhono-fatal')).length, 1);
+    });
+  });
+
+  test('it can paint into a document that has lost its html and body', async () => {
+    // React removes the whole document when the root it owns fails to render.
+    await inPage({ empty: true }, async ({ overlay, painted, document }) => {
+      doc.showFatal(new Error('x'));
+      await painted();
+      assert.ok(document.documentElement && document.body, 'both were put back');
+      assert.equal(overlay().parent, document.body);
+    });
+  });
+
+  test('a late notFound reloads once for this URL, and says so the second time', async () => {
+    await inPage({}, async ({ overlay, painted, reloads, storage, held }) => {
+      assert.equal(doc.lateNotFoundKey(), 'rsvhono:late-not-found:/late?x=1', 'counted per URL, query included');
+      doc.reloadOnceForLateNotFound();
+      assert.deepEqual(reloads, ['reload'], 'first: ask the server again, which can now answer 404 in time');
+      assert.equal(storage.get(doc.lateNotFoundKey()), '1');
+      assert.equal(overlay(), null);
+      assert.equal(held.length, 1, 'and a grace timer is armed, in case that reload never happens');
+
+      // The reload rendered the same page and it raised the same signal.
+      doc.reloadOnceForLateNotFound();
+      await painted();
+      assert.deepEqual(reloads, ['reload'], 'second: no further reload — that is the loop');
+      assert.match(overlay().text, /Page not found/);
+      assert.match(overlay().text, /This page is not available\./);
+    });
+  });
+
+  test('if the reload it asked for never comes, the grace timer says the page is not found', async () => {
+    await inPage({}, async ({ overlay, painted, held }) => {
+      doc.reloadOnceForLateNotFound();
+      held[0]();
+      await painted();
+      assert.match(overlay().text, /Page not found/);
+    });
+  });
+
+  test('and stays out of the way of an overlay that is already up', async () => {
+    await inPage({}, async ({ overlay, painted, held }) => {
+      doc.reloadOnceForLateNotFound();
+      doc.showFatal(new Error('x'));
+      await painted();
+      held[0]();
+      await painted();
+      assert.match(overlay().text, /Something went wrong/, 'the fatal overlay was not replaced');
+    });
+  });
+
+  test('settle swallows the rejections of a navigation nobody awaits', async () => {
+    const rejected = () => Promise.reject(new Error('aborted'));
+    const unhandled = [];
+    const onUnhandled = (reason) => unhandled.push(reason);
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      doc.settle({ committed: rejected(), finished: rejected() });
+      doc.settle({});
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      assert.deepEqual(unhandled, []);
+    } finally {
+      process.removeListener('unhandledRejection', onUnhandled);
+    }
   });
 });
 
