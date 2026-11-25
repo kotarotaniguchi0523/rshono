@@ -1,8 +1,8 @@
 'use server';
 
-import { getRequestContext, notFound, redirect } from '@rsvhono/core/server';
+import { getRequestContext, notFound, redirect, requestRefresh } from '@rsvhono/core/server';
 import { fakeDB, type User } from './db';
-import { raceLog } from './race-log';
+import { likes, raceLog } from './race-log';
 
 // Not exported — a 'use server' module may only export async functions.
 /**
@@ -113,4 +113,26 @@ export async function raiseSignal(formData: FormData): Promise<void> {
   const to = formData.get('to');
   if (typeof to === 'string' && to !== '') redirect(to);
   notFound();
+}
+
+/**
+ * `recordRace`, and then asks for the page — twice, which has to be one render. Under the default refresh
+ * mode the page is rendered anyway; under `'explicit'` this is the only thing that renders it.
+ */
+export async function recordRaceAndRefresh(label: string): Promise<string> {
+  raceLog.push(String(label).slice(0, 80));
+  requestRefresh();
+  requestRefresh();
+  return label;
+}
+
+/** Counts a like after a moment, and returns the new total — what an optimistic update settles to. */
+export async function like(): Promise<number> {
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  return ++likes.count;
+}
+
+/** Returns a value part of which is not ready yet: the reply streams it, page or no page. */
+export async function streamed(label: string): Promise<{ now: string; later: Promise<string> }> {
+  return { now: label, later: new Promise((resolve) => setTimeout(() => resolve(`${label}-later`), 200)) };
 }

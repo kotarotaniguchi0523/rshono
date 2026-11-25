@@ -65,6 +65,11 @@ Server-only, and request-scoped. See [Pages](/docs/pages) and [Usage](/docs/usag
 | `redirect(location, status?): never`        | Throws a control signal the framework turns into a redirect. `status` defaults to `303`.                                        |
 | `notFound(): never`                         | Aborts the render with a 404 and the app's not-found page.                                                                      |
 | `onServerError(handler): void`              | Registers one handler for every error the framework catches. Call it once, at the top level of `src/server.ts`.                 |
+| `beforeServerFunction(guard): void`         | Registers a check that runs before every server function, however it was called. Throw an `HTTPException` to refuse.            |
+| `trustServerFunctionOrigins(origins): void` | Names other origins that may call server functions. By default only the app's own can.                                          |
+| `setServerFunctionRefresh(mode): void`      | `'auto'` (default) renders the page after every function; `'explicit'` only when the function calls `requestRefresh()`.         |
+| `requestRefresh(): void`                    | Inside a server function: asks for the calling page to be rendered into the reply.                                              |
+| `classifyRequest(request): RequestKind`     | For middleware: `document`, `rsc`, `rsc-action` (with `actionId`) or `form-action` — a form post that _may_ carry a function.   |
 | `publicUrl(c): URL`                         | The browser-facing URL for a Hono `Context` — proxy-corrected under `trustProxy`. For middleware, which has no request context. |
 
 `publicUrl` is the one export here meant for `src/server.ts` rather than a component: middleware is

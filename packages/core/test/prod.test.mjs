@@ -489,6 +489,50 @@ test('a prerendered payload carries no render token', async () => {
   assert.doesNotMatch(await res.text(), /renderToken/);
 });
 
+// An action finishing and the page rendering after it are two events. `/action-race?after=<label>` stops
+// rendering once the server has applied that label — it redirects, or calls `notFound()` — so the action that
+// applies it succeeds and it is the *render* that ends in a route intent. The result is still the caller's.
+describe('an action that succeeded, on a page that then redirects or stops existing', () => {
+  const recordRace = () => {
+    const sibling = serverActionId('Add user');
+    return `${sibling.slice(0, sibling.lastIndexOf('#'))}#recordRace`;
+  };
+  const call = (label, then) =>
+    fetch(`${base}/action-race?after=${label}&then=${then}`, {
+      method: 'POST',
+      headers: { Origin: base, rsc: '1', 'x-rsc-action': recordRace(), 'content-type': 'text/plain;charset=UTF-8' },
+      body: JSON.stringify([label, 0]),
+    });
+
+  // A flight reply is on the wire before the page renders, so the page's intent cannot replace it: the root
+  // goes out with the result, and the intent follows inside the same payload as a digest.
+  for (const [then, digest] of [
+    ['redirect', /RSVHONO_REDIRECT;303;%2Fusers#/],
+    ['notfound', /RSVHONO_NOT_FOUND#/],
+  ]) {
+    test(`the reply carries the action’s result ahead of the page’s ${then}`, async () => {
+      const label = `then-${then}-${crypto.randomUUID()}`;
+      const res = await call(label, then);
+      const payload = await res.text();
+      assert.equal(res.status, 200);
+      assert.match(payload, new RegExp(`"returnValue":\\{"ok":true,"value":"${label}"\\}`));
+      assert.match(payload, digest);
+    });
+  }
+
+  test('an action that itself redirects has no result to carry', async () => {
+    const sibling = serverActionId('Logging out');
+    const res = await fetch(`${base}/dashboard`, {
+      method: 'POST',
+      headers: { Origin: base, rsc: '1', 'x-rsc-action': sibling, 'content-type': 'text/plain;charset=UTF-8' },
+      body: '[]',
+    });
+    const payload = await res.text();
+    assert.match(payload, /"redirect":/);
+    assert.doesNotMatch(payload, /"returnValue"/);
+  });
+});
+
 // An action called from the `notFound` page is posted to a URL no route matches. It is still an action call:
 // it runs behind the same checks as one posted to a page, and the page it re-renders is the 404 page.
 describe('a server action posted to a URL that only the notFound page answers', () => {

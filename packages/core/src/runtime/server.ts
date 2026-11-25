@@ -27,15 +27,24 @@
 // A barrel rather than pointing the subpath at `./context.js`, which also exports the framework's own
 // plumbing — that would put `runWithContext` and friends in a consumer's autocomplete and under semver.
 export {
+  beforeServerFunction,
   getRequestContext,
   notFound,
   onServerError,
   publicUrl,
   redirect,
+  requestRefresh,
+  setServerFunctionRefresh,
+  trustServerFunctionOrigins,
   type EnvVars,
   type RedirectStatus,
   type RequestContext,
   type ServerErrorContext,
   type ServerErrorHandler,
   type ServerErrorSource,
+  type ServerFunctionCall,
+  type ServerFunctionGuard,
+  type ServerFunctionOrigins,
+  type ServerFunctionRefresh,
 } from './context.js';
+export { classifyRequest, type RequestKind } from './request.js';

@@ -1,4 +1,4 @@
-import { onServerError, publicUrl } from '@rsvhono/core/server';
+import { beforeServerFunction, onServerError, publicUrl, setServerFunctionRefresh, trustServerFunctionOrigins } from '@rsvhono/core/server';
 // A dependency outside the set the framework bundles unconditionally — so the serverless targets, which
 // upload a directory rather than install one, have something real to prove they bundled. See the endpoint
 // at the bottom of this file and `assertSelfContained` in packages/core/test/deploy-targets.test.mjs.
@@ -6,7 +6,10 @@ import { onServerError, publicUrl } from '@rsvhono/core/server';
 // scoped name here would be bundled whatever the preset decided and prove nothing.
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
+import { getCookie } from 'hono/cookie';
+import { cors } from 'hono/cors';
 import { csrf } from 'hono/csrf';
+import { HTTPException } from 'hono/http-exception';
 import { requestId } from 'hono/request-id';
 import { NONCE, secureHeaders } from 'hono/secure-headers';
 import { trimTrailingSlash } from 'hono/trailing-slash';
@@ -78,6 +81,31 @@ if (maxBodyBytes > 0) {
 // production-only concern. Honours `trustProxy`, so it is still `c.req.url` where no proxy is declared.
 if (csrfEnabled) {
   server.use(csrf({ origin: (origin, c) => origin === publicUrl(c).origin || allowedOrigins.includes(origin) }));
+}
+// The framework's own origin check for server functions is separate from `csrf()` and does not read its
+// options, so an origin allowed there has to be named here as well to call a function.
+if (allowedOrigins.length > 0) trustServerFunctionOrigins(allowedOrigins);
+
+// A permissive `cors()` over everything, the way one gets mounted for an API and ends up matching the pages
+// too: it answers the preflight for `x-rsc-action` that the framework itself never answers. Off by default;
+// the test that turns it on is about what still stands between another origin and a server function then.
+if (process.env.TESTBED_CORS === '1') {
+  server.use(cors({ origin: (origin) => origin, allowHeaders: ['x-rsc-action', 'rsc', 'content-type'], credentials: true }));
+}
+
+// `'explicit'`: a server function called from client code is answered with its result alone, and the page is
+// rendered only when the function calls `requestRefresh()`.
+if (process.env.TESTBED_ACTION_REFRESH === 'explicit') setServerFunctionRefresh('explicit');
+
+// One check in front of every server function, however it was called. The log line is how a test sees which
+// function the guard was asked about — for a form post that is read off the function React decoded.
+if (process.env.TESTBED_ACTION_GUARD === '1') {
+  beforeServerFunction<AppEnv>(({ kind, id, hono }) => {
+    console.log(`[guard] ${kind} ${id ?? '(unnamed)'}`);
+    const pass = getCookie(hono, 'guard');
+    if (!pass) throw new HTTPException(401, { message: 'Sign in to call a server function' });
+    if (pass !== 'admin' && id?.endsWith('#raiseSignal')) throw new HTTPException(403, { message: 'Not allowed to raise signals' });
+  });
 }
 
 // A strict nonce-based CSP. `NONCE` is what makes it per-request: Hono mints a nonce, puts it on the

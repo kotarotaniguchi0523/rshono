@@ -1,6 +1,7 @@
 import type { PageProps } from '@rsvhono/core';
+import { notFound, redirect } from '@rsvhono/core/server';
 import { raiseSignal } from '../actions';
-import { raceLog } from '../race-log';
+import { countRaceRender, raceLog } from '../race-log';
 import { ActionRaceControls } from './action-race-controls';
 import { Layout } from './layout';
 
@@ -9,12 +10,22 @@ import { Layout } from './layout';
  * `window.__race(label, delayMs)` applies one more after a delay. Whatever order replies and re-reads arrive
  * in, the list on screen has to end up being the server's.
  */
-export default function ActionRace(_props: PageProps) {
+export default function ActionRace({ url }: PageProps) {
+  const renders = countRaceRender();
+  // `?after=<label>&then=redirect|notfound`: once the server has applied that label, the page no longer
+  // renders — it sends the visitor away, or stops existing. So an action that applies it *succeeds*, and it is
+  // the render after it that ends in a route intent.
+  const after = url.searchParams.get('after');
+  if (after && raceLog.includes(after)) {
+    if (url.searchParams.get('then') === 'notfound') notFound();
+    redirect('/users');
+  }
   return (
     <Layout title="Action race — rsvhono">
       <ActionRaceControls />
       <div className="page">
         <h1>Action race</h1>
+        <p data-race-renders>{renders}</p>
         <ul data-race-log>
           {raceLog.map((label, index) => (
             <li key={index} data-race-entry={label}>

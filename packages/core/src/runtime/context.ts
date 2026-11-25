@@ -618,6 +618,176 @@ export interface ServerErrorContext<E extends Env = Env> {
   waitUntil: (promise: Promise<unknown>) => void;
 }
 
+// ── Server functions: who may call one, and whether the page is rendered after it ───────────────────────
+
+/** What a {@link ServerFunctionGuard} is told about the call it is deciding on. */
+export interface ServerFunctionCall<E extends Env = Env> {
+  /**
+   * How the call arrived: `rsc-action` is a call from hydrated client code, `form-action` a `<form>` posted
+   * before hydration or with JavaScript off. Both run the same functions.
+   */
+  kind: 'rsc-action' | 'form-action';
+  /**
+   * The function's id — `<module key>#<export name>`. Always present for an `rsc-action`, where the request
+   * names it. For a `form-action` it is read off the function React decoded, and is `undefined` where that
+   * function does not say; it is never inferred from the body. A guard that authorizes by id must therefore
+   * refuse an `undefined` one rather than wave it through.
+   */
+  id: string | undefined;
+  request: Request;
+  /** The Hono context, for whatever middleware put on it: `hono.var.user`, `hono.get('session')`. */
+  hono: Context<E>;
+}
+
+/**
+ * Decides whether a server function may run. Return to allow it; throw to refuse — an `HTTPException`
+ * answers with its own status (401, 403), and `redirect()` / `notFound()` work as they do in an action.
+ */
+export type ServerFunctionGuard<E extends Env = Env> = (call: ServerFunctionCall<E>) => void | Promise<void>;
+
+let functionGuard: ServerFunctionGuard | undefined;
+
+/**
+ * Registers a check that runs before **every** server function, however it was called — from client code,
+ * from a form with no JavaScript, from the `notFound` page. It is the one place that sees all of them: a
+ * route's middleware only covers the calls posted to that route, and a function is callable from any page.
+ *
+ * It runs after the framework's own refusals (an unknown id, a foreign origin) and before the function is
+ * loaded, with the request context bound — `getRequestContext()` works inside it. It is not a replacement
+ * for the checks a function makes on its own arguments: the guard is told which function, not what with.
+ *
+ * Call it once, at the top level of `src/server.ts`. Registering again replaces the previous guard.
+ *
+ * @example
+ * ```ts
+ * // src/server.ts
+ * import { HTTPException } from 'hono/http-exception';
+ * import { beforeServerFunction } from '@rsvhono/core/server';
+ *
+ * beforeServerFunction(({ hono }) => {
+ *   if (!hono.var.user) throw new HTTPException(401, { message: 'Sign in first' });
+ * });
+ * ```
+ */
+export function beforeServerFunction<E extends Env = Env>(guard: ServerFunctionGuard<E>): void {
+  functionGuard = guard as unknown as ServerFunctionGuard;
+}
+
+/**
+ * Runs the registered guard for one call. Whatever it throws is the caller's to let through untouched.
+ *
+ * @internal
+ */
+export async function authorizeServerFunction(c: Context, kind: ServerFunctionCall['kind'], id: string | undefined): Promise<void> {
+  await functionGuard?.({ kind, id, request: c.req.raw, hono: c as Context<Env> });
+}
+
+/** Says whether `origin` — not the app's own — may call server functions. */
+export type ServerFunctionOrigins<E extends Env = Env> = readonly string[] | ((origin: string, hono: Context<E>) => boolean);
+
+let trustedOrigins: ServerFunctionOrigins | undefined;
+
+/**
+ * Lets other origins call this app's server functions: an admin console on another host, a second app on a
+ * sibling domain. By default only the app's own origin can — the framework refuses the rest itself, before
+ * the function is decoded, whether or not `csrf()` or `cors()` is mounted.
+ *
+ * Pass the exact origins (`'https://admin.example'`), or a function for a pattern. This is the framework's
+ * check only: a `csrf()` middleware in front still applies its own rule, and a browser on another origin
+ * still needs the CORS headers that let it send the request and read the reply.
+ *
+ * Call it once, at the top level of `src/server.ts`.
+ */
+export function trustServerFunctionOrigins<E extends Env = Env>(origins: ServerFunctionOrigins<E>): void {
+  trustedOrigins = origins as ServerFunctionOrigins;
+}
+
+/**
+ * Whether `origin` was named by {@link trustServerFunctionOrigins}.
+ *
+ * @internal
+ */
+export function isTrustedOrigin(origin: string, c: Context): boolean {
+  if (!trustedOrigins) return false;
+  return typeof trustedOrigins === 'function' ? trustedOrigins(origin, c as Context<Env>) : trustedOrigins.includes(origin);
+}
+
+/** Whether the page is rendered after a server function: always, or only when the function asks. */
+export type ServerFunctionRefresh = 'auto' | 'explicit';
+
+let refreshMode: ServerFunctionRefresh = 'auto';
+
+/**
+ * Chooses what a server function called from client code is answered with.
+ *
+ * - `'auto'` (the default): the page the call came from is rendered again after every function, and the reply
+ *   carries it alongside the return value. Nothing to remember; every call pays for a render.
+ * - `'explicit'`: the reply carries the return value alone, and the page is rendered only when the function
+ *   called {@link requestRefresh}. A function that changes nothing the page shows costs no render.
+ *
+ * A `<form>` posted without JavaScript is answered with the page either way — it is a document request, and
+ * a document is the only thing a browser can show for it.
+ *
+ * Call it once, at the top level of `src/server.ts`.
+ */
+export function setServerFunctionRefresh(mode: ServerFunctionRefresh): void {
+  refreshMode = mode;
+}
+
+/** Requests whose server function is running, or has run, and whether it asked for the page. */
+const functionRuns = new WeakMap<Context, { refresh: boolean }>();
+
+/**
+ * Marks the request as running a server function. Keyed on the Hono context like everything else that lives
+ * exactly as long as the request, so nothing outlives it and no second store is needed.
+ *
+ * @internal
+ */
+export function beginServerFunction(c: Context): void {
+  functionRuns.set(c, { refresh: false });
+}
+
+/**
+ * Whether the page should be rendered into this request's reply.
+ *
+ * @internal
+ */
+export function wantsRefresh(c: Context): boolean {
+  return refreshMode === 'auto' || functionRuns.get(c)?.refresh === true;
+}
+
+/**
+ * Asks for the page the server function was called from to be rendered again, into this call's reply. For
+ * {@link setServerFunctionRefresh | `'explicit'`} mode, where that does not happen on its own; under `'auto'`
+ * it is already going to, and this changes nothing.
+ *
+ * Calling it more than once is one request, and one render. Call it after the writes the page should show:
+ * the render happens when the function returns.
+ *
+ * @throws If called outside a server function — a page render has nothing to refresh into.
+ *
+ * @example
+ * ```ts
+ * 'use server';
+ * import { requestRefresh } from '@rsvhono/core/server';
+ *
+ * export async function addComment(text: string) {
+ *   const comment = await db.comments.insert({ text });
+ *   requestRefresh();
+ *   return comment.id;
+ * }
+ * ```
+ */
+export function requestRefresh(): void {
+  const c = contextStorage.getStore();
+  const run = c && functionRuns.get(c);
+  if (!run)
+    throw new Error(
+      "[rsvhono] requestRefresh() was called outside a server function. It asks for the calling page to be rendered into a function's reply.",
+    );
+  run.refresh = true;
+}
+
 /** Handler registered with {@link onServerError}. Called for the side effect; its return value is ignored. */
 export type ServerErrorHandler<E extends Env = Env> = (error: unknown, context: ServerErrorContext<E>) => void;
 

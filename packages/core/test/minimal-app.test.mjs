@@ -114,20 +114,23 @@ test('the security and caching defaults apply with no config file at all', async
   assert.match(res.headers.get('vary'), /RSC/);
 });
 
-test('with no server.ts there is no CSRF check — that is `csrf()` from hono, and this app has none', async () => {
-  // The framework used to run an origin check of its own, configured by `checkOrigin` in
-  // rsvhono.config.ts. It is Hono's `csrf()` now, registered in src/server.ts, which this app does not
-  // have — so a cross-origin POST reaches the route rather than being refused. `create-rsvhono`
-  // scaffolds that middleware into every new app; an app hand-written down to routes.ts opts in.
-  //
-  // No `Sec-Fetch-Site`, so this is a non-browser client: nothing labelled it cross-site, and nothing
-  // that cannot be a CSRF victim is refused on an origin header alone.
-  const res = await fetch(`${base}/`, {
-    method: 'POST',
-    headers: { origin: 'https://evil.test', 'content-type': 'application/x-www-form-urlencoded' },
-    body: 'x=1',
-  });
-  assert.notEqual(res.status, 403, 'nothing in the framework rejects this any more');
+test('with no server.ts the framework still refuses a post from another origin, and lets a non-browser client through', async () => {
+  // `csrf()` from Hono is the app's CSRF policy and this app has none. What is left is the framework's own
+  // rule for the requests that can run a server function, which needs no middleware: an `Origin` that is
+  // present has to be the app's.
+  const post = (headers) =>
+    fetch(`${base}/`, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', ...headers }, body: 'x=1' });
+
+  // No `Sec-Fetch-Site`, so nothing labelled this cross-site — a browser too old to, or a client forging the
+  // header. The origin alone refuses it.
+  const foreign = await post({ origin: 'https://evil.test' });
+  assert.equal(foreign.status, 403);
+  await foreign.text();
+
+  // No `Origin` at all is not a browser: it has no ambient credentials and cannot be a CSRF victim.
+  const tool = await post({});
+  assert.notEqual(tool.status, 403, 'a client with no Origin is not refused on origin grounds');
+  await tool.text();
 });
 
 test('a browser-shaped form post from another origin cannot reach a server action, even with no server.ts', async () => {

@@ -21,11 +21,13 @@ let lastShown = 0;
 
 let inFlight = 0;
 /**
- * Whether two calls were ever in flight together since the last re-read. The order calls were *made* in is
- * not the order the server applied them in, so neither reply can be trusted to be the newer snapshot: when
- * the last of them settles, the page is re-read once.
+ * Whether two calls whose replies carry a page were in flight together since the last re-read. The order
+ * calls were *made* in is not the order the server applied them in, so neither page can be trusted to be the
+ * newer snapshot: when the last call settles, the page is re-read once.
  */
 let overlapped = false;
+/** Whether any reply since the last quiet moment carried a page. A reply that carried none aged nothing. */
+let pagesArrived = false;
 
 export function installServerFunctions(): void {
   setServerCallback(async (id, args) => {
@@ -41,13 +43,14 @@ export function installServerFunctions(): void {
       // Not wired to the request: nothing on the client may cancel a mutation's reply. Leaving the page loses
       // the right to *show* it, not the caller's right to its result.
       const controller = new AbortController();
-      const request = createRscRequest(window.location.href, { id, body: await encodeReply(args, { temporaryReferences }) });
+      const request = createRscRequest(calledFrom, { id, body: await encodeReply(args, { temporaryReferences }) });
       const resource = requestResource('action', request, controller, temporaryReferences);
 
       let payload;
       try {
         payload = await resource.rootReady;
       } catch (error) {
+        pagesArrived = true;
         mutationCompleted();
         // A `redirect()` or `notFound()` that arrived as an error is a change of screen like any other.
         if (!parseControlIntent(error)) throw error;
@@ -56,20 +59,24 @@ export function installServerFunctions(): void {
         return undefined;
       }
 
-      mutationCompleted();
-      if (!ownsScreen()) revalidate();
-      else if (payload.redirect) void push(payload.redirect);
-      else if (call > lastShown) {
-        lastShown = call;
-        void schedule(createAttempt(resource, payload, calledFrom, { recoversByLoad: false }));
+      // The reply is the result and nothing else — the function did not ask for the page. Nothing on screen
+      // is older for it, so there is nothing to show, nothing to re-read, and no navigation to weigh it against.
+      if (!payload.resultOnly) {
+        pagesArrived = true;
+        mutationCompleted();
+        if (!ownsScreen()) revalidate();
+        else if (payload.redirect) void push(payload.redirect);
+        else if (call > lastShown) {
+          lastShown = call;
+          void schedule(createAttempt(resource, payload, calledFrom, { recoversByLoad: false }));
+        }
       }
 
-      // A redirect has no value to hand back, wherever the screen went.
-      if (payload.redirect) return undefined;
+      // What the function returned is the caller's whatever became of the screen: a page that redirected or
+      // turned out not to exist *after* the function finished does not take its result back. Only a function
+      // that itself ended in `redirect()` or `notFound()` has none, and that is not a missing result.
       const result = payload.returnValue;
-      // Nor has an action that raised `notFound()`. `notFound` alone does not say that: it marks what the
-      // *page* is, and an action called from the 404 page re-renders the 404 page and still has its result.
-      if (!result && payload.notFound) return undefined;
+      if (!result && (payload.redirect || payload.notFound)) return undefined;
       if (!result) {
         throw new Error(
           '[rsvhono] the server action produced no result — the request failed around it and the server answered with a page instead. Its log has the error.',
@@ -78,9 +85,9 @@ export function installServerFunctions(): void {
       if (!result.ok) throw result.error;
       return result.value;
     } finally {
-      if (--inFlight === 0 && overlapped) {
-        overlapped = false;
-        revalidate();
+      if (--inFlight === 0) {
+        if (overlapped && pagesArrived) revalidate();
+        overlapped = pagesArrived = false;
       }
     }
   });

@@ -26,7 +26,18 @@ import * as serverAppModule from '@rsvhono/server-app';
 import { isPageRoute, type ErrorPageInfo, type FallbackPage, type PageComponent, type PageProps, type Route } from '../router.js';
 import { appendVary, etagMatches, varyWith } from '../server/headers.js';
 import { PRERENDER_NONCE_HEADER, setPrerenderFlight } from '../server/prerendered.js';
-import { beginPageRender, getRequestContext, publicUrl, readParams, reportServerError, runWithContext } from './context.js';
+import {
+  authorizeServerFunction,
+  beginPageRender,
+  beginServerFunction,
+  getRequestContext,
+  isTrustedOrigin,
+  publicUrl,
+  readParams,
+  reportServerError,
+  runWithContext,
+  wantsRefresh,
+} from './context.js';
 import { cameFromPayload, controlDigestFor, isControlSignal, RedirectSignal, type ControlSignal } from './control.js';
 // Types only: the module itself is in the SSR environment, reached through `import.meta.viteRsc.loadModule`.
 import type { renderHTML, RenderHTMLOptions } from './entry.ssr.js';
@@ -35,7 +46,7 @@ import { failureDocument } from './failure-document.js';
 // Type-only, so it is erased — the RSC layer does not take its own instance of the SSR layer's module.
 import type { CancellableTransformer } from './flight-inject.js';
 import { RouterProvider } from './navigation.js';
-import { asksForRsc, isActionRequest, isBrowserFormPost, parseRenderRequest, requestWantsRsc, RSC_VARY_HEADER, wantsRsc } from './request.js';
+import { asksForRsc, isBrowserFormPost, parseRenderRequest, requestWantsRsc, RSC_VARY_HEADER, wantsRsc, type RenderRequest } from './request.js';
 import { assertEndpointModule, assertPageModule, assertRouteModules, validateRoutesModule, validateServerApp } from './validate-entries.js';
 
 /** Opaque: only ever handed back to the runtime that made it — which types it `unknown`, so `undefined` is "none". */
@@ -96,6 +107,11 @@ export type RscPayload = {
   redirect?: string;
   notFound?: boolean;
   /**
+   * The whole reply is the action's result: no page was rendered, so there is nothing to show and nothing on
+   * screen is older for it. See `setServerFunctionRefresh`.
+   */
+  resultOnly?: boolean;
+  /**
    * Names the render that produced this payload, for a dynamic render. A `redirect()` or `notFound()` raised
    * later in that render carries the same token in its digest, so the browser can tell which payload an
    * error React reports came from — it is told nothing else about that. Opaque, and not a credential: it
@@ -106,18 +122,24 @@ export type RscPayload = {
 };
 
 /**
- * The result of an action that has already run, for the request whose *render* then failed.
+ * The result of an action that has already run, for whatever ends up answering the request in place of the
+ * page it was going to be rendered with.
  *
  * The action and the page it answers with are one response: an action returns its value through the payload
- * of the page rendered after it. So when that render throws — a page module that will not load, most
- * plausibly a chunk that went away mid-deploy — `onError` renders the `error` page in its place, and without
- * this the reply carries no `returnValue` at all. The caller of an action that ran, and may well have
- * written something, would be told only that a field was missing.
+ * of the page rendered after it. But the action finishing and that render going to plan are two events, and
+ * the second does not get to undo the first. The page can throw — `onError` renders the `error` page
+ * instead; it can `redirect()` — the reply is the redirect; it can call `notFound()` — the reply is the 404
+ * page. Each of those is a different payload from the one that was being built, and without this none of
+ * them would carry a `returnValue`: the caller of an action that ran, and may well have written something,
+ * would get `undefined` or be told a field was missing.
+ *
+ * The temporary references go with it, since a value the action passed straight back can only be
+ * serialized against the set it was decoded with.
  *
  * Keyed on the Hono context the way `beginPageRender` keys its own marker, and weakly, so nothing outlives
  * the request it belongs to.
  */
-const actionResults = new WeakMap<Context, ActionResult>();
+const actionReplies = new WeakMap<Context, { returnValue: ActionResult; temporaryReferences: TemporaryReferenceSet }>();
 
 /**
  * Whether this process is `rsvhono build`'s prerender pass rather than a server answering requests.
@@ -166,53 +188,49 @@ function prerenderNonceHeader(c: Context): Record<string, string> | null {
 }
 
 /**
- * Whether a `<form action={serverAction}>` post came from another site, and so must not be allowed to run one.
+ * Whether a request that can run a server function came from somewhere other than this app. Asked of both
+ * ways a function is called — a `<form>` post and a call from client code — before anything in the body is
+ * read, and answered from the request alone: it does not depend on `csrf()` or `cors()` being mounted, or on
+ * how either is configured.
  *
- * This is not CSRF policy — that is `csrf()` from Hono, registered in `src/server.ts`, which runs ahead of
- * every page route and covers far more than this. It is the framework declining to run *its own* action
- * mechanism for a request that mechanism cannot legitimately produce, in the one place the two action shapes
- * are not equally exposed:
+ * It is not the app's CSRF policy, which is `csrf()` from Hono in `src/server.ts` and covers every route. It
+ * is the framework declining to run *its own* function mechanism for a caller that mechanism was not built
+ * for. The call from client code used to have no check here at all: it carries `x-rsc-action`, which is not a
+ * CORS-safelisted header, so another origin needs a preflight to send it and the framework answers none.
+ * That holds exactly until something else answers it — a `cors()` middleware mounted for an API and matching
+ * more than it meant to, a proxy that reflects origins — and then nothing stood between another site and
+ * every `'use server'` export.
  *
- * - A client-initiated action carries `x-rsc-action`, which is not a CORS-simple header. A cross-origin caller
- *   needs a preflight it will not be given, so that shape cannot be forged from a browser at all.
- * - A form post is one of the three `enctype` values a browser `<form>` can send, with no header of its own —
- *   the content types that need no preflight. It is forgeable, and an app with no `src/server.ts` has nothing
- *   standing in front of it. All three, not the two React writes: see {@link isBrowserFormPost}.
+ * In order:
  *
- * Both halves are required, because either alone refuses something real:
+ * - **No `Origin`.** A browser attaches one to every POST, so this is a client that is not a browser —
+ *   `curl`, another server, a test — with no ambient credentials to abuse. Let through, unless the request
+ *   also carries a `Sec-Fetch-Site` that says it came from elsewhere, which no real client produces.
+ * - **The app's own `Origin`.** Let through, whatever label rides with it: a browser calls a post from the
+ *   app's own pages `same-origin`, so a foreign label beside the app's origin is a proxy or a test client.
+ *   `publicUrl(c)` rather than `c.req.url`, so it honours `trustProxy` and compares against the origin the
+ *   browser used — which behind a proxy, `rsvhono dev`'s included, is not the one the server was reached on.
+ * - **`Sec-Fetch-Site: same-origin` or `none`.** The browser's own statement, which page script cannot
+ *   forge. It stands even where `Origin` and `publicUrl` disagree, because that is what a genuine post looks
+ *   like behind a proxy that rewrote `Host` with `trustProxy` unset.
+ * - **Anything else** is another origin — `cross-site`, `same-site` (a sibling subdomain: a user-content
+ *   host, a stale CNAME, a takeover), an `Origin` of `null`, or a foreign `Origin` from a browser too old to
+ *   label it. Refused unless the app named that origin with `trustServerFunctionOrigins`.
  *
- * - `Sec-Fetch-Site` is the browser's own statement of provenance, unforgeable by page script, and every
- *   browser that can post a form to a server action sends it. `cross-site` and `same-site` are the two labels
- *   that mean "not from this origin" — `same-site` is what a *sibling subdomain* gets, which is a user-content
- *   host, a stale CNAME or a subdomain takeover, so leaving it to `csrf()` meant an app without one could have
- *   any `'use server'` export driven from next door. An absent header means a non-browser client, which cannot
- *   be a CSRF victim. `same-origin` and `none` settle it on their own, and are what a genuine post carries
- *   however many proxies rewrote `Host` on the way in.
- * - An `Origin` that is the app's own contradicts either label — a browser calls a post from the app's own pages
- *   `same-origin` — so the pair is a shape no browser produces, and refusing it would only catch a proxy or a
- *   test client setting the label by hand while posting from the app itself. Nothing else clears the label:
- *   an `Origin` of `null` (a sandboxed iframe, a `data:` URL, `Referrer-Policy: no-referrer`) and no `Origin`
- *   at all are both refused. A browser attaches one to every non-GET request, so neither is a shape it
- *   produces — but a security predicate that says "not proven foreign" rather than "proven local" fails open
- *   the day something does produce it.
- *
- * `publicUrl(c)` rather than `c.req.url`, so it honours `trustProxy` and compares against the origin the
- * browser actually used — which behind a proxy, `rsvhono dev`'s included, is not the one the server was reached
- * on.
- *
- * **The cost is wider than "an action you meant to allow".** This runs on the request's shape alone, before
- * the body is read, because knowing whether a given post carries an action means buffering an untrusted body
- * to look for a `$ACTION_*` field. So a **page route cannot accept any cross-site form post at all**, whether
- * or not an action is in it: a SAML ACS callback, OIDC `response_mode=form_post`, and most payment-gateway
- * returns all arrive in exactly this shape and are all refused, `csrf()`'s allowlist included. Refusing
- * before parsing is the right trade — the alternative is reading a body from anyone who asks — but it is a
- * real limitation and the 403 and the README both say so. An `{ type: 'endpoint' }` route is the way to
- * accept one: those call the app handler directly and never reach `renderPage`, so they never reach this.
+ * **The cost is wider than "a function you meant to allow".** For a form this runs on the request's shape,
+ * because knowing whether a post carries a function means buffering an untrusted body to look for a
+ * `$ACTION_*` field. So a **page route accepts no form post from an origin it was not told to trust**,
+ * function or no function: a SAML ACS callback, OIDC `response_mode=form_post`, and most payment-gateway
+ * returns arrive in exactly this shape. An `{ type: 'endpoint' }` route is the way to accept one — those call
+ * the app handler directly and never reach `renderPage`, so they never reach this.
  */
-function refusesCrossSiteForm(c: Context): boolean {
+function refusesForeignOrigin(c: Context): boolean {
   const site = c.req.header('sec-fetch-site');
-  if (site !== 'cross-site' && site !== 'same-site') return false;
-  return c.req.header('origin') !== publicUrl(c).origin;
+  const origin = c.req.header('origin');
+  if (origin === undefined) return site === 'cross-site' || site === 'same-site';
+  if (origin === publicUrl(c).origin) return false;
+  if (site === 'same-origin' || site === 'none') return false;
+  return !isTrustedOrigin(origin, c);
 }
 
 /** A browser navigation or a crawler, as opposed to a fetch that would rather have plain text. */
@@ -596,6 +614,165 @@ async function cannotLoadServerActions(formData: FormData): Promise<boolean> {
   }
 }
 
+/** What running a request's server function left for the response: nothing, for a request that carried none. */
+type FunctionRun = { returnValue?: ActionResult; formState?: ReactFormState; temporaryReferences?: TemporaryReferenceSet; status?: number };
+
+/** Calls a server function with the request marked as running one, which is what `requestRefresh()` reads. */
+function call<T>(c: Context, run: () => Promise<T>): Promise<T> {
+  beginServerFunction(c);
+  return run();
+}
+
+/**
+ * A server function called from client code: the request names it, and its arguments are the body.
+ *
+ * Returns the refusal as a `Response` where the *request* is at fault. Throws where something else is — the
+ * guard refusing, the function redirecting, the deployment missing a chunk.
+ */
+async function runCalledFunction(c: Context, id: string): Promise<FunctionRun | Response> {
+  const request = c.req.raw;
+  // Before the body is decoded, so an unknown id costs nothing to reject. `hasOwn` so `__proto__`
+  // does not resolve to a manifest entry.
+  if (!(await hasServerAction(id))) {
+    return plainRefusal(c, 'Bad Request: unknown server action', 400);
+  }
+  // Before the body is decoded as well: a caller who may not call this has no business making the server
+  // read what they sent. The guard is told which function; what it is called with is the function's to check.
+  await authorizeServerFunction(c, 'rsc-action', id);
+
+  let args: unknown[];
+  let temporaryReferences: TemporaryReferenceSet;
+  try {
+    const contentType = request.headers.get('content-type');
+    const body = contentType?.startsWith('multipart/form-data') ? await request.formData() : await request.text();
+    temporaryReferences = createTemporaryReferenceSet();
+    args = await decodeReply(body, { temporaryReferences }, referenceValidation);
+  } catch {
+    return malformedAction(c);
+  }
+
+  // Outside that guard, deliberately. Everything inside it reads or decodes the *body*, which is the
+  // caller's to get wrong; loading the action is not. The id is one `hasOwn` above proved the manifest
+  // holds, so no client can steer this — what is left is the bundle being incomplete: a chunk
+  // `__webpack_require__` cannot find after a partial deploy, or a module that throws as it evaluates.
+  // A 400 there would tell the one caller in that guard who is *not* at fault that they are, and tell
+  // the operator who needs paging nothing at all.
+  let action: (...actionArgs: unknown[]) => Promise<unknown>;
+  try {
+    action = (await loadServerAction(id)) as typeof action;
+  } catch (error) {
+    // Attributed to the action rather than left to the top-level handler's `source: 'request'`: the
+    // request was fine, the deployment is not. Then re-thrown, so the app's `error` page answers 500 —
+    // `reportServerError` de-duplicates, so `onError` reporting it again is a no-op.
+    reportServerError(error, { source: 'action', hono: c, message: '[rsvhono] server action could not be loaded:' });
+    throw error;
+  }
+  let returnValue: ActionResult;
+  let status: number | undefined;
+  try {
+    returnValue = { ok: true, value: await call(c, () => action(...args)) };
+  } catch (error) {
+    if (isControlSignal(error)) throw error;
+    // In production React sends a thrown action error to the client as an opaque marker, so this is
+    // the only place the real one is visible.
+    reportServerError(error, { source: 'action', hono: c, message: '[rsvhono] server action error:' });
+    returnValue = { ok: false, error };
+    status = 500;
+  }
+  // The action is done and its result is the caller's, whatever becomes of the render after it — the page
+  // redirecting, or not existing, or failing. See {@link actionReplies}.
+  actionReplies.set(c, { returnValue, temporaryReferences });
+  return { returnValue, temporaryReferences, status };
+}
+
+/**
+ * A `<form action={serverFunction}>` post — the path that runs before hydration and with JavaScript off. The
+ * function it names, if it names one, is in the body.
+ */
+async function runPostedFunction(c: Context): Promise<FunctionRun | Response> {
+  const request = c.req.raw;
+  // A `<form action={serverAction}>` post, which is the path that runs before hydration and with
+  // JavaScript off. Unlike the client-initiated one it carries no custom header, so it is also the only
+  // action shape a browser can be made to send from another site — refused above, on the shape of the
+  // request rather than on this classification: see `refusesForeignOrigin`.
+  let formData: FormData;
+  try {
+    formData = await request.formData();
+  } catch {
+    return malformedAction(c);
+  }
+  let decodedAction: (() => Promise<unknown>) | null;
+  try {
+    decodedAction = await decodeAction(formData, referenceValidation);
+  } catch (error) {
+    // Split from the read above, for the reason F3 split the client-initiated path: `decodeAction` is
+    // two things at once. It reads the caller's body *and* — through `loadServerReference` —
+    // `__webpack_require__`s the module the action lives in, so the 400 that is right about a body is
+    // wrong whenever the deployment is what failed. Which of the two it was is nowhere on the error, so
+    // it is asked directly. See {@link cannotLoadServerActions}.
+    if (await cannotLoadServerActions(formData)) {
+      // The original error, not the probe's: this one is the fault the request actually met. Attributed
+      // and re-thrown exactly as the `rsc-action` branch does, so the app's `error` page answers 500 and
+      // the operator is paged instead of the caller being blamed.
+      reportServerError(error, { source: 'action', hono: c, message: '[rsvhono] server action could not be loaded:' });
+      throw error;
+    }
+    return malformedAction(c);
+  }
+  let formState: ReactFormState | undefined;
+  if (decodedAction) {
+    // The function is known only now — which one a form names is in its body, and `decodeAction` is what
+    // reads it — so this is the earliest the same guard the direct call passed can be asked. Its id is the
+    // one the reference itself carries, where it carries one; nothing is inferred from the fields.
+    const named = (decodedAction as { $$id?: unknown }).$$id;
+    await authorizeServerFunction(c, 'form-action', typeof named === 'string' ? named : undefined);
+
+    let result: unknown;
+    try {
+      result = await call(c, decodedAction);
+    } catch (error) {
+      if (isControlSignal(error)) throw error;
+      // Reported here so a no-JS form post is attributed to the action that threw, exactly as the
+      // client-initiated path is — the top-level handler would call it a `request`. Then re-thrown,
+      // because this path has no client boundary and no `useActionState` to hand the error to, so the
+      // app's `error` page is the honest answer. `reportServerError` de-duplicates, so the re-throw
+      // reaching `onError` does not report it a second time.
+      reportServerError(error, { source: 'action', hono: c, message: '[rsvhono] server action error:' });
+      throw error;
+    }
+    try {
+      formState = (await decodeFormState(result, formData, referenceValidation)) ?? undefined;
+    } catch (error) {
+      // The action has already run, and may well have written something, so this cannot be refused the
+      // way an undecodable body *before* it is — the guard above answers 400 precisely because nothing
+      // has happened yet. What failed here is rebuilding the `useActionState` key from the body's
+      // `$ACTION_REF_` metadata, and a body React wrote always carries it: this is reachable only from a
+      // hand-made one, which pairs a `$ACTION_ID_` React took for the call with `$ACTION_REF_`/
+      // `$ACTION_KEY` fields it did not write. So the page is rendered with no form state, which is
+      // exactly what a form without `useActionState` gets.
+      //
+      // Silent for the same reason `malformedAction` is: action ids are public, so anyone can post one,
+      // and reporting from here would put an unauthenticated caller back in touch with whoever owns the
+      // error tracker — for a request that has already had its effects. In dev it is worth a line, since
+      // there the likely cause is a React or bundler version whose form fields this does not understand.
+      if (isDev) console.warn('[rsvhono] a form post carried form-state fields that could not be decoded; rendering without them:', error);
+    }
+  }
+  return { formState };
+}
+
+/**
+ * Runs the server function a request carries, if it carries one: the checks, the decoding, the guard, the
+ * call. The two ways a function arrives decode differently and are kept apart; what stands in front of the
+ * call — the origin check before this, the reference allowlist, {@link authorizeServerFunction} — and the
+ * call itself are the same for both, and for a function posted from the `notFound` page as well.
+ */
+async function runServerFunction(c: Context, renderRequest: RenderRequest): Promise<FunctionRun | Response> {
+  if (renderRequest.kind === 'rsc-action') return runCalledFunction(c, renderRequest.actionId);
+  if (renderRequest.kind === 'form-action') return runPostedFunction(c);
+  return {};
+}
+
 /**
  * `as` is for the `notFound` page answering a URL no route matches: the same request handling — an action
  * posted from that page runs, and the page it re-renders is that page — with the 404's status and marker.
@@ -607,8 +784,8 @@ async function renderPage(c: Context, loadPage: () => Promise<PageComponent>, as
   // a browser form can post is refused, not only the two React writes. `text/plain` is the third, and keying
   // this off `parseRenderRequest` left it classified `document` and let through — the one enctype the
   // framework never decodes was also the one it never refused, while the README promised that a page route
-  // refuses every cross-site form post. See {@link isBrowserFormPost} and `refusesCrossSiteForm`.
-  if (isBrowserFormPost(request) && refusesCrossSiteForm(c)) {
+  // refuses every cross-site form post. See {@link isBrowserFormPost} and `refusesForeignOrigin`.
+  if (isBrowserFormPost(request) && refusesForeignOrigin(c)) {
     // Named for what was actually refused. The check runs before the body is read — it has to, since knowing
     // whether a post carries an action means buffering an untrusted body — so "to a server action" claimed
     // something this code cannot know, and said it to a caller whose post very often has no action in it.
@@ -620,128 +797,31 @@ async function renderPage(c: Context, loadPage: () => Promise<PageComponent>, as
   }
 
   const renderRequest = parseRenderRequest(request);
+  // The call from client code, held to the same origin as the form. Before anything is decoded or asked of
+  // the guard: a request from somewhere else is not the app's caller getting something wrong.
+  if (renderRequest.kind === 'rsc-action' && refusesForeignOrigin(c)) {
+    return plainRefusal(c, 'Forbidden: a server function was called from another origin.', 403);
+  }
+  const run = await runServerFunction(c, renderRequest);
+  if (run instanceof Response) return run;
 
-  let returnValue: ActionResult | undefined;
-  let formState: ReactFormState | undefined;
-  let temporaryReferences: TemporaryReferenceSet;
-  let actionStatus: number | undefined;
-  if (isActionRequest(renderRequest)) {
-    if (renderRequest.kind === 'rsc-action') {
-      // Before the body is decoded, so an unknown id costs nothing to reject. `hasOwn` so `__proto__`
-      // does not resolve to a manifest entry.
-      if (!(await hasServerAction(renderRequest.actionId))) {
-        return plainRefusal(c, 'Bad Request: unknown server action', 400);
-      }
-      let args: unknown[];
-      try {
-        const contentType = request.headers.get('content-type');
-        const body = contentType?.startsWith('multipart/form-data') ? await request.formData() : await request.text();
-        temporaryReferences = createTemporaryReferenceSet();
-        args = await decodeReply(body, { temporaryReferences }, referenceValidation);
-      } catch {
-        return malformedAction(c);
-      }
-
-      // Outside that guard, deliberately. Everything inside it reads or decodes the *body*, which is the
-      // caller's to get wrong; loading the action is not. The id is one `hasOwn` above proved the manifest
-      // holds, so no client can steer this — what is left is the bundle being incomplete: a chunk
-      // `__webpack_require__` cannot find after a partial deploy, or a module that throws as it evaluates.
-      // A 400 there would tell the one caller in that guard who is *not* at fault that they are, and tell
-      // the operator who needs paging nothing at all.
-      let action: (...actionArgs: unknown[]) => Promise<unknown>;
-      try {
-        action = (await loadServerAction(renderRequest.actionId)) as typeof action;
-      } catch (error) {
-        // Attributed to the action rather than left to the top-level handler's `source: 'request'`: the
-        // request was fine, the deployment is not. Then re-thrown, so the app's `error` page answers 500 —
-        // `reportServerError` de-duplicates, so `onError` reporting it again is a no-op.
-        reportServerError(error, { source: 'action', hono: c, message: '[rsvhono] server action could not be loaded:' });
-        throw error;
-      }
-      try {
-        returnValue = { ok: true, value: await action(...args) };
-      } catch (error) {
-        if (isControlSignal(error)) throw error;
-        // In production React sends a thrown action error to the client as an opaque marker, so this is
-        // the only place the real one is visible.
-        reportServerError(error, { source: 'action', hono: c, message: '[rsvhono] server action error:' });
-        returnValue = { ok: false, error };
-        actionStatus = 500;
-      }
-      // The action is done and its result is the caller's, whatever becomes of the render below. See
-      // {@link actionResults}.
-      actionResults.set(c, returnValue);
-    } else {
-      // A `<form action={serverAction}>` post, which is the path that runs before hydration and with
-      // JavaScript off. Unlike the client-initiated one it carries no custom header, so it is also the only
-      // action shape a browser can be made to send from another site — refused above, on the shape of the
-      // request rather than on this classification: see `refusesCrossSiteForm`.
-      let formData: FormData;
-      try {
-        formData = await request.formData();
-      } catch {
-        return malformedAction(c);
-      }
-      let decodedAction: (() => Promise<unknown>) | null;
-      try {
-        decodedAction = await decodeAction(formData, referenceValidation);
-      } catch (error) {
-        // Split from the read above, for the reason F3 split the client-initiated path: `decodeAction` is
-        // two things at once. It reads the caller's body *and* — through `loadServerReference` —
-        // `__webpack_require__`s the module the action lives in, so the 400 that is right about a body is
-        // wrong whenever the deployment is what failed. Which of the two it was is nowhere on the error, so
-        // it is asked directly. See {@link cannotLoadServerActions}.
-        if (await cannotLoadServerActions(formData)) {
-          // The original error, not the probe's: this one is the fault the request actually met. Attributed
-          // and re-thrown exactly as the `rsc-action` branch does, so the app's `error` page answers 500 and
-          // the operator is paged instead of the caller being blamed.
-          reportServerError(error, { source: 'action', hono: c, message: '[rsvhono] server action could not be loaded:' });
-          throw error;
-        }
-        return malformedAction(c);
-      }
-      if (decodedAction) {
-        let result: unknown;
-        try {
-          result = await decodedAction();
-        } catch (error) {
-          if (isControlSignal(error)) throw error;
-          // Reported here so a no-JS form post is attributed to the action that threw, exactly as the
-          // client-initiated path is — the top-level handler would call it a `request`. Then re-thrown,
-          // because this path has no client boundary and no `useActionState` to hand the error to, so the
-          // app's `error` page is the honest answer. `reportServerError` de-duplicates, so the re-throw
-          // reaching `onError` does not report it a second time.
-          reportServerError(error, { source: 'action', hono: c, message: '[rsvhono] server action error:' });
-          throw error;
-        }
-        try {
-          formState = (await decodeFormState(result, formData, referenceValidation)) ?? undefined;
-        } catch (error) {
-          // The action has already run, and may well have written something, so this cannot be refused the
-          // way an undecodable body *before* it is — the guard above answers 400 precisely because nothing
-          // has happened yet. What failed here is rebuilding the `useActionState` key from the body's
-          // `$ACTION_REF_` metadata, and a body React wrote always carries it: this is reachable only from a
-          // hand-made one, which pairs a `$ACTION_ID_` React took for the call with `$ACTION_REF_`/
-          // `$ACTION_KEY` fields it did not write. So the page is rendered with no form state, which is
-          // exactly what a form without `useActionState` gets.
-          //
-          // Silent for the same reason `malformedAction` is: action ids are public, so anyone can post one,
-          // and reporting from here would put an unauthenticated caller back in touch with whoever owns the
-          // error tracker — for a request that has already had its effects. In dev it is worth a line, since
-          // there the likely cause is a React or bundler version whose form fields this does not understand.
-          if (isDev) console.warn('[rsvhono] a form post carried form-state fields that could not be decoded; rendering without them:', error);
-        }
-      }
-    }
+  // A call from client code that did not ask for the page gets its result and nothing else: the page module
+  // is not loaded and nothing is rendered. Flight still carries the result, so whatever a function can
+  // return — a promise, a stream, a client reference — it can return here.
+  if (renderRequest.kind === 'rsc-action' && !wantsRefresh(c)) {
+    const payload: RscPayload = { root: null, returnValue: run.returnValue, resultOnly: true };
+    return c.body(renderToReadableStream(payload, { temporaryReferences: run.temporaryReferences }), (run.status ?? 200) as ContentfulStatusCode, {
+      'content-type': 'text/x-component;charset=utf-8',
+    });
   }
 
   const Page = await loadPage();
   return renderComponent(c, Page, {
-    status: actionStatus ?? as?.status,
+    status: run.status ?? as?.status,
     isRsc: wantsRsc(renderRequest),
-    formState,
-    returnValue,
-    temporaryReferences,
+    formState: run.formState,
+    returnValue: run.returnValue,
+    temporaryReferences: run.temporaryReferences,
     notFound: as?.notFound,
   });
 }
@@ -886,8 +966,12 @@ function buildApp(): Hono {
     const isRsc = requestWantsRsc(c.req.raw);
     if (signal instanceof RedirectSignal) {
       if (isRsc) {
-        // No `signal`: two fields and no component tree, so there is nothing worth aborting.
-        return c.body(renderToReadableStream({ root: null, redirect: signal.location } satisfies RscPayload), 200, {
+        // An action that finished before the page redirected still has its result: the redirect is where
+        // the screen goes, not what the call returned. An action that redirected *itself* never set one.
+        const reply = actionReplies.get(c);
+        const payload: RscPayload = { root: null, redirect: signal.location, ...(reply ? { returnValue: reply.returnValue } : null) };
+        // No `signal`: a few fields and no component tree, so there is nothing worth aborting.
+        return c.body(renderToReadableStream(payload, { temporaryReferences: reply?.temporaryReferences }), 200, {
           'content-type': 'text/x-component;charset=utf-8',
         });
       }
@@ -906,7 +990,8 @@ function buildApp(): Hono {
     }
     if (loadNotFoundPage) {
       try {
-        return await renderComponent(c, await loadNotFoundPage(), { status: 404, isRsc, notFound: true });
+        // With the result of an action that had finished before the page called `notFound()`, as above.
+        return await renderComponent(c, await loadNotFoundPage(), { status: 404, isRsc, notFound: true, ...actionReplies.get(c) });
       } catch (error) {
         // The `notFound` page is already the answer to a request that went wrong, so a failure here has
         // nowhere to escalate to: this runs from `onError` as well as from the page handler, and Hono calls
@@ -1076,7 +1161,7 @@ function buildApp(): Hono {
         : { message: 'Internal Server Error' };
       try {
         return await runWithContext(c, async () =>
-          renderComponent(c, await loadErrorPage(), { status: 500, isRsc, errorInfo, returnValue: actionResults.get(c) }),
+          renderComponent(c, await loadErrorPage(), { status: 500, isRsc, errorInfo, ...actionReplies.get(c) }),
         );
       } catch (renderError) {
         // A `redirect()` is not a render failure, and this is the one catch on that path that used to treat

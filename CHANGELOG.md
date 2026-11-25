@@ -57,6 +57,19 @@ those.
   back as if it had. It now runs like an action posted to any page — same origin check, same id check — and
   the page it re-renders is the 404 page, with the action's result in the payload.
 
+- **`setServerFunctionRefresh('explicit')` and `requestRefresh()`.** By default a server function called
+  from client code is still answered with the page rendered again. In `'explicit'` mode the reply is the
+  return value alone — the page module is not loaded and nothing is rendered — unless the function called
+  `requestRefresh()`. The client shows nothing and re-reads nothing for such a reply. A form posted without
+  JavaScript is answered with the page in either mode.
+
+- **`classifyRequest(request)`** tells middleware what a page-route request is: `document`, `rsc`,
+  `rsc-action` (with the id) or `form-action`. It is the framework's own classification, exported.
+
+- **An action's result survives whatever the page does after it.** A reply that is a redirect or the 404
+  page now carries the result of an action that had already finished, and the client no longer discards a
+  result because the reply also redirects.
+
 - **`navigation.finished` rejects for a navigation whose destination did not commit** — superseded, or failed
   to render — instead of resolving once something else had.
 
@@ -64,6 +77,18 @@ those.
   `-forward`), for `<ViewTransition>`.
 
 ### Security
+
+- **Server functions are held to the app's own origin by the framework**, for a call from client code as
+  well as for a form post, and without relying on `csrf()` or CORS. A call with `x-rsc-action` used to be
+  checked by nothing: another origin cannot send that header without a preflight, and the framework answers
+  none — until a `cors()` middleware does. An `Origin` that is present now has to be the app's, unless the
+  browser says `Sec-Fetch-Site: same-origin`. **Breaking** for an app that deliberately takes calls from
+  another origin: name it with `trustServerFunctionOrigins([...])`. A client that sends no `Origin` is
+  unaffected.
+
+- **`beforeServerFunction(guard)`** runs before every server function — called from client code, posted by
+  a form without JavaScript, or called from the `notFound` page — with the function's id and the Hono
+  context. An `HTTPException` it throws is answered with its own status.
 
 - **Every server reference is checked against the build's allowlist, on every decode path.** The id in an
   action call's header already was; a reference inside the arguments, in a form's `$ACTION_REF`, or in a

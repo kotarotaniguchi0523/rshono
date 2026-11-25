@@ -4,9 +4,9 @@
  *
  * That choice is a security boundary, not just a dispatch detail. It is deliberately *not* a CORS-safelisted
  * header: a page on another origin cannot send one without a successful preflight, and the framework answers
- * no preflight, so the `rsc-action` branch is unreachable cross-origin and carries no origin check of its
- * own. The `form-action` branch is the forgeable one — a form post needs no preflight — and that is the one
- * `refusesCrossSiteForm` stands in front of. See `SECURITY.md`.
+ * none. That is a first line and not the only one — a `cors()` middleware can answer the preflight for it —
+ * so both branches stand behind the same origin check, `refusesForeignOrigin`. The `form-action` branch is
+ * the one a browser can be made to send with no preflight at all. See `SECURITY.md`.
  */
 const HEADER_ACTION_ID = 'x-rsc-action';
 
@@ -81,8 +81,8 @@ const PLAIN_TEXT_ENCTYPE = /^text\/plain/i;
  * post. No action could run through it, since `decodeAction` is only called for the two above; what it cost
  * was a forced authenticated page render, and a claim about the boundary that was not true as written.
  *
- * `x-rsc-action` excludes the client-initiated shape, which needs no check of its own: that header is not
- * CORS-safelisted, so a cross-origin caller needs a preflight the framework never answers.
+ * `x-rsc-action` excludes the client-initiated shape, which is not a form post and is checked by its own
+ * classification — against the same origin rule.
  *
  * **The same test {@link parseRenderRequest} makes**, and it has to be: this decides what is *refused* and
  * that decides what is *decoded*, so a header the two read differently is a request that takes the form path
@@ -106,6 +106,39 @@ export function parseRenderRequest(request: Request): RenderRequest {
     return { kind: 'document' };
   }
   return { kind: asksForRsc(request) ? 'rsc' : 'document' };
+}
+
+/** What {@link classifyRequest} tells middleware about a request. */
+export type RequestKind = RenderRequest;
+
+/**
+ * Says what a request to a page route is asking for, for middleware that has to treat the four differently —
+ * rate-limit the calls, skip a redirect for a payload fetch, log server functions by name.
+ *
+ * - `document` — a navigation: the answer is an HTML document.
+ * - `rsc` — a soft navigation's fetch: the answer is the page's flight payload.
+ * - `rsc-action` — a server function called from client code. `actionId` names it, as the client sent it;
+ *   that is a claim, checked against the build only once the framework handles the request.
+ * - `form-action` — a `<form>` POST in a shape that **may** carry a server function. Whether it does is in
+ *   the body, which this does not read: a plain form posted to a page route is classified the same and runs
+ *   nothing. So this says "a function could run", never "one will".
+ *
+ * It is the framework's own classification — the one that decides what it does with the request — not a
+ * second reading of the headers, so the two cannot disagree. It applies to page routes; an
+ * `{ type: 'endpoint' }` route is the app's own and none of this describes it.
+ *
+ * @example
+ * ```ts
+ * // src/server.ts
+ * app.use(async (c, next) => {
+ *   const kind = classifyRequest(c.req.raw);
+ *   if (kind.kind === 'rsc-action') console.log('server function', kind.actionId);
+ *   await next();
+ * });
+ * ```
+ */
+export function classifyRequest(request: Request): RequestKind {
+  return parseRenderRequest(request);
 }
 
 /** Whether the client asked for a flight payload. For GET paths that only need the boolean, without parsing. */
