@@ -20,6 +20,16 @@ import { BrowserRoot } from './browser/root.js';
 import { currentEntryKey, readStoredScrollPositions, scrollPointFor, scrollToPoint } from './browser/scroll.js';
 import { installServerFunctions } from './browser/server-function.js';
 
+/** Whether this document was loaded by a push or a replace from a different page, rather than reloaded or traversed to. */
+function arrivedFromElsewhere(): boolean {
+  const activation = navigation.activation;
+  if (!activation || (activation.navigationType !== 'push' && activation.navigationType !== 'replace')) return false;
+  const from = activation.from?.url;
+  if (!from) return true;
+  const previous = new URL(from);
+  return previous.pathname + previous.search !== documentUrl();
+}
+
 async function main() {
   // Not hydrated rather than half-run: the server-rendered document works as a document without this.
   if (!supported) {
@@ -40,9 +50,13 @@ async function main() {
     }
   }
 
-  // A reload of this document: the browser's own restoration is off (`document.ts`), so put the offset back.
+  // A reload of this document, or a traversal back to it: the browser's own restoration is off
+  // (`document.ts`), so put the offset back. Not when the document was *navigated to* from another URL — a
+  // late redirect followed as a document load replaces the entry it left, and a replace keeps the entry's
+  // key, so the offset stored under it belongs to the page that was left. Arriving that way the scroll is the
+  // browser's: the top, or the fragment of the URL it loaded.
   readStoredScrollPositions();
-  const restored = scrollPointFor(currentEntryKey());
+  const restored = arrivedFromElsewhere() ? undefined : scrollPointFor(currentEntryKey());
   const initial = createAttempt(resource, payload, documentUrl(), { afterCommit: restored ? () => scrollToPoint(restored) : undefined });
 
   installServerFunctions();

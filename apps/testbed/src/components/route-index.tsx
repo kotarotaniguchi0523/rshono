@@ -116,6 +116,12 @@ const META: Record<RoutePath, RouteMeta> = {
     title: 'React standard APIs',
     description: '`cache()` within one render, `cacheSignal()` ending with it, and a component `browser()` leaves to the browser.',
   },
+  '/fragment-redirect/:step': {
+    group: 'Pages & forms',
+    title: 'Fragment redirect',
+    example: '/fragment-redirect/start',
+    description: 'Redirects that add, change or drop the URL fragment, to see where the page scrolls to.',
+  },
   '/canonical': {
     group: 'Pages & forms',
     title: 'Canonical',

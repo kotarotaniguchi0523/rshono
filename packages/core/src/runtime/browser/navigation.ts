@@ -9,7 +9,15 @@
 import { parseControlIntent, type RouteIntent } from '../control.js';
 import type { NavigationOutcome } from '../navigation.js';
 import { documentNavigation, loadDocument, reloadOnceForLateNotFound, settle } from './document.js';
-import { discard, discardPrefetched, discardPrepared, prefetch as fetchAhead, prepare, resourceOfRender, type PageResource } from './page-resource.js';
+import {
+  discard,
+  discardPrefetched,
+  discardPrepared,
+  prefetch as fetchAhead,
+  prepare,
+  resourceOfRender,
+  type PageResource,
+} from './page-resource.js';
 import { committedAttempt, createAttempt, pendingAttempt, schedule, type AttemptOptions } from './render-attempt.js';
 import { cancelElementWatches, jumpToAnchor, rememberCurrentScroll, resetFocus, scrollPointFor, scrollToPoint, scrollToTop } from './scroll.js';
 
@@ -29,6 +37,8 @@ type NavigationRequest = {
   mark: typeof requestMark;
   /** Bumped each time the request follows a redirect, so an earlier leg's ending cannot settle a later one. */
   hop: number;
+  /** Set on the `replace` that follows a redirect found after a push committed: it scrolls as that push would. */
+  finishesPush?: boolean;
   done: boolean;
   /** A fragment jump: the browser performs it alone, and its `finished` is the only signal there is. */
   browserOnly: boolean;
@@ -282,8 +292,12 @@ async function show(
     discard(resource);
     // Replacing for the same reason as {@link followIntent}: the URL whose payload carried the
     // redirect is the entry being left, and a push would make Back bounce through it into the same redirect.
+    const next = request ?? newRequest();
     if (request) request.hop++;
-    void navigate(payload.redirect, 'replace', request);
+    // `afterCommit` is what the navigation that got this far meant to do to the scroll. The redirect is the
+    // rest of that navigation, at a URL whose fragment is now the one that counts.
+    next.finishesPush = options.afterCommit !== undefined;
+    void navigate(payload.redirect, 'replace', next);
     return false;
   }
 
@@ -432,13 +446,17 @@ function leaveToBrowser(event: NavigateEvent): boolean {
 }
 
 /**
- * The scroll a committing navigation owes: a push reaches its own fragment or the top, an in-place change
- * stays where it is. Read at commit rather than at dispatch, so a redirect the preparation followed lands
- * on the fragment it actually committed.
+ * What a navigation does to the scroll once its page is on screen: a push starts at the top, or at the
+ * anchor its URL names. Anything else leaves the scroll alone — a replace or a reload is the same place.
+ *
+ * `href` is the URL the navigation *ends* on. That is the event's own destination unless a redirect was
+ * resolved before the commit, and then the fragment the visitor arrives at is the redirect's, whether it
+ * added one, changed it or dropped it. A redirect followed after the commit arrives here as a `replace`
+ * (`show`); it finishes the push that found it, and is marked so on its request.
  */
-function afterCommitFor(event: NavigateEvent): (() => void) | undefined {
-  if (event.navigationType !== 'push') return undefined;
-  const { hash } = new URL(event.destination.url);
+function afterCommitFor(event: NavigateEvent, href: string = event.destination.url): (() => void) | undefined {
+  if (event.navigationType !== 'push' && !requestOf(event)?.finishesPush) return undefined;
+  const { hash } = new URL(href);
   return hash === '' ? scrollToTop : () => jumpToAnchor(hash);
 }
 
@@ -499,9 +517,11 @@ function interceptBeforeCommit(event: NavigateEvent, end: () => void, options: A
           resource = undefined;
           href = target.href;
         }
-        if (href !== event.destination.url) controller.redirect(href);
+        const redirected = href !== event.destination.url;
+        if (redirected) controller.redirect(href);
         const ready = resource;
-        controller.addHandler(() => perform(event, ready, end, options));
+        const final = redirected ? { ...options, afterCommit: afterCommitFor(event, href) } : options;
+        controller.addHandler(() => perform(event, ready, end, final));
       } catch (error) {
         const cancelled = event.signal.aborted || resource?.controller.signal.aborted === true;
         if (resource) discard(resource);

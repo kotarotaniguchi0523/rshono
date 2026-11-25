@@ -159,6 +159,11 @@ export const routes = defineRoutes({
       component: () => import('./components/react-standard'),
     },
     {
+      // Redirects that add, change or drop the fragment. See navigation-redirects.spec.mjs.
+      path: '/fragment-redirect/:step',
+      component: () => import('./components/fragment-redirect'),
+    },
+    {
       // Redirects to its own path with a different query. See navigation-redirects.spec.mjs.
       path: '/canonical',
       component: () => import('./components/canonical'),

@@ -153,3 +153,110 @@ test('a late redirect is still followed after a fragment-only navigation', async
   await expect(page).toHaveURL('/login');
   await expect(page.locator('input[name="email"]')).toBeVisible();
 });
+
+/*
+ * Where a navigation scrolls to is a fact about the URL it *ends* on. A redirect resolved before the commit
+ * can add a fragment, replace one or drop one, and the URL the navigation started with says nothing true
+ * about any of the three.
+ */
+test.describe('the fragment of a redirect’s target decides the scroll', () => {
+  const START = '/fragment-redirect/start';
+  const top = (page, id) => page.evaluate((name) => Math.round(document.getElementById(name).getBoundingClientRect().top) || 0, id);
+  const scrollY = (page) => page.evaluate(() => Math.round(window.scrollY));
+
+  /** Opens the tall start page scrolled well down, so "scrolled to the top" is a change that can be seen. */
+  async function openScrolled(page) {
+    await open(page, START);
+    await page.evaluate(() => window.scrollTo(0, 900));
+    expect(await scrollY(page)).toBe(900);
+  }
+
+  async function follow(page, href) {
+    await page.evaluate((to) => {
+      const anchor = Object.assign(document.createElement('a'), { href: to, textContent: 'go' });
+      anchor.dataset.fragmentGo = '';
+      anchor.style.cssText = 'position:fixed;top:0;left:0;z-index:9';
+      document.body.append(anchor);
+    }, href);
+    await page.locator('[data-fragment-go]').click();
+    await expect(page.locator('[data-fragment-page="target"]')).toBeVisible();
+  }
+
+  // Each case twice: a redirect known before the payload starts, which the browser resolves before it
+  // commits a URL, and one thrown after — which can only be followed as a document load.
+  for (const [when, late] of [
+    ['before the payload', ''],
+    ['after the payload has started', '&late=1'],
+  ]) {
+    test(`added ${when}: the target’s anchor is scrolled to, though the link named none`, async ({ page }) => {
+      await openScrolled(page);
+      await follow(page, `/fragment-redirect/from?case=add${late}`);
+      await expect(page).toHaveURL('/fragment-redirect/target#low');
+      await expect.poll(() => top(page, 'low')).toBe(0);
+    });
+
+    test(`changed ${when}: the target’s anchor wins over the one the link named`, async ({ page }) => {
+      await openScrolled(page);
+      await follow(page, `/fragment-redirect/from?case=change${late}#high`);
+      await expect(page).toHaveURL('/fragment-redirect/target#low');
+      await expect.poll(() => top(page, 'low')).toBe(0);
+      expect(await top(page, 'high')).toBeLessThan(0);
+    });
+
+    test(`removed ${when}: the page starts at the top, though the link named an anchor`, async ({ page }) => {
+      await openScrolled(page);
+      await follow(page, `/fragment-redirect/from?case=remove${late}#low`);
+      await expect(page).toHaveURL('/fragment-redirect/target');
+      await expect.poll(() => scrollY(page)).toBe(0);
+      // And it stays there: nothing arrives later to scroll it.
+      await page.waitForTimeout(300);
+      expect(await scrollY(page)).toBe(0);
+    });
+
+    test(`two redirects ${when}: the last target’s anchor`, async ({ page }) => {
+      await openScrolled(page);
+      await follow(page, `/fragment-redirect/from?case=twice${late}#high`);
+      await expect(page).toHaveURL('/fragment-redirect/target#low');
+      await expect.poll(() => top(page, 'low')).toBe(0);
+    });
+  }
+
+  test('redirects resolved before the commit leave one history entry', async ({ page }) => {
+    await openScrolled(page);
+    await follow(page, '/fragment-redirect/from?case=twice#high');
+    expect(await entries(page)).toEqual([START, '/fragment-redirect/target#low']);
+  });
+
+  test('a navigation started while the redirect is resolving owns the scroll', async ({ page }) => {
+    await openScrolled(page);
+    await page.evaluate(() => void navigation.navigate('/fragment-redirect/from?case=slow').finished.catch(() => {}));
+    await page.waitForTimeout(150);
+    await page.evaluate(() => navigation.navigate('/fragment-redirect/other#high').finished);
+    await expect(page.locator('[data-fragment-page="other"]')).toBeVisible();
+    await expect.poll(() => top(page, 'high')).toBe(0);
+    // Long enough for the superseded redirect to have answered: it scrolls nothing and goes nowhere.
+    await page.waitForTimeout(800);
+    await expect(page).toHaveURL('/fragment-redirect/other#high');
+    expect(await top(page, 'high')).toBe(0);
+  });
+
+  test('without precommit, the redirect’s replace still scrolls the way the push it finishes would', async ({ page }) => {
+    await page.addInitScript(() => {
+      delete window.NavigationPrecommitController;
+    });
+    await openScrolled(page);
+    await follow(page, '/fragment-redirect/from?case=add');
+    await expect(page).toHaveURL('/fragment-redirect/target#low');
+    await expect.poll(() => top(page, 'low')).toBe(0);
+  });
+
+  test('without precommit, a redirect that drops the fragment ends at the top', async ({ page }) => {
+    await page.addInitScript(() => {
+      delete window.NavigationPrecommitController;
+    });
+    await openScrolled(page);
+    await follow(page, '/fragment-redirect/from?case=remove#low');
+    await expect(page).toHaveURL('/fragment-redirect/target');
+    await expect.poll(() => scrollY(page)).toBe(0);
+  });
+});
