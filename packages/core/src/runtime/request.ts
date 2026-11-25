@@ -1,3 +1,5 @@
+import { BUILD_HEADER, BUILD_ID } from './build-id.js';
+
 /**
  * The header that names the server action a client-initiated call wants to run, and so the header that
  * decides which of the two action branches a POST takes.
@@ -46,7 +48,12 @@ export type RenderRequest = { kind: 'document' } | { kind: 'rsc' } | { kind: 'fo
 export function createRscRequest(urlString: string, action?: { id: string; body: BodyInit }, signal?: AbortSignal, cache?: RequestCache): Request {
   const url = new URL(urlString, location.origin);
   const headers = new Headers({ [HEADER_RSC]: HEADER_RSC_VALUE });
-  if (action) headers.set(HEADER_ACTION_ID, action.id);
+  if (action) {
+    headers.set(HEADER_ACTION_ID, action.id);
+    // On a call only. A page fetch is a GET that caches see, and a request header the response does not vary
+    // on has no business there; the server names *its* build on the response, which is enough to compare.
+    if (BUILD_ID) headers.set(BUILD_HEADER, BUILD_ID);
+  }
   return new Request(url, {
     method: action ? 'POST' : 'GET',
     headers,

@@ -1726,3 +1726,69 @@ describe('the route-functions manifest', () => {
     assert.ok(all.has(serverActionId('Add user')));
   });
 });
+
+// ── One id per build, and what each side does about a different one ──────────────────────────────────────
+describe('the build id', () => {
+  const { buildId } = JSON.parse(readFileSync(join(TESTBED_DIST, 'rsvhono-build.json'), 'utf8'));
+  const recordRace = () => {
+    const sibling = serverActionId('Add user');
+    return `${sibling.slice(0, sibling.lastIndexOf('#'))}#recordRace`;
+  };
+  const call = (label, headers = {}) =>
+    fetch(`${base}/action-race`, {
+      method: 'POST',
+      headers: { Origin: base, rsc: '1', 'x-rsc-action': recordRace(), 'content-type': 'text/plain;charset=UTF-8', ...headers },
+      body: JSON.stringify([label, 0]),
+    });
+  const applied = async (label) => (await (await fetch(`${base}/action-race`)).text()).includes(label);
+
+  test('is one value, in the marker and in both bundles', () => {
+    assert.match(buildId, /^[0-9a-f]{16}$/);
+    const inDir = (dir) =>
+      readdirSync(join(TESTBED_DIST, dir), { recursive: true }).some(
+        (file) => /\.m?js$/.test(file) && readFileSync(join(TESTBED_DIST, dir, file), 'utf8').includes(buildId),
+      );
+    assert.ok(inDir('server'), 'the server bundle carries it');
+    assert.ok(inDir('static'), 'and the browser bundle carries the same one');
+  });
+
+  test('rides every response: a document, a payload, a prerendered page in both forms, a refusal', async () => {
+    const responses = {
+      document: await fetch(`${base}/users`),
+      payload: await fetch(`${base}/users`, { headers: { rsc: '1' } }),
+      'prerendered document': await fetch(`${base}/docs/getting-started`),
+      'prerendered payload': await fetch(`${base}/docs/getting-started`, { headers: { rsc: '1' } }),
+      refusal: await call('x', { 'x-rsc-action': 'no-such-action' }),
+    };
+    for (const [name, res] of Object.entries(responses)) {
+      await res.text();
+      assert.equal(res.headers.get('x-rsvhono-build'), buildId, name);
+    }
+    // Named on the response and not asked for on a GET, so nothing varies by it and no cache key grows.
+    assert.doesNotMatch(responses['prerendered payload'].headers.get('vary') ?? '', /build/i);
+  });
+
+  test('a call from a page another build rendered is refused before it runs', async () => {
+    const label = `other-build-${crypto.randomUUID()}`;
+    const res = await call(label, { 'x-rsvhono-build': '0000000000000000' });
+    assert.equal(res.status, 409);
+    assert.equal(res.headers.get('x-rsvhono-build'), buildId, 'the reply says which build refused');
+    assert.match(await res.text(), /different deployment/);
+    assert.equal(await applied(label), false, 'the function did not run');
+
+    // Even for an id this build has never heard of: the 409 comes first, so the caller is told the real reason.
+    const unknown = await call(label, { 'x-rsvhono-build': '0000000000000000', 'x-rsc-action': 'no-such-action' });
+    assert.equal(unknown.status, 409);
+    await unknown.text();
+  });
+
+  test('a call from this build, or from a client that names none, runs', async () => {
+    for (const headers of [{ 'x-rsvhono-build': buildId }, {}]) {
+      const label = `same-build-${crypto.randomUUID()}`;
+      const res = await call(label, headers);
+      assert.equal(res.status, 200);
+      await res.text();
+      assert.equal(await applied(label), true);
+    }
+  });
+});

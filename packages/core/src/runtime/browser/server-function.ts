@@ -8,9 +8,10 @@
  * is re-read instead, because it may have been rendered before the mutation.
  */
 import { createTemporaryReferenceSet, encodeReply, setServerCallback } from '@vitejs/plugin-rsc/browser';
+import { BuildMismatchError } from '../build-id.js';
 import { parseControlIntent } from '../control.js';
 import { createRscRequest } from '../request.js';
-import { documentUrl } from './document.js';
+import { documentUrl, reloadForBuild } from './document.js';
 import { followRootIntent, mutationCompleted, navigating, navigationIntent, push, revalidate } from './navigation.js';
 import { requestResource } from './page-resource.js';
 import { createAttempt, schedule } from './render-attempt.js';
@@ -52,6 +53,15 @@ export function installServerFunctions(): void {
       } catch (error) {
         pagesArrived = true;
         mutationCompleted();
+        // The server is another build: it refused the call before running anything, and this page can call
+        // nothing on it. The caller is told — the call is not sent again, here or after the reload, since
+        // nothing says it is safe to — and the page is replaced with the server's own, once the caller's
+        // handlers have had the rejection.
+        if (error instanceof BuildMismatchError) {
+          const { serverBuild } = error;
+          setTimeout(() => reloadForBuild(serverBuild), 0);
+          throw error;
+        }
         // A `redirect()` or `notFound()` that arrived as an error is a change of screen like any other.
         if (!parseControlIntent(error)) throw error;
         if (ownsScreen()) followRootIntent(resource, error);

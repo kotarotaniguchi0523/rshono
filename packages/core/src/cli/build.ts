@@ -1,4 +1,5 @@
 import type { Hono } from 'hono';
+import { randomUUID } from 'node:crypto';
 import { cpSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -77,7 +78,11 @@ export async function buildCommand(options: BuildOptions): Promise<void> {
   await rm(join(distDir, 'server'), { recursive: true, force: true });
   await rm(join(distDir, 'static'), { recursive: true, force: true });
   // Outside the `try`: what this throws is a one-line `[rsvhono]` message about the app, for the CLI to print.
-  const viteConfig = createViteConfig({ rootDir, isDev: false, config, preset });
+  // One id for this build, minted once and handed to all three bundles. Random rather than a hash of the
+  // output: what it has to say is "these were built together", and two builds of the same source on two
+  // machines were not.
+  const buildId = randomUUID().replaceAll('-', '').slice(0, 16);
+  const viteConfig = createViteConfig({ rootDir, isDev: false, config, preset, buildId });
   try {
     const builder = await createBuilder(viteConfig);
     await builder.buildApp();
@@ -139,7 +144,7 @@ export async function buildCommand(options: BuildOptions): Promise<void> {
   if (skipped.length > 0) console.log(`  • skipped ${skipped.length} (will SSR per request)`);
 
   // Before `finalize`, so a preset that copies `dist/` into a platform layout takes it along.
-  writeBuildMarker(distDir, preset.name);
+  writeBuildMarker(distDir, preset.name, buildId);
 
   // Last, so a preset arranging its output finds every piece of the build on disk.
   await preset.finalize?.({

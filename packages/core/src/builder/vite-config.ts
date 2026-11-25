@@ -48,6 +48,8 @@ const RESOLVED_SERVER_REFERENCES_ID = '\0' + SERVER_REFERENCES_ID;
 interface ViteConfigOptions {
   rootDir: string;
   isDev: boolean;
+  /** One id for the whole build, shared by all three bundles. Absent under `rsvhono dev`. */
+  buildId?: string;
   config: RsvhonoConfig;
   preset: DeployPreset;
 }
@@ -452,7 +454,7 @@ function serverEnvironment(preset: DeployPreset, outDir: string, entryFileName?:
   };
 }
 
-export function createViteConfig({ rootDir, isDev, config, preset }: ViteConfigOptions): InlineConfig {
+export function createViteConfig({ rootDir, isDev, config, preset, buildId }: ViteConfigOptions): InlineConfig {
   const srcDir = join(rootDir, 'src');
 
   // A react/react-dom split fails inside React at render time; this is the place that can say so.
@@ -496,7 +498,9 @@ export function createViteConfig({ rootDir, isDev, config, preset }: ViteConfigO
     clearScreen: false,
     // Warnings and errors; the CLI prints its own progress lines.
     logLevel: 'warn',
-    define: { __RSVHONO_CONFIG__: JSON.stringify(serverConfig) },
+    // Top-level, so every environment gets the same two literals. The build id is the one that has to be
+    // identical across them: it is how the browser bundle and the server bundle recognise each other.
+    define: { __RSVHONO_CONFIG__: JSON.stringify(serverConfig), __RSVHONO_BUILD_ID__: buildId === undefined ? 'undefined' : JSON.stringify(buildId) },
     resolve: { alias: { '@': srcDir } },
     environments: {
       // `main.mjs` is the one path `rsvhono start` and every platform's config name.

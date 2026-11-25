@@ -38,6 +38,7 @@ import {
   runWithContext,
   wantsRefresh,
 } from './context.js';
+import { BUILD_HEADER, BUILD_ID, isOtherBuild } from './build-id.js';
 import { cameFromPayload, controlDigestFor, isControlSignal, RedirectSignal, type ControlSignal } from './control.js';
 // Types only: the module itself is in the SSR environment, reached through `import.meta.viteRsc.loadModule`.
 import type { renderHTML, RenderHTMLOptions } from './entry.ssr.js';
@@ -810,6 +811,12 @@ async function renderPage(c: Context, loadPage: () => Promise<PageComponent>, as
   if (renderRequest.kind === 'rsc-action' && refusesForeignOrigin(c)) {
     return plainRefusal(c, 'Forbidden: a server function was called from another origin.', 403);
   }
+  // A call from a page another build rendered. Refused here — before the function is looked up, let alone
+  // run — because its id belongs to the other build: it may name nothing here, or name a different function.
+  // The reply carries this build's id like every response, which is how the browser knows what this was.
+  if (renderRequest.kind === 'rsc-action' && isOtherBuild(c.req.header(BUILD_HEADER))) {
+    return plainRefusal(c, 'Conflict: this page was built by a different deployment. Reload it.', 409);
+  }
   const run = await runServerFunction(c, renderRequest);
   if (run instanceof Response) return run;
 
@@ -908,6 +915,9 @@ function buildApp(): Hono {
     if (!headers.has('x-content-type-options')) writes.push(['x-content-type-options', 'nosniff']);
     if (!headers.has('referrer-policy')) writes.push(['referrer-policy', 'strict-origin-when-cross-origin']);
     if (!headers.has('x-frame-options')) writes.push(['x-frame-options', 'SAMEORIGIN']);
+    // Which build answered — on every response, a prerendered page's and a refusal's included, so the
+    // browser can tell before it reads a byte of the body. See `build-id.ts`.
+    if (BUILD_ID) writes.push([BUILD_HEADER, BUILD_ID]);
 
     // React Refresh compiles updates with `eval`, so a dev build cannot run under a production CSP.
     // Widened here so one policy in src/server.ts serves both.

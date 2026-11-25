@@ -195,6 +195,34 @@ export function loadDocument(href?: string, { replace = false }: { replace?: boo
  */
 export const RECOVERY_GRACE_MS = 2000;
 
+/**
+ * Takes the one recovery `key` is good for in this tab, and says whether there was one to take. Every
+ * reload this runtime starts on its own is bounded by one of these, because a reload that does not fix what
+ * it was for comes straight back and reloads again.
+ *
+ * `sessionStorage`, because the count has to outlive the document it is written in and must not outlive the
+ * tab. Where storage throws — site data blocked — a page that cannot count has to pick a side, and it picks
+ * the terminating one: `false`, no reload.
+ */
+export function spendOnce(key: string): boolean {
+  try {
+    if (sessionStorage.getItem(key) !== null) return false;
+    sessionStorage.setItem(key, '1');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Reloads for a server that turned out to be a newer build than this page — once per build, per tab. After
+ * the reload the document and its scripts are the server's own; if they are not, because a cache in between
+ * is still handing out the old page, a second reload would get the same thing.
+ */
+export function reloadForBuild(serverBuild: string): void {
+  if (spendOnce(`rsvhono:build:${serverBuild}`)) loadDocument();
+}
+
 /** The `sessionStorage` key bounding the recovery reload for one URL. Spent here, released in {@link main}. */
 export const lateNotFoundKey = (): string => `rsvhono:late-not-found:${documentUrl()}`;
 
@@ -214,18 +242,7 @@ export const lateNotFoundKey = (): string => `rsvhono:late-not-found:${documentU
  * second page's late signal still gets its own attempt.
  */
 export function reloadOnceForLateNotFound(): void {
-  const key = lateNotFoundKey();
-  let spent: boolean;
-  try {
-    spent = sessionStorage.getItem(key) !== null;
-    if (!spent) sessionStorage.setItem(key, '1');
-  } catch {
-    // Storage can throw outright where site data is blocked, and a page that cannot count its reloads has
-    // to pick a side. It picks the terminating one: a message on a page that might have recovered is a
-    // worse outcome than a reload loop only by a lot less.
-    spent = true;
-  }
-  if (spent) {
+  if (!spendOnce(lateNotFoundKey())) {
     showLateNotFound();
     return;
   }

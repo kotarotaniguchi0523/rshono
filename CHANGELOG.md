@@ -57,6 +57,17 @@ those.
   back as if it had. It now runs like an action posted to any page — same origin check, same id check — and
   the page it re-renders is the 404 page, with the action's result in the payload.
 
+- **A page and a server from different builds notice.** Every `rsvhono build` mints one id, compiled into
+  the server and the browser bundle alike and written to `dist/rsvhono-build.json`. The server names its
+  build on every response (`x-rsvhono-build`); the browser names its own on a server function call.
+  - A payload from another build is not decoded — it names chunks the page does not have. The navigation
+    ends in a document load of where it was going.
+  - A function call from a page another build rendered is refused with `409` **before it runs**. The caller
+    gets a `BuildMismatchError` (`code: 'RSVHONO_BUILD_MISMATCH'`), the call is never re-sent, and the page
+    reloads once per build per tab.
+  - Nothing is added to a page fetch's request, so nothing varies by it and no cache key grows. Off under
+    `rsvhono dev`.
+
 - **`setServerFunctionRefresh('explicit')` and `requestRefresh()`.** By default a server function called
   from client code is still answered with the page rendered again. In `'explicit'` mode the reply is the
   return value alone — the page module is not loaded and nothing is rendered — unless the function called

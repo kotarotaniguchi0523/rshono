@@ -2,15 +2,20 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { DeployTarget } from './contract.js';
 
-/** Records which platform a build was for, so `rsvhono start` can refuse one it cannot run. */
+/**
+ * Records which platform a build was for, so `rsvhono start` can refuse one it cannot run — and which build
+ * it is: the id compiled into every bundle of it (`runtime/build-id.ts`), for whoever is looking at a
+ * directory and wondering which deploy it is.
+ */
 export interface BuildMarker {
   deploy: DeployTarget;
+  buildId: string;
 }
 
 const MARKER_FILE = 'rsvhono-build.json';
 
-export function writeBuildMarker(distDir: string, deploy: DeployTarget): void {
-  writeFileSync(join(distDir, MARKER_FILE), `${JSON.stringify({ deploy } satisfies BuildMarker, null, 2)}\n`);
+export function writeBuildMarker(distDir: string, deploy: DeployTarget, buildId: string): void {
+  writeFileSync(join(distDir, MARKER_FILE), `${JSON.stringify({ deploy, buildId } satisfies BuildMarker, null, 2)}\n`);
 }
 
 /**

@@ -17,6 +17,7 @@
  */
 import { createFromReadableStream } from '@vitejs/plugin-rsc/browser';
 import type { RscPayload } from '../entry.rsc.js';
+import { BUILD_HEADER, BuildMismatchError, isOtherBuild } from '../build-id.js';
 import { createRscRequest } from '../request.js';
 
 /**
@@ -92,6 +93,13 @@ async function refusalBody(response: Response): Promise<string> {
  */
 async function payloadResponse(request: Request): Promise<Response> {
   const response = await fetch(request);
+  // Before the body is looked at, whatever it is: a payload from another build names chunks this page
+  // cannot load, and a refusal from one is not a payload at all. Nothing of it reaches the decoder.
+  const theirs = response.headers.get(BUILD_HEADER);
+  if (isOtherBuild(theirs)) {
+    void response.body?.cancel().catch(() => {});
+    throw new BuildMismatchError(theirs!);
+  }
   const contentType = response.headers.get('content-type');
   if (contentType?.startsWith(FLIGHT_CONTENT_TYPE)) return response;
   // Read for the message: a plain-text refusal says what it refused only in its body, and HTTP/2 has no
