@@ -1742,14 +1742,21 @@ describe('the build id', () => {
     });
   const applied = async (label) => (await (await fetch(`${base}/action-race`)).text()).includes(label);
 
-  test('is one value, in the marker and in both bundles', () => {
+  test('is one value: in the marker, in the server bundle, and in the document that boots the browser', async () => {
     assert.match(buildId, /^[0-9a-f]{16}$/);
-    const inDir = (dir) =>
+    const inDir = (dir, extension) =>
       readdirSync(join(TESTBED_DIST, dir), { recursive: true }).some(
-        (file) => /\.m?js$/.test(file) && readFileSync(join(TESTBED_DIST, dir, file), 'utf8').includes(buildId),
+        (file) => extension.test(file) && readFileSync(join(TESTBED_DIST, dir, file), 'utf8').includes(buildId),
       );
-    assert.ok(inDir('server'), 'the server bundle carries it');
-    assert.ok(inDir('static'), 'and the browser bundle carries the same one');
+    assert.ok(inDir('server', /\.m?js$/), 'the server bundle carries it');
+    // Not in the browser's files: a literal of a value that is new every build would rename every chunk on
+    // every deploy (build-stability.test.mjs). The document hands it over instead.
+    assert.ok(!inDir('static', /\.m?js$/), 'no browser chunk has a copy');
+    assert.ok((await (await fetch(`${base}/users`)).text()).includes(`self.__rsvhonoBuild="${buildId}";`), 'a rendered document sets it');
+    assert.ok(
+      (await (await fetch(`${base}/docs/getting-started`)).text()).includes(`self.__rsvhonoBuild="${buildId}";`),
+      'and so does a prerendered one',
+    );
   });
 
   test('rides every response: a document, a payload, a prerendered page in both forms, a refusal', async () => {

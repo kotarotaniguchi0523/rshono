@@ -4,6 +4,7 @@ import React from 'react';
 import type { ReactFormState } from 'react-dom/client';
 import { renderToReadableStream } from 'react-dom/server';
 import { createFromReadableStream, getClientEntryUrl } from '@vitejs/plugin-rsc/ssr';
+import { buildIdPreamble } from './build-id.js';
 import { chunkRecoveryPreamble } from './chunk-recovery.js';
 import { cameFromPayload, isControlDigest } from './control.js';
 import { injectFlightPayload } from './flight-inject.js';
@@ -101,8 +102,9 @@ async function renderHTMLInternal(
       // One module entry for every page; route code is reached from it lazily through client references.
       // Ahead of the entry, inline: what to do if the entry — or a chunk it imports later — will not load.
       // React writes this before the module script below and gives it the nonce. A build only: the dev
-      // server's modules are not hashed files that a deploy can take away.
-      bootstrapScriptContent: isDev ? undefined : chunkRecoveryPreamble(clientEntry),
+      // server's modules are not hashed files that a deploy can take away. The build id rides the same
+      // script: the browser bundle has no copy of its own (`build-id.ts`).
+      bootstrapScriptContent: isDev ? undefined : buildIdPreamble() + chunkRecoveryPreamble(clientEntry),
       bootstrapModules: [clientEntry],
       formState: options.formState,
       signal: options.signal,

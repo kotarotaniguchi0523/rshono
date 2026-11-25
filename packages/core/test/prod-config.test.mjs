@@ -56,7 +56,7 @@ describe('a hardened server.ts', () => {
     // The chunk-recovery preamble is an inline script like any other the document carries: without the nonce
     // the policy above would refuse it, and a page whose entry chunk is gone would just sit there.
     const html = await (await fetch(`${app.base}/`)).text();
-    assert.match(html, /<script[^>]*nonce="[^"]+"[^>]*>\(function\(\)\{var k="rsvhono:chunk-reload"/);
+    assert.match(html, /<script[^>]*nonce="[^"]+"[^>]*>self\.__rsvhonoBuild="[0-9a-f]{16}";\(function\(\)\{var k="rsvhono:chunk-reload"/);
 
     // A prerendered file is fixed bytes and cannot carry a fresh nonce, so the document falls back to
     // rendering per request while a nonce is in play.

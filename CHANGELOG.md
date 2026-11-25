@@ -68,6 +68,16 @@ those.
   - Nothing is added to a page fetch's request, so nothing varies by it and no cache key grows. Off under
     `rsvhono dev`.
 
+- **A rebuild of unchanged source ships under unchanged file names.** The build id was inlined into the
+  browser bundle, and a value that is new on every build renamed the chunk it landed in — the one with React
+  — and every chunk importing it: on the testbed, 20 of 23 files and 95% of the bytes, with no source
+  change. The browser now reads the id from the document (`self.__rsvhonoBuild`, in the inline script React
+  writes ahead of the entry, with the nonce), and the two server bundles keep their inlined copy. A document
+  whose CSP refuses that inline script boots a page that claims no build: its calls run, and it does not
+  notice a deploy.
+- **`build.chunkImportMap` is refused at build time.** Vite's experimental option imports chunks by names
+  that only an import map in the document resolves, and rsvhono does not emit one — the build used to
+  succeed and no page booted (client environment), or the server bundle failed to load (everywhere).
 - **A document whose scripts will not load reloads itself, once.** An inline preamble ahead of the entry
   chunk watches for the entry failing to load and for Vite's `vite:preloadError` — a client component's
   chunk that is gone, typically after a deploy — and reloads the document so the server can hand out a page

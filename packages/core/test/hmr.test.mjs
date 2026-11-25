@@ -119,4 +119,78 @@ describe('rsvhono dev', async () => {
       }
     },
   );
+  test(
+    'a stylesheet edit restyles the page, and a server function edit is what the next call runs',
+    { skip: browser ? false : 'no browser could be launched here' },
+    async () => {
+      const cssFile = join(APP_DIR, 'src', 'pages', 'home.css');
+      const actionsFile = join(APP_DIR, 'src', 'actions.ts');
+      const cssSource = readFileSync(cssFile, 'utf8');
+      const actionsSource = readFileSync(actionsFile, 'utf8');
+      const page = await browser.newPage();
+      const errors = [];
+      page.on('pageerror', (error) => errors.push(error.message));
+      try {
+        await page.goto(`${base}/`);
+        await waitForHydration(page);
+        const count = await page.textContent('[data-testid=count]');
+        await page.evaluate(() => {
+          window.__sameDocument = true;
+        });
+
+        // The stylesheet belongs to a *server* component, so there is no client module to hot-swap it through.
+        writeFileSync(cssFile, cssSource.replace('rgb(0, 128, 0)', 'rgb(0, 0, 255)'));
+        await page.waitForFunction(() => getComputedStyle(document.querySelector('h1')).color === 'rgb(0, 0, 255)', null, { timeout: 20_000 });
+        assert.equal(await page.textContent('[data-testid=count]'), count, 'restyling keeps client state');
+
+        // Before the edit, the function as written.
+        await page.click('[data-testid=shout]');
+        await page.waitForFunction(() => document.querySelector('[data-testid=shouted]').textContent === 'QUIET');
+
+        writeFileSync(actionsFile, actionsSource.replace('return text.toUpperCase();', 'return `${text.toUpperCase()}!`;'));
+        // Nothing on screen changes for a server function edit, so there is nothing to wait on but the call.
+        await page.waitForFunction(
+          async () => {
+            document.querySelector('[data-testid=shout]').click();
+            await new Promise((resolve) => setTimeout(resolve, 300));
+            return document.querySelector('[data-testid=shouted]').textContent === 'QUIET!';
+          },
+          null,
+          { timeout: 20_000, polling: 500 },
+        );
+        assert.equal(await page.evaluate(() => window.__sameDocument), true, 'neither edit reloaded the document');
+        assert.equal(await page.textContent('[data-testid=count]'), count, 'and the counter is where it was');
+        assert.deepEqual(errors, []);
+      } finally {
+        writeFileSync(cssFile, cssSource);
+        writeFileSync(actionsFile, actionsSource);
+        await page.close();
+      }
+    },
+  );
+
+  test('a soft navigation is recorded on the rsvhono devtools track', { skip: browser ? false : 'no browser could be launched here' }, async () => {
+    const page = await browser.newPage();
+    try {
+      await page.goto(`${base}/`);
+      await waitForHydration(page);
+      await page.click('a[href="/items/7"]');
+      await page.waitForURL(`${base}/items/7`);
+      const track = () =>
+        page.evaluate(() =>
+          performance
+            .getEntriesByType('measure')
+            .filter((entry) => entry.detail?.devtools?.track === 'rsvhono')
+            .map((entry) => ({ name: entry.name, duration: entry.duration })),
+        );
+      await page.waitForFunction(() => performance.getEntriesByType('measure').some((entry) => entry.detail?.devtools?.track === 'rsvhono'), null, {
+        timeout: 10_000,
+      });
+      const entries = await track();
+      assert.ok(entries.length > 0, 'the dev build measures its own work');
+      for (const entry of entries) assert.ok(entry.duration >= 0 && entry.name.length > 0, `${entry.name} is a real measure`);
+    } finally {
+      await page.close();
+    }
+  });
 });

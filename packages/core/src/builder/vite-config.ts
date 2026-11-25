@@ -11,6 +11,7 @@ import react from '@vitejs/plugin-react';
 import rsc, { getPluginApi } from '@vitejs/plugin-rsc';
 import { hasDirective } from '@vitejs/plugin-rsc/transforms';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { BUILD_GLOBAL } from '../runtime/build-id.js';
 import { writeFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import {
@@ -345,6 +346,18 @@ function rsvhonoCore(aliases: ReadonlyMap<string, string>, routesFile: string, s
 
     configResolved(config) {
       resolvedConfig = config;
+      // `build.chunkImportMap` (experimental in Vite 8) has the bundle import its chunks by names that only an
+      // import map in the document can resolve. Vite leaves writing that map to the backend, and this one
+      // does not write it — so the build would succeed and no page would boot. Set for a server environment
+      // it fails later and more obscurely: Node has no import map to look the names up in.
+      for (const [name, environment] of Object.entries(config.environments)) {
+        if (environment.build.chunkImportMap) {
+          throw new Error(
+            `[rsvhono] \`build.chunkImportMap\` is on for the ${name} environment. rsvhono does not put an import map in the ` +
+              'document, so the chunks this option renames could not be loaded. Remove it from `vite` in rsvhono.config.',
+          );
+        }
+      }
     },
 
     /**
@@ -500,8 +513,8 @@ export function createViteConfig({ rootDir, isDev, config, preset, buildId }: Vi
     clearScreen: false,
     // Warnings and errors; the CLI prints its own progress lines.
     logLevel: 'warn',
-    // Top-level, so every environment gets the same two literals. The build id is the one that has to be
-    // identical across them: it is how the browser bundle and the server bundle recognise each other.
+    // Top-level, so both server environments get the same two literals. The browser's build id is not one of
+    // them — see the client environment below.
     define: { __RSVHONO_CONFIG__: JSON.stringify(serverConfig), __RSVHONO_BUILD_ID__: buildId === undefined ? 'undefined' : JSON.stringify(buildId) },
     resolve: { alias: { '@': srcDir } },
     environments: {
@@ -515,7 +528,11 @@ export function createViteConfig({ rootDir, isDev, config, preset, buildId }: Vi
       // No `define` here: `rsvhonoEnvShadow` replaces the whole `process` binding in this environment.
       ssr: serverEnvironment(preset, join(serverDir, 'ssr')),
       client: {
-        define: { 'process.env': JSON.stringify(browserEnv) },
+        // The build id is a new value every build, and a literal of it in the browser bundle renames the chunk
+        // it lands in — the one with React in it — and then every chunk that imports that one. So an unchanged
+        // app would ship under all-new file names on each deploy, and no visitor would keep a cached byte. The
+        // browser reads it from the document instead, where `entry.ssr.tsx` writes it ahead of the entry.
+        define: { 'process.env': JSON.stringify(browserEnv), __RSVHONO_BUILD_ID__: `globalThis.${BUILD_GLOBAL}` },
         optimizeDeps: { exclude: [PACKAGE_NAME] },
         // No source map: this directory is public.
         build: { outDir: join(BUILD_OUT_DIR, 'static'), emptyOutDir: false, sourcemap: false, rollupOptions: { onwarn: ignoreExpectedWarnings } },

@@ -2606,6 +2606,14 @@ describe('build id', () => {
     assert.equal(BUILD_HEADER, 'x-rsvhono-build');
   });
 
+  test('the preamble hands the id to the page, and is nothing when there is no id', async () => {
+    const built = await load('build-a');
+    assert.equal(built.buildIdPreamble(), `self.${built.BUILD_GLOBAL}="build-a";`);
+    assert.equal((await load(undefined)).buildIdPreamble(), '');
+    // An id is hex in practice; the escape is for the day it is not.
+    assert.doesNotMatch((await load('</script>')).buildIdPreamble(), /</);
+  });
+
   test('a server function call carries the build, and a page fetch does not', () => {
     // Its own process: the id is read when `build-id.js` first loads, and this file loaded it long ago.
     const run = spawnSync(

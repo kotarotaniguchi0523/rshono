@@ -19,6 +19,22 @@
 /** This bundle's build, or `undefined` under `rsvhono dev`, where there is nothing to compare. */
 export const BUILD_ID: string | undefined = typeof __RSVHONO_BUILD_ID__ === 'string' ? __RSVHONO_BUILD_ID__ : undefined;
 
+/**
+ * Where the browser finds the id: a global the document sets before its entry runs. The two server bundles
+ * have the id inlined; the browser bundle does not, because a value that is new every build would rename
+ * every chunk on every deploy. The build points the browser's `__RSVHONO_BUILD_ID__` at this instead.
+ */
+export const BUILD_GLOBAL = '__rsvhonoBuild';
+
+/**
+ * The inline script that hands this build's id to the page, or nothing under `rsvhono dev`. A document whose
+ * CSP refuses it boots a page with no id — which is a page that claims no build, not one that claims a wrong
+ * one: its calls are run, and it will not notice a deploy.
+ */
+export function buildIdPreamble(): string {
+  return BUILD_ID === undefined ? '' : `self.${BUILD_GLOBAL}=${JSON.stringify(BUILD_ID).replace(/</g, '\\u003c')};`;
+}
+
 /** Carries a build id: on every response from the server, and on a server function call from the browser. */
 export const BUILD_HEADER = 'x-rsvhono-build';
 
