@@ -44,9 +44,14 @@ below.
   `dist/static/importmap.json`. Nothing puts an import map in the document: Vite expects the backend to, and
   the document here is React's stream, where the map would have to precede the first module script on every
   response, with the nonce. Not wired; the build id and chunk recovery do not depend on it.
-- **`preserveServerReferences`, `use cache`, PPR.** `preserveServerReferences` is in 0.5.39's
-  `createFromReadableStream` options. It matters when a stored flight is decoded on the server to be built
-  into a new tree, which nothing here does: a prerendered payload is served as bytes. No fixture was built.
+- **`preserveServerReferences`, `use cache`, PPR.** Tried, as a testbed page and not as a framework feature:
+  `/flight-replay` renders a fragment to flight once with the plugin's `renderToReadableStream`, keeps the
+  bytes, and decodes them back into the tree on later requests with `createFromReadableStream(…, {},
+{ preserveServerReferences: true })` — the `cache-replay` example's method. It works on this renderer: the
+  fragment renders once, and the `<form action={serverFunction}>` inside it is written out as a reference
+  again and still runs. What a real cache would need on top is everything that page leaves out — a key,
+  invalidation, the build id on stored flight, per-user separation, a bound on memory — and none of that
+  was built. `'use cache'` and PPR were not tried.
 - **`@rolldown/plugin-transform-imports` (0.1.3).** An app can add it under `vite.plugins` like any plugin;
   the framework does not depend on it and ships no preset for it. Not exercised here.
 - **`vitest-plugin-rsc` (0.3.0).** Not added. The suite's value is in real requests through Hono and a real

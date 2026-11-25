@@ -149,6 +149,11 @@ export const routes = defineRoutes({
       component: () => import('./components/reachability'),
     },
     {
+      // An experiment: a fragment rendered to flight once and replayed, server function and all.
+      path: '/flight-replay',
+      component: () => import('./components/flight-replay'),
+    },
+    {
       // React's own `cache()`, `cacheSignal()` and `browser()` on this renderer.
       path: '/react-standard',
       component: () => import('./components/react-standard'),

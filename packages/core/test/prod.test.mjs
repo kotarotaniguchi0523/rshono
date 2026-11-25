@@ -1876,3 +1876,33 @@ describe('React standard APIs', () => {
     assert.doesNotMatch(getOutput().slice(before), /SSR error|render error|error-reporter/, 'a deliberate bailout is not a fault');
   });
 });
+
+// An experiment, not a feature: `/flight-replay` renders a fragment to flight once and decodes it back into
+// the tree on every later request, after `@vitejs/plugin-rsc`'s `cache-replay` example. What makes it more
+// than a string cache is the server function inside it, which has to survive the round trip as a reference.
+describe('replaying stored flight (experiment)', () => {
+  const get = async () => (await fetch(`${base}/flight-replay`)).text();
+
+  test('the fragment is rendered once, however many requests replay it', async () => {
+    const first = await get();
+    const second = await get();
+    assert.match(first, /data-replay-renders="1"/);
+    assert.match(second, /data-replay-renders="1"/, 'the second request decoded the stored flight instead of rendering');
+  });
+
+  test('a server function inside the replayed fragment is still a form action, and still runs', async () => {
+    const html = await get();
+    const form = /<form[^>]*data-replay-form[^>]*>(.*?)<\/form>/s.exec(html)?.[1] ?? '';
+    const fields = hiddenFields(form);
+    assert.ok(
+      Object.keys(fields).some((name) => name.startsWith('$ACTION_ID_')),
+      'the reference was written out again, not lost in the decode',
+    );
+
+    const body = new FormData();
+    for (const [name, value] of Object.entries(fields)) body.set(name, value);
+    const res = await fetch(`${base}/flight-replay`, { method: 'POST', headers: { Origin: base }, body });
+    assert.equal(res.status, 200);
+    assert.match(await res.text(), /data-replay-renders="1"/);
+  });
+});

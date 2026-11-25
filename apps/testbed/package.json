@@ -10,16 +10,17 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@rsvhono/core": "workspace:*",
     "hono": "^4.13.17",
     "react": "19.3.1",
     "react-dom": "19.3.1",
-    "@rsvhono/core": "workspace:*",
-    "rsvhono-test-external-dep": "workspace:*",
-    "rsvhono-test-external-client-dep": "workspace:*"
+    "rsvhono-test-external-client-dep": "workspace:*",
+    "rsvhono-test-external-dep": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
     "@types/react": "^19.2.18",
+    "@vitejs/plugin-rsc": "0.5.39",
     "typescript": "^7.0.2"
   }
 }

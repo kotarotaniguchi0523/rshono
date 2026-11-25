@@ -106,6 +106,11 @@ const META: Record<RoutePath, RouteMeta> = {
     title: 'Reachability',
     description: 'Reaches server functions through a re-export, a lazy client component and a dynamically imported server component.',
   },
+  '/flight-replay': {
+    group: 'Streaming & suspense',
+    title: 'Flight replay',
+    description: 'An experiment: a fragment rendered to flight once and decoded back on later requests, with a server function in it.',
+  },
   '/react-standard': {
     group: 'Streaming & suspense',
     title: 'React standard APIs',
