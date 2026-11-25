@@ -11,6 +11,7 @@
  *   scroll.ts           scroll and focus across navigations
  */
 import { hydrateRoot } from 'react-dom/client';
+import { CHUNK_RELOAD_KEY } from './chunk-recovery.js';
 import { RECOVERY_GRACE_MS, documentUrl, lateNotFoundKey, showFatal, supported } from './browser/document.js';
 import { recoverRoot, refetch, settleRenderIntent } from './browser/navigation.js';
 import { inlineResource } from './browser/page-resource.js';
@@ -45,6 +46,12 @@ async function main() {
   const initial = createAttempt(resource, payload, documentUrl(), { afterCommit: restored ? () => scrollToPoint(restored) : undefined });
 
   installServerFunctions();
+  // The runtime is up, so its chunks loaded: the next one that does not gets its own reload.
+  try {
+    sessionStorage.removeItem(CHUNK_RELOAD_KEY);
+  } catch {
+    // Storage is unavailable; then the preamble never reloaded on it either.
+  }
 
   hydrateRoot(document, <BrowserRoot initial={initial} />, {
     formState: payload.formState,

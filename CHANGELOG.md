@@ -68,6 +68,13 @@ those.
   - Nothing is added to a page fetch's request, so nothing varies by it and no cache key grows. Off under
     `rsvhono dev`.
 
+- **A document whose scripts will not load reloads itself, once.** An inline preamble ahead of the entry
+  chunk watches for the entry failing to load and for Vite's `vite:preloadError` — a client component's
+  chunk that is gone, typically after a deploy — and reloads the document so the server can hand out a page
+  that names the files it has. Once per tab until a boot succeeds; never while the page is being left; not at
+  all where `sessionStorage` is unusable. It carries the CSP nonce like every other inline script, and is not
+  emitted under `rsvhono dev`. The entry is still React's `bootstrapModules`, so its `modulepreload` is kept.
+
 - **`setServerFunctionRefresh('explicit')` and `requestRefresh()`.** By default a server function called
   from client code is still answered with the page rendered again. In `'explicit'` mode the reply is the
   return value alone — the page module is not loaded and nothing is rendered — unless the function called

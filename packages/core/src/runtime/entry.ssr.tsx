@@ -1,10 +1,15 @@
+// eslint-disable-next-line @typescript-eslint/triple-slash-reference
+/// <reference path="../types/rsvhono-config.d.ts" />
 import React from 'react';
 import type { ReactFormState } from 'react-dom/client';
 import { renderToReadableStream } from 'react-dom/server';
 import { createFromReadableStream, getClientEntryUrl } from '@vitejs/plugin-rsc/ssr';
+import { chunkRecoveryPreamble } from './chunk-recovery.js';
 import { cameFromPayload, isControlDigest } from './control.js';
 import { injectFlightPayload } from './flight-inject.js';
 import type { RscPayload } from './entry.rsc.js';
+
+const isDev = typeof __RSVHONO_CONFIG__ !== 'undefined' && __RSVHONO_CONFIG__.isDev;
 
 export interface RenderHTMLOptions {
   formState?: ReactFormState;
@@ -89,11 +94,16 @@ async function renderHTMLInternal(
     options.onError?.(error);
   };
 
+  const clientEntry = getClientEntryUrl();
   let htmlStream: ReadableStream<Uint8Array>;
   try {
     htmlStream = await renderToReadableStream(<SsrRoot />, {
       // One module entry for every page; route code is reached from it lazily through client references.
-      bootstrapModules: [getClientEntryUrl()],
+      // Ahead of the entry, inline: what to do if the entry — or a chunk it imports later — will not load.
+      // React writes this before the module script below and gives it the nonce. A build only: the dev
+      // server's modules are not hashed files that a deploy can take away.
+      bootstrapScriptContent: isDev ? undefined : chunkRecoveryPreamble(clientEntry),
+      bootstrapModules: [clientEntry],
       formState: options.formState,
       signal: options.signal,
       nonce: options.nonce,

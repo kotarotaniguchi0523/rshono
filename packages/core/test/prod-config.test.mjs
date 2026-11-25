@@ -53,6 +53,11 @@ describe('a hardened server.ts', () => {
     assert.doesNotMatch(header, /unsafe-eval/, 'prod CSP must not allow eval');
     assert.ok((await res.text()).includes(`nonce="${nonce}"`), 'the nonce Hono minted was not stamped on the scripts');
 
+    // The chunk-recovery preamble is an inline script like any other the document carries: without the nonce
+    // the policy above would refuse it, and a page whose entry chunk is gone would just sit there.
+    const html = await (await fetch(`${app.base}/`)).text();
+    assert.match(html, /<script[^>]*nonce="[^"]+"[^>]*>\(function\(\)\{var k="rsvhono:chunk-reload"/);
+
     // A prerendered file is fixed bytes and cannot carry a fresh nonce, so the document falls back to
     // rendering per request while a nonce is in play.
     const ssg = await fetch(`${app.base}/docs/getting-started`);

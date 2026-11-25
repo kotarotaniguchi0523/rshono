@@ -2,6 +2,7 @@
  * The document itself: what URL it is, how to leave it for a new one, and what to paint when it cannot go on.
  * Nothing here knows about payloads or React.
  */
+import { CHUNK_RELOAD_KEY } from '../chunk-recovery.js';
 export const isDev = process.env.NODE_ENV === 'development';
 
 /**
@@ -166,6 +167,11 @@ export const documentNavigation = Symbol('rsvhono:document-navigation');
  * browser refuses cannot make the next one a full load.
  */
 export function loadDocument(href?: string, { replace = false }: { replace?: boolean } = {}): void {
+  // A chunk would not load, and the document's own preamble has already spent its one reload on that
+  // (`chunk-recovery.ts`). The failed import then surfaces here too, as a render that died — and a second
+  // reload for the same missing file is the loop the preamble's count exists to prevent. The key is released
+  // by a boot that works, so this only holds while nothing has.
+  if (href === undefined && chunkReloadSpent()) return;
   try {
     settle(
       href === undefined
@@ -194,6 +200,15 @@ export function loadDocument(href?: string, { replace = false }: { replace?: boo
  * ask the browser for a real document, and this timer is all that is left when one is refused or swallowed.
  */
 export const RECOVERY_GRACE_MS = 2000;
+
+/** Whether the chunk-recovery preamble has reloaded this tab and no boot has succeeded since. */
+function chunkReloadSpent(): boolean {
+  try {
+    return sessionStorage.getItem(CHUNK_RELOAD_KEY) !== null;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Takes the one recovery `key` is good for in this tab, and says whether there was one to take. Every

@@ -47,7 +47,7 @@ test('a payload from another build is not decoded: the navigation ends in a docu
 
   await expect(page.getByRole('heading', { level: 1, name: 'Users' })).toBeVisible();
   await expect(page).toHaveURL('/users');
-  expect(loads.count).toBe(1);
+  await expect.poll(() => loads.count).toBe(1);
   await expect(page.locator('[data-rsvhono-fatal]')).toHaveCount(0);
   expect(errors.filter((text) => /chunk|module|Minified React/i.test(text))).toEqual([]);
 });
