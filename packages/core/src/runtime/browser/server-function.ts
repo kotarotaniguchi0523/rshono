@@ -11,7 +11,7 @@ import { createTemporaryReferenceSet, encodeReply, setServerCallback } from '@vi
 import { isControlDigest } from '../control.js';
 import { createRscRequest } from '../request.js';
 import { documentUrl } from './document.js';
-import { handleControlDigest, navigating, navigationIntent, push, revalidate } from './navigation.js';
+import { handleControlDigest, mutationCompleted, navigating, navigationIntent, push, revalidate } from './navigation.js';
 import { requestResource } from './page-resource.js';
 import { createAttempt, schedule } from './render-attempt.js';
 
@@ -48,6 +48,7 @@ export function installServerFunctions(): void {
       try {
         payload = await resource.rootReady;
       } catch (error) {
+        mutationCompleted();
         // A `redirect()` or `notFound()` that arrived as an error is a change of screen like any other.
         if (isControlDigest((error as { digest?: unknown } | null)?.digest) && !ownsScreen()) {
           revalidate();
@@ -57,6 +58,7 @@ export function installServerFunctions(): void {
         throw error;
       }
 
+      mutationCompleted();
       if (!ownsScreen()) revalidate();
       else if (payload.redirect) void push(payload.redirect);
       else if (call > lastShown) {

@@ -210,11 +210,12 @@ export function watchPreparing(listener: (preparing: boolean) => void): () => vo
  * Starts fetching the page payload for `href`, as a prepared resource. `navigation`, when given, is the
  * signal of the browser navigation that wants it: cancelled before React has the payload, the fetch stops
  * with it. Afterwards the signal no longer applies — see the ownership rules at the top of this file.
+ * `cache` is the fetch's cache mode, for a re-read that must not be answered from the HTTP cache.
  */
-export function prepare(href: string, navigation?: AbortSignal): PageResource {
+export function prepare(href: string, navigation?: AbortSignal, cache?: RequestCache): PageResource {
   const controller = new AbortController();
   const url = new URL(href, location.href);
-  const resource = requestResource(createRscRequest(url.href, undefined, controller.signal), controller);
+  const resource = requestResource(createRscRequest(url.href, undefined, controller.signal, cache), controller);
   prepared.add(resource);
   changed();
   const cancel = () => {

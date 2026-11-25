@@ -71,6 +71,11 @@ result; the table is.
   have been rendered before the mutation. The return value or error reaches the caller regardless.
 - **Two actions in flight together end in one re-read of the page.** The order calls were made in is not the
   order the server applied them in, so neither reply is trusted to be the newer snapshot.
+- **A re-read is finished when its payload has committed, not when its fetch starts.** `revalidate()` counts
+  the reasons to re-read (`stale`) against what the screen has caught up with (`fresh`) and goes round until
+  they agree. A re-read that loses the screen to a navigation waits for it and reads the destination; one
+  that was fetched before a later mutation's reply arrived is thrown away unshown and made again; and it
+  asks with `cache: 'no-store'`, because a prerendered payload is served `max-age=300`.
 - **Navigations carry a React transition type**: `navigation-push`, `-replace`, `-reload`, `-back`,
   `-forward`, decided at dispatch. A `<ViewTransition>` can key its direction on them.
 - **No Navigation API, no hydration.** The runtime has no other way to navigate, so where the API is missing
@@ -87,10 +92,12 @@ result; the table is.
 - **Two transitions for one address change.** A traversal fires `currententrychange` and then `popstate`.
   Starting a transition for each was observed, on 19.3.1, to commit the first with its Suspense fallbacks
   showing. The address follower now listens to `currententrychange` alone, which every change of entry fires.
-- **A pending action holds a navigation's commit.** With a `useActionState` action in flight, a navigation
-  started meanwhile fetches its payload but does not commit until the action's reply has been read — React
-  19.3.1 entangles the two transitions. Seen while writing the stale-redirect test, not designed for; it is
-  the opposite of what "parallel transitions" suggests, and case 16 below is still untested.
+- **A pending action holds a navigation's commit.** With an async transition or a `useActionState` action
+  in flight, a navigation started meanwhile fetches its payload but does not commit until the earlier one
+  finishes. The other way round nothing waits: a component's own transitions commit while a navigation is
+  suspended. Both were measured, and measured the same under Waku — it is React's entanglement of
+  transitions with an async action, not this runtime's. [`react-transitions.md`](react-transitions.md) has
+  the numbers.
 - **`reapplyPayload`** worked around React not retrying a transition after a late flight chunk. With it
   removed the suite passes on 19.3.1, including the case written for it (`navigation-address.spec.mjs`,
   "URL-selected Suspense resolves without … a stuck pending state"). That is evidence it is unnecessary
@@ -100,7 +107,7 @@ result; the table is.
 
 ## The design's regression list, honestly
 
-The design named 22 cases. Browser suite: 99 pass.
+The design named 22 cases. Browser suite: 105 pass.
 
 | #      | Case                                                             | Status                                                                                                              |
 | ------ | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
@@ -110,15 +117,15 @@ The design named 22 cases. Browser suite: 99 pass.
 | 5      | the page on screen is not aborted when a navigation starts       | by construction; not separately asserted                                                                            |
 | 6      | an unapplied fetch is aborted promptly                           | existing cancellation cases; the abort itself is not asserted                                                       |
 | 7      | an old navigation does not overwrite a newer page                | existing (`navigation-action.spec.mjs`, lifecycle cases)                                                            |
-| 8      | A → B → A distinguishes old work                                 | implemented (navigation intent count); **not tested** for A → B → A itself                                          |
+| 8      | A → B → A distinguishes old work                                 | **tested** (`navigation-revalidation.spec.mjs`): the old reply changes nothing and its caller gets the result       |
 | 9      | `finished` does not succeed during a pending commit              | **tested** — prepared payloads (existing) and traversals (new)                                                      |
 | 10     | restoring the same resource commits anew                         | exercised by "Back abandons suspension"; the notification is not asserted                                           |
 | 11     | a superseded attempt is not a success                            | router calls and `navigation.finished` both reject; asserted for the router, not for every `finished` path          |
 | 12     | a failed render does not leave waiters hanging                   | **tested** ("a prepared payload whose render fails rejects …")                                                      |
-| 13     | no listeners left after a failed or aborted stream               | by construction; **not tested**                                                                                     |
-| 14     | a discarded action payload keeps its return value                | page-not-repainted is **tested**; the return value reaching the caller is not                                       |
-| 15     | racing actions and navigations do not go back to an old snapshot | **tested** for action vs navigation (both commit orders) and a stale redirect; action vs action **not tested**      |
-| 16     | a slow navigation does not block an independent transition       | **not tested**                                                                                                      |
+| 13     | no listeners left after a failed or aborted stream               | by construction (`begin()` removes its abort listener when it ends); **not tested**                                 |
+| 14     | a discarded action payload keeps its return value                | **tested** — the A → B → A case and the order-inversion case both read the caller's result                          |
+| 15     | racing actions and navigations do not go back to an old snapshot | **tested**: action vs navigation, a stale redirect, action vs action in reverse order, a mutation during a re-read  |
+| 16     | a slow navigation does not block an independent transition       | measured, not asserted — see `react-transitions.md`                                                                 |
 | 17, 18 | SSR / hydration agree; static pages read URL, query, hash        | existing (`navigation-address.spec.mjs`)                                                                            |
 | 19     | Back, Forward, redirect, scroll, focus                           | existing suite                                                                                                      |
 | 20     | HMR goes through the same model                                  | `test/hmr.test.mjs` (server edit and client edit, state kept)                                                       |

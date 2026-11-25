@@ -40,9 +40,10 @@ export type RenderRequest = { kind: 'document' } | { kind: 'rsc' } | { kind: 'fo
  * action.
  *
  * `signal` is for a navigation, which a later one supersedes — an action is never abandoned that way, so its
- * caller passes none.
+ * caller passes none. `cache` is for a re-read that exists because the page changed: a prerendered payload is
+ * served `max-age=300`, and the HTTP cache would hand back the very snapshot being replaced.
  */
-export function createRscRequest(urlString: string, action?: { id: string; body: BodyInit }, signal?: AbortSignal): Request {
+export function createRscRequest(urlString: string, action?: { id: string; body: BodyInit }, signal?: AbortSignal, cache?: RequestCache): Request {
   const url = new URL(urlString, location.origin);
   const headers = new Headers({ [HEADER_RSC]: HEADER_RSC_VALUE });
   if (action) headers.set(HEADER_ACTION_ID, action.id);
@@ -51,6 +52,7 @@ export function createRscRequest(urlString: string, action?: { id: string; body:
     headers,
     body: action?.body,
     signal,
+    cache,
   });
 }
 

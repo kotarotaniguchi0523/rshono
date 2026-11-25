@@ -40,7 +40,9 @@ those.
 - **A server action's reply changes the screen only if nothing has asked to navigate since the call.** That
   now covers its `redirect()` and `notFound()` as well as its re-rendered page, and a reply that loses no
   longer cancels the navigation that won: the destination commits and is re-read. Two actions in flight
-  together end in one re-read. Return values and errors reach the caller as before.
+  together end in one re-read. Return values and errors reach the caller as before. A re-read goes round
+  until the screen has caught up with the last mutation — it waits for a navigation rather than cancelling
+  it, discards a result that a later mutation has outdated, and bypasses the HTTP cache.
 
 - **`navigation.finished` rejects for a navigation whose destination did not commit** — superseded, or failed
   to render — instead of resolving once something else had.

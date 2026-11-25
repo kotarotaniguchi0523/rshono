@@ -107,6 +107,22 @@ export const routes = defineRoutes({
       component: () => import('./components/mount-navigation'),
     },
     {
+      // Overlapping server functions, and server functions against navigations. See navigation-revalidation.spec.mjs.
+      path: '/action-race',
+      component: () => import('./components/action-race'),
+    },
+    {
+      // A server function declared inside a component, with an encrypted closure. See prod.test.mjs.
+      path: '/inline-action',
+      component: () => import('./components/inline-action'),
+    },
+    {
+      // What a client component's own transitions do while a navigation is pending, and the reverse. Read by
+      // packages/core/test/experiments/transition-probe.mjs — an observation, not a test.
+      path: '/transition-probe',
+      component: () => import('./components/transition-probe'),
+    },
+    {
       path: '/whoami',
       component: () => import('./components/whoami'),
     },

@@ -2,6 +2,7 @@
 
 import { getRequestContext, redirect } from '@rsvhono/core/server';
 import { fakeDB, type User } from './db';
+import { raceLog } from './race-log';
 
 // Not exported — a 'use server' module may only export async functions.
 /**
@@ -83,4 +84,23 @@ export async function subscribe(formData: FormData): Promise<void> {
   const email = field(formData, 'email');
   if (!email.includes('@')) return;
   getRequestContext().cookies.set('subscribed', email, { path: '/', httpOnly: true });
+}
+
+/**
+ * Applies `label` after `delayMs` — so a test decides the order two overlapping calls land in on the server,
+ * independently of the order the browser made them in. See `/action-race`.
+ */
+export async function recordRace(label: string, delayMs: number): Promise<string> {
+  await new Promise((resolve) => setTimeout(resolve, Math.min(Math.max(Number(delayMs) || 0, 0), 5000)));
+  raceLog.push(String(label).slice(0, 80));
+  return label;
+}
+
+/**
+ * Counts up after `ms` — a `useActionState` action with a server-side delay a test controls. See
+ * `/transition-probe`.
+ */
+export async function probeEcho(previous: number, formData: FormData): Promise<number> {
+  await new Promise((resolve) => setTimeout(resolve, Math.min(Number(formData.get('ms')) || 0, 5000)));
+  return previous + 1;
 }

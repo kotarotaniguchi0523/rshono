@@ -91,6 +91,23 @@ const META: Record<RoutePath, RouteMeta> = {
     title: 'Users',
     description: 'Async server component reading the server-only `db` module directly, plus a form that calls a server action.',
   },
+  '/action-race': {
+    group: 'Pages & forms',
+    title: 'Action race',
+    description: 'Server functions racing each other and racing navigations: the list has to end up being what the server applied.',
+  },
+  '/inline-action': {
+    group: 'Pages & forms',
+    title: 'Inline action',
+    description: "A `'use server'` function declared inside a server component, carrying an encrypted closure in the form.",
+  },
+  '/transition-probe': {
+    group: 'Streaming & suspense',
+    title: 'Transition probe',
+    description:
+      'Client transitions, an async transition, a suspending one and a `useActionState` action, against a navigation held pending inside React.',
+    variants: [{ href: '/transition-probe?body=3000', label: '/transition-probe?body=3000 → three seconds outside any Suspense' }],
+  },
   '/whoami': {
     group: 'Pages & forms',
     title: 'whoami',

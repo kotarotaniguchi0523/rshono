@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { after, before, describe, test } from 'node:test';
-import { APP_ENV, buildApp, MINIMAL_APP_DIR, TESTBED_DIR, TESTBED_DIST, importAppBundle, importServerBundle } from './helpers.mjs';
+import { APP_ENV, buildApp, hiddenFields, MINIMAL_APP_DIR, TESTBED_DIR, TESTBED_DIST, importAppBundle, importServerBundle } from './helpers.mjs';
 
 /**
  * Every specifier the bundle imports *statically*, whether or not it was minified.
@@ -74,8 +74,12 @@ describe('the Workers build output', () => {
   test('has no lazily loaded chunk — a Worker is a fixed set of modules', () => {
     const scripts = readdirSync(join(TESTBED_DIST, 'server'), { recursive: true }).filter((file) => /\.m?js$/.test(file));
     // Each environment's entry and the asset manifest it imports statically — and no lazily loaded chunk.
+    // The encryption key is the one module reached through `import()`: the plugin writes it beside the entry
+    // once an inline server function captures a closure (`/inline-action`), under a fixed name the bundler
+    // can follow, so it is part of the set rather than a chunk.
     assert.deepEqual(scripts.map((file) => file.replaceAll('\\', '/')).sort(), [
       '__vite_rsc_assets_manifest.js',
+      '__vite_rsc_encryption_key.js',
       'main.mjs',
       'ssr/__vite_rsc_assets_manifest.js',
       'ssr/index.js',
@@ -159,6 +163,18 @@ describe('serving from a Worker', () => {
     const body = await res.text();
     assert.equal(res.status, 200);
     assert.match(body, /from-a-workers-binding/, 'a Workers binding must be readable as ctx.env');
+  });
+
+  test('runs an inline server function, whose key is the one module the bundle imports lazily', async () => {
+    // Encrypting the closure on the way out and decrypting it on the way in both read
+    // `__vite_rsc_encryption_key.js` through `import()` — the only such import a Worker build has.
+    const html = await (await fetchWorker('/inline-action')).text();
+    const form = new FormData();
+    for (const [name, value] of Object.entries({ ...hiddenFields(html), note: 'worker' })) form.set(name, value);
+    const res = await fetchWorker('/inline-action', { method: 'POST', headers: { Origin: ORIGIN }, body: form });
+    assert.equal(res.status, 200);
+    const cookie = res.headers.getSetCookie().find((each) => each.startsWith('stamped='));
+    assert.match(decodeURIComponent(cookie ?? ''), /inline-closure-7f3a91:\/inline-action:worker/);
   });
 
   test('serves a prerendered document out of the assets binding', async () => {

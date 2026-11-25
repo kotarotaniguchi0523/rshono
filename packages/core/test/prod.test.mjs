@@ -7,10 +7,11 @@ import { spawn } from 'node:child_process';
 import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { Agent, request } from 'node:http';
 import { join } from 'node:path';
-import { after, test } from 'node:test';
+import { after, describe, test } from 'node:test';
 import { pathToFileURL } from 'node:url';
 import {
   actionFormData,
+  hiddenFields,
   APP_ENV,
   buildTestbed,
   clientChunks,
@@ -445,6 +446,63 @@ test('progressive-enhancement form action works without JavaScript', async () =>
     'server action cookie (getRequestContext + setCookie) did not reach the response',
   );
   assert.match(await res.text(), /Welcome aboard, NoScript Nancy/);
+});
+
+// A server function declared inside a component: the bundler hoists it, and what it closed over rides the
+// form as an *encrypted* bound argument. Three things meet in that one POST and none of the forms above
+// exercises them together — the closure's encryption, the no-JavaScript submission, and the server-reference
+// allowlist, which has to know a function nobody exported by name.
+describe('an inline server function with a closure', () => {
+  const MARK = 'inline-closure-7f3a91';
+
+  const post = (fields) => {
+    const form = new FormData();
+    for (const [name, value] of Object.entries(fields)) form.set(name, value);
+    return fetch(`${base}/inline-action`, { method: 'POST', headers: { Origin: base }, body: form });
+  };
+
+  const stampedCookie = (res) => res.headers.getSetCookie().find((each) => each.startsWith('stamped='));
+
+  test('its closure reaches the browser encrypted, and the form works without JavaScript', async () => {
+    const html = await (await fetch(`${base}/inline-action`)).text();
+    const fields = hiddenFields(html);
+    assert.match(fields['$ACTION_1:0'] ?? '', /"id":"[0-9a-f]+#\$\$hoist_\w+"/, 'a hoisted function is what this is about');
+    assert.doesNotMatch(html, new RegExp(MARK), 'the captured value must not be readable in the document');
+
+    const res = await post({ ...fields, note: 'no-js' });
+    assert.equal(res.status, 200);
+    const cookie = stampedCookie(res);
+    assert.ok(cookie, 'the action ran');
+    assert.match(
+      decodeURIComponent(cookie),
+      new RegExp(`${MARK}:/inline-action:no-js`),
+      'with the closure it was rendered with, decrypted on the server',
+    );
+  });
+
+  test('a closure that was tampered with does not run the action', async () => {
+    const fields = hiddenFields(await (await fetch(`${base}/inline-action`)).text());
+    const encrypted = Object.keys(fields).find((name) => /^\$ACTION_1:\d+$/.test(name) && /^"[A-Za-z0-9+/=]{40,}"$/.test(fields[name]));
+    assert.ok(encrypted, 'the encrypted bound argument is one of the form\u2019s fields');
+    // One character of the ciphertext, flipped.
+    const value = fields[encrypted];
+    const flipped = value.slice(0, 20) + (value[20] === 'A' ? 'B' : 'A') + value.slice(21);
+
+    const res = await post({ ...fields, [encrypted]: flipped, note: 'tampered' });
+    assert.ok(res.status >= 400, `a forged closure must be refused, not run — got ${res.status}`);
+    assert.equal(stampedCookie(res), undefined, 'and the action must not have written anything');
+  });
+
+  test('a form naming an export the module never had is a 400, before anything loads', async () => {
+    const fields = hiddenFields(await (await fetch(`${base}/inline-action`)).text());
+    const forged = fields['$ACTION_1:0'].replace(/#\$\$hoist_\w+/, '#$$$$hoist_9_neverDeclared');
+    assert.notEqual(forged, fields['$ACTION_1:0']);
+
+    const res = await post({ ...fields, '$ACTION_1:0': forged, note: 'forged' });
+    assert.equal(res.status, 400);
+    assert.match(await res.text(), /Bad Request: malformed server action request/);
+    assert.equal(stampedCookie(res), undefined);
+  });
 });
 
 // The other shape React emits, and the one the three `useActionState` forms above never produce: a server

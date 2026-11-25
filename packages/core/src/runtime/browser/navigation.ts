@@ -129,6 +129,15 @@ let underway = 0;
 /** Whether a navigation this runtime intercepted is still fetching or rendering. */
 export const navigating = (): boolean => underway > 0;
 
+let onIdle: Array<() => void> = [];
+/** Resolves once no intercepted navigation is under way — at once, when none is. */
+function idle(): Promise<void> {
+  if (underway === 0) return Promise.resolve();
+  const { promise, resolve } = Promise.withResolvers<void>();
+  onIdle.push(resolve);
+  return promise;
+}
+
 /** Marks an intercepted navigation as under way. The returned function ends it, once. */
 function begin(event: NavigateEvent): () => void {
   underway++;
@@ -136,7 +145,12 @@ function begin(event: NavigateEvent): () => void {
   const end = () => {
     if (ended) return;
     ended = true;
-    underway--;
+    // Ended by its handler rather than by the abort: the signal has nothing left to tell this.
+    event.signal.removeEventListener('abort', end);
+    if (--underway !== 0) return;
+    const waiting = onIdle;
+    onIdle = [];
+    for (const resolve of waiting) resolve();
   };
   event.signal.addEventListener('abort', end, { once: true });
   return end;
@@ -181,9 +195,15 @@ export function handleControlDigest(
  * signal, which is then already being followed.
  *
  * Throws an `AbortError` when the resource lost the screen before it got there: cancelled while it was still
- * being fetched, or scheduled and then replaced by another render. Anything else thrown is a real failure.
+ * being fetched, no longer `wanted` once its root arrived, or scheduled and then replaced by another render.
+ * Anything else thrown is a real failure.
  */
-async function show(resource: PageResource, options: AttemptOptions, request?: NavigationRequest): Promise<boolean> {
+async function show(
+  resource: PageResource,
+  options: AttemptOptions,
+  request?: NavigationRequest,
+  wanted: () => boolean = () => true,
+): Promise<boolean> {
   let payload;
   try {
     payload = await resource.rootReady;
@@ -196,6 +216,11 @@ async function show(resource: PageResource, options: AttemptOptions, request?: N
   // Checked again after the await: the read may have resolved in the same turn it was cancelled in, and
   // showing it would repaint a page the visitor has left.
   if (resource.controller.signal.aborted) throw superseded();
+  // Asked in the same turn the attempt would be scheduled in, so nothing can change the answer in between.
+  if (!wanted()) {
+    discard(resource);
+    throw superseded();
+  }
 
   if (payload.redirect) {
     discard(resource);
@@ -245,19 +270,56 @@ export function refetch(): void {
   });
 }
 
-let revalidation: Promise<void> | undefined;
+// ── Re-reading the page after a mutation ─────────────────────────────────────────────────────────────────
+
+/** Counts the reasons to re-read: one per mutation whose effect the screen may not show. */
+let stale = 0;
+/** The value of {@link stale} the screen is known to have caught up with. */
+let fresh = 0;
+let converging = false;
+
 /**
- * Re-reads whatever page the visitor ends up on, once no navigation is under way. For a mutation whose own
- * reply could not be shown: the page on screen — or the one arriving — may have been rendered before it.
- * One re-read however many callers ask while it is waiting.
+ * Re-reads whatever page the visitor ends up on, until the screen is at least as new as the last mutation
+ * that asked. For a mutation whose own reply could not be shown: the page on screen — or the one arriving —
+ * may have been rendered before it.
+ *
+ * It waits for a navigation rather than cancelling it, and it is not finished when its fetch starts but when
+ * the payload it fetched has *committed*. A re-read that loses the screen — to a navigation, or to a newer
+ * action reply — or that was fetched before a later mutation completed, is thrown away and made again.
  */
 export function revalidate(): void {
-  revalidation ??= (async () => {
-    // A navigation under way is left to finish: cancelling it would undo what the visitor asked for.
-    while (navigating()) await navigation.transition?.finished.catch(() => {});
-    revalidation = undefined;
-    refetch();
-  })();
+  stale++;
+  if (!converging) void converge();
+}
+
+/**
+ * A mutation's reply has arrived. A re-read already on the wire was rendered before it, or may have been, so
+ * its result must not be the last thing shown.
+ */
+export function mutationCompleted(): void {
+  if (converging) stale++;
+}
+
+async function converge(): Promise<void> {
+  converging = true;
+  try {
+    while (fresh !== stale) {
+      await idle();
+      const target = stale;
+      try {
+        // `no-store`: the HTTP cache may hold this URL's payload from before the mutation.
+        await show(prepare(location.href, undefined, 'no-store'), {}, undefined, () => stale === target);
+      } catch (error) {
+        // Lost the screen, or outdated before it arrived: go round again, after whatever took over.
+        if (isSuperseded(error)) continue;
+        return leave();
+      }
+      // Committed — or redirected, which is a navigation to a page rendered after every mutation so far.
+      fresh = target;
+    }
+  } finally {
+    converging = false;
+  }
 }
 
 // ── The navigate listener ────────────────────────────────────────────────────────────────────────────────

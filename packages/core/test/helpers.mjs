@@ -255,3 +255,13 @@ export function actionFormData(html, fields = {}) {
   for (const [name, value] of Object.entries(fields)) form.set(name, value);
   return form;
 }
+
+/** Every hidden field of a server-rendered form, as a browser without JavaScript would post them. */
+export function hiddenFields(html) {
+  return Object.fromEntries(
+    [...html.matchAll(/<input type="hidden" name="([^"]+)"(?: value="([^"]*)")?\/>/g)].map(([, name, value = '']) => [
+      name,
+      value.replaceAll('&quot;', '"').replaceAll('&amp;', '&'),
+    ]),
+  );
+}
