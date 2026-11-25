@@ -64,7 +64,7 @@ async function appVersions() {
 }
 
 const PROBE = {
-  rsvhono: ['react', 'react-dom', '@rsvhono/core', 'hono', '@rspack/core', 'react-server-dom-rspack'],
+  rsvhono: ['react', 'react-dom', '@rsvhono/core', 'hono', 'vite', '@vitejs/plugin-rsc', 'react-server-dom-webpack'],
   next: ['react', 'react-dom', 'next'],
   'tanstack-start': ['react', 'react-dom', '@tanstack/react-start', '@tanstack/react-router', 'vite'],
 };

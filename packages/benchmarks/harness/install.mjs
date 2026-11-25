@@ -2,7 +2,7 @@
  * Installs each benchmark app into its own isolated node_modules.
  *
  * The apps are deliberately *not* pnpm workspace members: the root `pnpm-workspace.yaml` pins react, react-dom
- * and @rspack/core with `overrides`, and forcing those onto Next and TanStack Start would measure a configuration
+ * and the bundler with `overrides`, and forcing those onto Next and TanStack Start would measure a configuration
  * nobody ships. Isolated installs are also what make footprint.mjs's numbers mean anything.
  */
 import { existsSync } from 'node:fs';
@@ -65,8 +65,8 @@ async function forgetLockedTarball(lockPath) {
 
 let failed = false;
 for (const target of targets) {
-  // One fixture file, copied in rather than imported across roots: Rspack, Turbopack and Vite each
-  // have their own opinion about a specifier that escapes the project directory, and the benchmark
+  // One fixture file, copied in rather than imported across roots: each bundler has
+  // its own opinion about a specifier that escapes the project directory, and the benchmark
   // has no business discovering which. Gitignored — fixtures/data.json stays the only source.
   const generated = path.join(target.dir, 'src', 'generated');
   await mkdir(generated, { recursive: true });

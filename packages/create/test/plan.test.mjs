@@ -469,13 +469,12 @@ test('every name toPackageName returns is one npm accepts', () => {
 });
 
 /*
- * `dist/` is what `rsvhono build` writes and `.rsvhono/` is what `rsvhono dev` writes, and both hold generated
- * bundles: a linter that reads them reports on code nobody wrote, and `format` rewrites it. Prettier, oxfmt
- * and oxlint all honour `.gitignore`, which every scaffold carries — Biome does not, unless `vcs.enabled` and
- * `vcs.useIgnoreFile` are both set, and neither is. So its own config has to list them, and `.rsvhono` was
- * missing from it: after anyone ran `pnpm dev`, that app's `format:check` and `lint` failed.
+ * `dist/` is what `rsvhono build` writes, and it holds generated bundles: a linter that reads them reports on
+ * code nobody wrote, and `format` rewrites it. Prettier, oxfmt and oxlint all honour `.gitignore`, which every
+ * scaffold carries — Biome does not, unless `vcs.enabled` and `vcs.useIgnoreFile` are both set, and neither
+ * is. So its own config has to list it too. (`rsvhono dev` writes nothing: it serves from memory.)
  */
-test('the generated output directories are out of every quality preset’s reach', () => {
+test('the generated output directory is out of every quality preset’s reach', () => {
   for (const combination of matrix()) {
     const label = `${combination.deploy}/${combination.styling}/${combination.preset}`;
     const result = plan(answers(combination), pm);
@@ -489,15 +488,11 @@ test('the generated output directories are out of every quality preset’s reach
         .split(/\r?\n/)
         .map((line) => line.trim()),
     );
-    for (const dir of ['dist/', '.rsvhono/']) {
-      assert.ok(ignored.has(dir), `${label}: .gitignore should list ${dir}`);
-    }
+    assert.ok(ignored.has('dist/'), `${label}: .gitignore should list dist/`);
 
     const biome = result.files.get('biome.json');
     if (!biome) continue;
     const { includes } = JSON.parse(biome).files;
-    for (const dir of ['dist', '.rsvhono']) {
-      assert.ok(includes.includes(`!${dir}`), `${label}: biome.json does not read .gitignore, so it must exclude ${dir} itself`);
-    }
+    assert.ok(includes.includes('!dist'), `${label}: biome.json does not read .gitignore, so it must exclude dist itself`);
   }
 });

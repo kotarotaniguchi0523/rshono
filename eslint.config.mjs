@@ -28,7 +28,6 @@ export default tseslint.config(
     // would otherwise be linted as if you had written it.
     ignores: [
       '**/dist/**',
-      '**/.rsvhono/**',
       '**/.wrangler/**',
       '**/.vercel/**',
       '**/.netlify/**',

@@ -38,12 +38,12 @@ const PACKAGE_NAME = '@rsvhono/core';
 
 export const BUILD_OUT_DIR = 'dist';
 /** Where the client build is served from — and, on the dev server, every module Vite serves. */
-export const STATIC_BASE = '/_static/';
+const STATIC_BASE = '/_static/';
 
 const SERVER_REFERENCES_ID = 'virtual:rsvhono/server-references';
 const RESOLVED_SERVER_REFERENCES_ID = '\0' + SERVER_REFERENCES_ID;
 
-export interface ViteConfigOptions {
+interface ViteConfigOptions {
   rootDir: string;
   isDev: boolean;
   config: RsvhonoConfig;
@@ -65,6 +65,9 @@ const SERVER_ONLY: Record<string, string> = {
 };
 
 const SOURCE_FILE = /\.[cm]?[jt]sx?$/;
+
+/** A module id without its query — the file Vite read it from. */
+const fileOf = (id: string): string => id.split('?', 1)[0];
 
 /** Whether any source file under `srcDir` mentions `identifier` — a grep, which is all the warning below claims. */
 function mentions(srcDir: string, identifier: string): boolean {
@@ -129,7 +132,7 @@ function rsvhonoPages(pageFiles: Set<string>): Plugin {
     name: 'rsvhono:pages',
     async transform(code, id) {
       if (this.environment.name !== 'rsc') return;
-      const file = id.split('?', 1)[0];
+      const file = fileOf(id);
       if (!pageFiles.has(file) && !code.includes('use server-entry')) return;
       const ast = await parseAstAsync(code);
       // Left for `assertPageModule` to refuse, with a message about the page rather than about a wrapper.
@@ -182,7 +185,7 @@ function rsvhonoCssPackageImports(): Plugin {
     enforce: 'pre',
     transform(code, id) {
       if (this.environment.name === 'client') return;
-      const file = id.split('?', 1)[0];
+      const file = fileOf(id);
       if (!file.endsWith('.css') || !code.includes('@import')) return;
       const rewritten = code.replace(CSS_PACKAGE_IMPORT, (match, at: string, quote: string, name: string, subpath: string) => {
         const resolved = resolveCssPackage(name, subpath, file);
@@ -205,8 +208,8 @@ function rsvhonoEnvShadow(env: Record<string, string>, nodeEnv: string, srcDir: 
     enforce: 'post',
     transform(code, id) {
       if (this.environment.name !== 'ssr') return;
-      const file = id.split('?', 1)[0];
-      if (!/\.[cm]?[jt]sx?$/.test(file)) return;
+      const file = fileOf(id);
+      if (!SOURCE_FILE.test(file)) return;
       const shadowed = shadowProcessEnv(code, { env, nodeEnv });
       if (shadowed === null) return;
       // Only for the app's own source: a library feature-detecting `globalThis.process` is doing nothing
@@ -290,7 +293,7 @@ function rsvhonoCore(aliases: ReadonlyMap<string, string>, routesFile: string, s
       order: 'pre',
       handler(source, importer) {
         if (this.environment.name === 'client' && Object.hasOwn(SERVER_ONLY, source)) {
-          const where = importer ? relative(rootDir, importer.split('?', 1)[0]) : 'a module in the browser bundle';
+          const where = importer ? relative(rootDir, fileOf(importer)) : 'a module in the browser bundle';
           this.error(`[rsvhono] ${where} imports '${source}', which the browser bundle cannot have.\n${SERVER_ONLY[source]}`);
         }
         if (source === SERVER_REFERENCES_ID) return RESOLVED_SERVER_REFERENCES_ID;
@@ -388,14 +391,10 @@ export function createViteConfig({ rootDir, isDev, config, preset }: ViteConfigO
   // and one that read the real `process.env` on the server would put a secret in the HTML and then
   // mismatch on hydration. The RSC environment keeps the real one — that is where server code runs.
   const browserEnv = publicEnv(isDev);
-  const publicProcessEnv = { 'process.env': JSON.stringify(browserEnv) };
   const serverDir = join(BUILD_OUT_DIR, 'server');
 
   const generated: InlineConfig = {
-    root: rootDir,
-    configFile: false,
     appType: 'custom',
-    base: STATIC_BASE,
     // `public/` is served at `/`, not under the base, and by the app itself (`mountPublicFallback`) so that
     // routes win over it the same way in dev and in production.
     publicDir: false,
@@ -415,7 +414,7 @@ export function createViteConfig({ rootDir, isDev, config, preset }: ViteConfigO
       // No `define` here: `rsvhonoEnvShadow` replaces the whole `process` binding in this environment.
       ssr: serverEnvironment(preset, join(serverDir, 'ssr')),
       client: {
-        define: publicProcessEnv,
+        define: { 'process.env': JSON.stringify(browserEnv) },
         optimizeDeps: { exclude: [PACKAGE_NAME] },
         // No source map: this directory is public.
         build: { outDir: join(BUILD_OUT_DIR, 'static'), emptyOutDir: false, sourcemap: false, rollupOptions: { onwarn: ignoreExpectedWarnings } },
@@ -428,6 +427,7 @@ export function createViteConfig({ rootDir, isDev, config, preset }: ViteConfigO
   const merged: InlineConfig = mergeConfig(generated, config.vite ?? {});
   return {
     ...merged,
+    // Not the app's to move: the output layout and every platform preset are built on these three.
     root: rootDir,
     configFile: false,
     base: STATIC_BASE,
@@ -443,7 +443,7 @@ export function createViteConfig({ rootDir, isDev, config, preset }: ViteConfigO
         },
         // The request path is `configureServer` in `rsvhonoCore`, not the plugin's own middleware.
         serverHandler: false,
-        rscCssTransform: { filter: (id) => !pageFiles.has(id.split('?', 1)[0]) },
+        rscCssTransform: { filter: (id) => !pageFiles.has(fileOf(id)) },
       }),
       rsvhonoCore(aliases, routesFile, srcDir, pageFiles, rootDir),
       rsvhonoEnvShadow(browserEnv, browserEnv.NODE_ENV, srcDir),

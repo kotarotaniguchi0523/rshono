@@ -2324,7 +2324,7 @@ describe('assertRouteModules', () => {
 
 // The CLI's failure paths print the report that says what went wrong and then exit. `process.exit` does not
 // drain a pipe — every CI job, and any `rsvhono build | tee` — so everything past the 64 KiB pipe buffer used
-// to be discarded, cutting a large Rspack error dump mid-error.
+// to be discarded, cutting a large build error dump mid-error.
 describe('exit', () => {
   const EXIT_MODULE = new URL('../dist/cli/exit.js', import.meta.url).href;
   const spawnWriting = (bytes, exiting) =>

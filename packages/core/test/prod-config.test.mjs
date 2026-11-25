@@ -1,7 +1,7 @@
 // The security middleware an app registers in `src/server.ts` — Hono's `csrf()`, `bodyLimit()` and
 // `secureHeaders()` — plus the one security setting that is still build-time config, `trustProxy`.
 //
-// Only `trustProxy` needs a build of its own: it is resolved before Rspack compiles anything and
+// Only `trustProxy` needs a build of its own: it is resolved before Vite compiles anything and
 // baked into the server bundle. The rest is middleware, so the testbed reads its profile from the
 // environment and one build serves every permutation — which is the point of having moved them.
 import assert from 'node:assert/strict';

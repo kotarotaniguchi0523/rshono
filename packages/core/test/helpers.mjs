@@ -6,8 +6,6 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const ROOT = join(fileURLToPath(import.meta.url), '..', '..', '..', '..');
 export const TESTBED_DIR = join(ROOT, 'apps', 'testbed');
 export const TESTBED_DIST = join(TESTBED_DIR, 'dist');
-/** Where `rsvhono dev` builds to — deliberately not `dist/`, so `rsvhono build` cannot overwrite a running server. */
-export const TESTBED_DEV_DIR = join(TESTBED_DIR, '.rsvhono');
 export const FIXTURES_DIR = join(ROOT, 'packages', 'core', 'test', 'fixtures');
 /** The smallest app the framework accepts: src/routes.ts and nothing else. */
 export const MINIMAL_APP_DIR = join(FIXTURES_DIR, 'minimal-app');

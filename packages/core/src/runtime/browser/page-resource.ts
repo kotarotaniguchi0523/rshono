@@ -19,17 +19,14 @@ import { createFromReadableStream } from '@vitejs/plugin-rsc/browser';
 import type { RscPayload } from '../entry.rsc.js';
 import { createRscRequest } from '../request.js';
 
-/** How a payload's stream ended. The root resolving is not the end: later chunks keep arriving after it. */
-export type StreamOutcome = { kind: 'completed' } | { kind: 'aborted'; reason: unknown } | { kind: 'failed'; error: unknown };
-
 export type PageResource = {
   readonly url: URL;
   /** The only switch for this read. Inert for the document's inlined payload, which is not a request. */
   readonly controller: AbortController;
   /** The payload's root: enough to render the page's shell, and to learn of a redirect. */
   readonly rootReady: Promise<RscPayload>;
-  /** Settles when the stream does, however it does. Never rejects. */
-  readonly streamFinished: Promise<StreamOutcome>;
+  /** Settles when the stream ends, however it ends — the root resolving is not the end. Never rejects. */
+  readonly streamFinished: Promise<void>;
 };
 
 /** What every flight response is typed as. The charset and any other parameters follow it. */
@@ -123,11 +120,8 @@ function readInlinePayload(): ReadableStream<Uint8Array> {
  * `source` as a stream whose ending is observable, without a second reader: a `tee()` would hold every chunk
  * in memory twice for as long as either branch lagged, to learn one fact.
  */
-function observed(
-  source: Promise<ReadableStream<Uint8Array>>,
-  signal: AbortSignal,
-): { stream: ReadableStream<Uint8Array>; finished: Promise<StreamOutcome> } {
-  const { promise: finished, resolve } = Promise.withResolvers<StreamOutcome>();
+function observed(source: Promise<ReadableStream<Uint8Array>>): { stream: ReadableStream<Uint8Array>; finished: Promise<void> } {
+  const { promise: finished, resolve } = Promise.withResolvers<void>();
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   const stream = new ReadableStream<Uint8Array>({
     async pull(controller) {
@@ -136,15 +130,15 @@ function observed(
         const { done, value } = await reader.read();
         if (done) {
           controller.close();
-          resolve({ kind: 'completed' });
+          resolve();
         } else controller.enqueue(value);
       } catch (error) {
         controller.error(error);
-        resolve(signal.aborted ? { kind: 'aborted', reason: signal.reason } : { kind: 'failed', error });
+        resolve();
       }
     },
     cancel(reason) {
-      resolve({ kind: 'aborted', reason });
+      resolve();
       return reader?.cancel(reason);
     },
   });
@@ -157,7 +151,7 @@ function createResource(
   source: Promise<ReadableStream<Uint8Array>>,
   temporaryReferences?: unknown,
 ): PageResource {
-  const { stream, finished } = observed(source, controller.signal);
+  const { stream, finished } = observed(source);
   const rootReady = Promise.resolve(createFromReadableStream<RscPayload>(stream, { temporaryReferences }));
   // A resource nobody ends up waiting on — a navigation cancelled mid-fetch — must not surface as an
   // unhandled rejection. Whoever does await `rootReady` still sees it reject.

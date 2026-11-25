@@ -5,7 +5,7 @@
  * The install goes into a throwaway directory from the app's package.json with devDependencies omitted, which is
  * what a deploy image contains. Slow — three real npm installs — so `run.mjs` skips it unless passed --footprint.
  *
- * For rsvhono specifically: `@rspack/core` is in core's `dependencies`, so the bundler lands in a production
+ * For rsvhono specifically: `vite` is in core's `dependencies`, so the bundler lands in a production
  * install. That is a real cost and this metric shows it.
  */
 import { mkdtemp, rm, readFile, writeFile, readdir } from 'node:fs/promises';

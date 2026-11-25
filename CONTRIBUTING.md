@@ -43,9 +43,6 @@ typecheck` after `pnpm lint:fix`.
 - **The apps import the framework through its published `exports`, which point at `dist/`.** A source change
   is invisible to them until `pnpm --filter @rsvhono/core build` has run. `pnpm dev` runs `tsc --watch` for
   exactly this.
-- **`rsvhono dev` and `rsvhono build` write to different directories** (`.rsvhono/` and `dist/`) so that running
-  one cannot delete the chunks the other is serving. If a dev server seems to be serving stale output, check
-  that a build did not just run in another terminal.
 - **Comments carry the reasoning.** Most non-obvious lines in this codebase have a comment saying why, and
   several say what was tried first. If you change one of those lines, the comment is part of the change.
 

@@ -18,7 +18,6 @@ import { hold, retire, type PageResource } from './page-resource.js';
 export type RenderOutcome = { kind: 'committed' } | { kind: 'superseded' } | { kind: 'failed'; error: unknown };
 
 export type RenderAttempt = {
-  readonly id: number;
   readonly resource: PageResource;
   /** The document URL (path and query) the payload was rendered for. */
   readonly href: string;
@@ -44,8 +43,6 @@ export type RenderAttempt = {
 
 export type AttemptOptions = { afterCommit?: () => void; recoversByLoad?: boolean };
 
-let lastId = 0;
-
 export function createAttempt(
   resource: PageResource,
   payload: RscPayload,
@@ -60,7 +57,7 @@ export function createAttempt(
     resolve(outcome);
     return true;
   };
-  return { id: ++lastId, resource, href, payload, completion, recoversByLoad, settle, afterCommit };
+  return { resource, href, payload, completion, recoversByLoad, settle, afterCommit };
 }
 
 /** The attempt React was last asked to show. Equal to {@link committed} when nothing is in flight. */

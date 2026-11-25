@@ -1,7 +1,4 @@
-/**
- * The plugin list. postcss-loader finds this file on its own; what puts postcss-loader in front of
- * Rspack's CSS parser in the first place is the rule in `rsvhono.config.ts`.
- */
+/** The plugin list. Vite finds this file itself. */
 export default {
   plugins: {
     '@tailwindcss/postcss': {},

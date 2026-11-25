@@ -15,10 +15,9 @@ import reactHooks from 'eslint-plugin-react-hooks';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  // Build output, all of it generated: `dist/` from `rsvhono build`, `.rsvhono/` from `rsvhono dev`, and
-  // whatever the deploy target assembles beside them. Without this, linting after a dev run reports on
-  // bundles rather than on anything you wrote.
-  { ignores: ['dist/**', '.rsvhono/**', '.wrangler/**', '.vercel/**', '.netlify/**'] },
+  // Build output, all of it generated: `dist/` from `rsvhono build`, and whatever the deploy target assembles
+  // beside it. Without this, linting after a build reports on bundles rather than on anything you wrote.
+  { ignores: ['dist/**', '.wrangler/**', '.vercel/**', '.netlify/**'] },
   js.configs.recommended,
   tseslint.configs.recommendedTypeChecked,
   reactHooks.configs.flat['recommended-latest'],

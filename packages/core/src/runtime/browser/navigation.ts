@@ -39,19 +39,16 @@ type NavigationRequest = {
 
 let activeRequest: NavigationRequest | undefined;
 
-function finishRequest(request: NavigationRequest | undefined, outcome: NavigationOutcome): void {
+/** Settles a request once; later endings of the same request are ignored. */
+function close(request: NavigationRequest | undefined, settle: (request: NavigationRequest) => void): void {
   if (!request || request.done) return;
   request.done = true;
-  request.resolve(outcome);
+  settle(request);
   if (activeRequest === request) activeRequest = undefined;
 }
 
-function rejectRequest(request: NavigationRequest | undefined, error: unknown): void {
-  if (!request || request.done) return;
-  request.done = true;
-  request.reject(error);
-  if (activeRequest === request) activeRequest = undefined;
-}
+const finishRequest = (request: NavigationRequest | undefined, outcome: NavigationOutcome): void => close(request, (r) => r.resolve(outcome));
+const rejectRequest = (request: NavigationRequest | undefined, error: unknown): void => close(request, (r) => r.reject(error));
 
 function newRequest(): NavigationRequest {
   const { promise, resolve, reject } = Promise.withResolvers<NavigationOutcome>();
@@ -69,10 +66,10 @@ const rendered = (): NavigationOutcome => ({ kind: 'rendered', url: new URL(loca
 const superseded = (by = 'Navigation superseded'): DOMException => new DOMException(by, 'AbortError');
 const isSuperseded = (error: unknown): boolean => error instanceof DOMException && error.name === 'AbortError';
 
-function ask(request: NavigationRequest, run: () => NavigationResult): Promise<NavigationOutcome> {
+function ask(run: (request: NavigationRequest) => NavigationResult, request = newRequest()): Promise<NavigationOutcome> {
   const hop = request.hop;
   try {
-    const result = run();
+    const result = run(request);
     settle(result);
     void result.finished?.then(
       () => {
@@ -94,9 +91,9 @@ function documentOnly(go: () => void): Promise<NavigationOutcome> {
   return Promise.resolve({ kind: 'document-navigation' });
 }
 
-function navigate(href: string, history: 'push' | 'replace', request = newRequest()): Promise<NavigationOutcome> {
+function navigate(href: string, history: 'push' | 'replace', request?: NavigationRequest): Promise<NavigationOutcome> {
   if (!canSoftNavigate) return documentOnly(() => (history === 'replace' ? window.location.replace(href) : window.location.assign(href)));
-  return ask(request, () => navigation.navigate(href, { history, info: request }));
+  return ask((info) => navigation.navigate(href, { history, info }), request);
 }
 
 export const push = (href: string): Promise<NavigationOutcome> => navigate(href, 'push');
@@ -105,21 +102,18 @@ export const replace = (href: string): Promise<NavigationOutcome> => navigate(hr
 export function back(): Promise<NavigationOutcome> {
   if (!canSoftNavigate) return documentOnly(() => window.history.back());
   if (!navigation.canGoBack) return Promise.resolve({ kind: 'no-op' });
-  const request = newRequest();
-  return ask(request, () => navigation.back({ info: request }));
+  return ask((info) => navigation.back({ info }));
 }
 
 export function forward(): Promise<NavigationOutcome> {
   if (!canSoftNavigate) return documentOnly(() => window.history.forward());
   if (!navigation.canGoForward) return Promise.resolve({ kind: 'no-op' });
-  const request = newRequest();
-  return ask(request, () => navigation.forward({ info: request }));
+  return ask((info) => navigation.forward({ info }));
 }
 
 export function refresh(): Promise<NavigationOutcome> {
   if (!canSoftNavigate) return documentOnly(() => window.location.reload());
-  const request = newRequest();
-  return ask(request, () => navigation.reload({ info: request }));
+  return ask((info) => navigation.reload({ info }));
 }
 
 /**
@@ -161,10 +155,8 @@ export function handleControlDigest(
     // The URL is resolved first: a malformed location then throws here, before any navigation is asked for.
     // Replacing is what keeps the URL that raised the redirect from becoming an entry Back bounces through.
     leave(new URL(redirect.location, window.location.href).href, { replace: history === 'replace' });
-  } else if (history === 'replace') {
-    void replace(redirect.location);
   } else {
-    void push(redirect.location);
+    void navigate(redirect.location, history);
   }
   return true;
 }
@@ -197,10 +189,8 @@ async function show(resource: PageResource, options: AttemptOptions, request?: N
     discard(resource);
     // Replacing for the same reason as {@link handleControlDigest}: the URL whose payload carried the
     // redirect is the entry being left, and a push would make Back bounce through it into the same redirect.
-    if (request) {
-      request.hop++;
-      void navigate(payload.redirect, 'replace', request);
-    } else void replace(payload.redirect);
+    if (request) request.hop++;
+    void navigate(payload.redirect, 'replace', request);
     return false;
   }
 
@@ -224,12 +214,11 @@ async function perform(event: NavigateEvent, resource: PageResource, afterCommit
     const shown = await show(resource, { afterCommit }, request);
     if (shown && request?.hop === hop && !event.signal.aborted) finishRequest(request, rendered());
   } catch (error) {
+    rejectRequest(request, error);
     if (isSuperseded(error)) {
-      rejectRequest(request, error);
       await pendingAttempt()?.completion;
       return;
     }
-    rejectRequest(request, error);
     // The root this would have rendered into is gone, or the server answered with something that is not a
     // payload. Either way the document load asks the server the same question and shows its answer.
     leave();

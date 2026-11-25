@@ -18,10 +18,6 @@ function subscribeToAddress(onChange: () => void): () => void {
 
 const readAddress = (): string => (typeof navigation !== 'undefined' ? navigation.currentEntry?.url : undefined) ?? location.href;
 
-// This immutable snapshot distinguishes hydration from a later client mount. It does not subscribe
-// to URL mutations: those updates remain transition-owned. A newly mounted error-boundary child must
-// not start from an old payload URL and throw before its layout effect can reconcile the address.
-
 /**
  * What the root renders: the attempt, and the address it is rendered at. One state rather than two because
  * they are one decision. `useNavigation().url` is the address, and a component may suspend on it — so an

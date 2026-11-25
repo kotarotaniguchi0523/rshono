@@ -189,7 +189,7 @@ after(() => {
  * The minimal app with `src/routes.ts` replaced, somewhere disposable — a build that must fail, run safely.
  *
  * **Inside the fixture**, not in the OS temp directory, and with no `node_modules` of its own: these two
- * cases run a real Rspack build, and `@rsvhono/core` is the one package it cannot resolve from the
+ * cases run a real Vite build, and `@rsvhono/core` is the one package it cannot resolve from the
  * *framework's* `node_modules` — it is reachable only through the app's. Nesting the copy one level down
  * means the resolver walks up and finds the fixture's real `node_modules`, with no link of any kind in the
  * way.
@@ -287,7 +287,7 @@ test("a 'use server' module that cannot be evaluated is a build warning, not a 5
   // The one part of an app a build never touched. Nothing on the server imports an action module until an
   // action is called — a client component that calls one gets a `createServerReference` stub — so a module
   // that throws as it evaluates used to reach production behind a green build, and then answer 500 for
-  // *every* action it holds, which with Rspack's single-module 'use server' graph is all of them.
+  // *every* action it holds in that module.
   const dir = appWithRoutes(HOME_AND("  { path: '/actions', component: () => import('./pages/calls-an-action') },\n"));
   writeFileSync(
     join(dir, 'src', 'actions.ts'),
@@ -432,7 +432,7 @@ test("a 'use client' module importing @rsvhono/core/server fails the build namin
 
   const { status, output } = runCli(dir, ['build']);
   assert.equal(status, 1, `the build must not exit 0:\n${output}`);
-  // Rspack colours its own "ERROR in <file>" line, so the escapes land between the words.
+  // The bundler colours its error output, so the escapes land between the words.
   const plain = output.replaceAll(new RegExp(String.fromCharCode(27) + '\\[\\d+m', 'g'), '');
   assert.match(plain, /\[rsvhono\] src[\\/]pages[\\/]widget\.tsx imports '@rsvhono\/core\/server', which the browser bundle cannot have\./);
   assert.match(output, /useNavigation\(\)/, 'and what to use instead');

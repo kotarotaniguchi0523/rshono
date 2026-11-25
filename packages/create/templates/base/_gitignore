@@ -1,6 +1,5 @@
 node_modules/
 dist/
-.rsvhono/
 *.tsbuildinfo
 .DS_Store
 
