@@ -12,21 +12,12 @@
  */
 import { hydrateRoot } from 'react-dom/client';
 import { RECOVERY_GRACE_MS, documentUrl, lateNotFoundKey, showFatal, supported } from './browser/document.js';
-import { handleControlDigest, refetch } from './browser/navigation.js';
+import { recoverRoot, refetch, settleRenderIntent } from './browser/navigation.js';
 import { inlineResource } from './browser/page-resource.js';
-import { createAttempt, failPending, pendingAttempt } from './browser/render-attempt.js';
+import { createAttempt, failPending } from './browser/render-attempt.js';
 import { BrowserRoot } from './browser/root.js';
 import { currentEntryKey, readStoredScrollPositions, scrollPointFor, scrollToPoint } from './browser/scroll.js';
 import { installServerFunctions } from './browser/server-function.js';
-
-/**
- * The history mode for a `redirect()` that surfaced through React, where the pending attempt is the render
- * that raised it. A navigation payload names the URL that raised the redirect, so the redirect replaces that
- * entry. An action reply re-renders the page the visitor is already on — a GET of it does not re-run the
- * action — so its redirect keeps the push the action's other redirect paths have, and Back returns to the
- * page that submitted the form.
- */
-const controlDigestHistory = (): 'push' | 'replace' => (pendingAttempt()?.recoversByLoad === false ? 'push' : 'replace');
 
 async function main() {
   // Not hydrated rather than half-run: the server-rendered document works as a document without this.
@@ -57,14 +48,24 @@ async function main() {
 
   hydrateRoot(document, <BrowserRoot initial={initial} />, {
     formState: payload.formState,
+    // A `redirect()` or `notFound()` raised inside a payload that was already rendering arrives here as an
+    // error, with no word on which payload. `settleRenderIntent` traces it back by its render token and
+    // follows it only if that payload still has the right to move the visitor — a page being left does not.
     onCaughtError: (error, errorInfo) => {
-      if (handleControlDigest(error, { hard: true, history: controlDigestHistory() })) return;
+      if (settleRenderIntent(error, resource)) return;
       console.error(error, errorInfo.componentStack ?? '');
     },
     onUncaughtError: (error, errorInfo) => {
-      // React unmounts the root on an uncaught error, so a redirect or notFound that got this far needs a
-      // document to land in.
-      if (handleControlDigest(error, { hard: true, history: controlDigestHistory() })) return;
+      // React unmounts the root on an uncaught error, so whatever happens next needs a document to land in:
+      // the redirect's target if it was followed, and where the visitor was going if it was not.
+      const settled = settleRenderIntent(error, resource);
+      if (settled === 'followed') return;
+      if (settled === 'stale') {
+        // A navigation that already has a render pending recovers by its own document load once it learns
+        // the render died. Anything else has no one to tell.
+        if (!failPending(error)?.recoversByLoad) recoverRoot();
+        return;
+      }
       globalThis.reportError(error);
       // Whoever awaits the render that just died — a navigation handler — takes its own recovery: a document
       // load, which the server answers with the app's error page. The panel is for when there is no such

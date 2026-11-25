@@ -448,6 +448,47 @@ test('progressive-enhancement form action works without JavaScript', async () =>
   assert.match(await res.text(), /Welcome aboard, NoScript Nancy/);
 });
 
+// One render, one route intent. A page can raise several — two sections redirecting to different places, or
+// the abort that follows the first signal re-raising it through every boundary still open — and the browser
+// reads each as a digest in the payload. They have to agree, or which one wins is decided by which boundary
+// React happens to render first on the client.
+test('a render that raises two different redirects reports the first one everywhere, tagged with its render', async () => {
+  const one = `one-${crypto.randomUUID()}`;
+  const two = `two-${crypto.randomUUID()}`;
+  const openGate = (id) => fetch(`${base}/api/gate?id=${id}`, { method: 'POST', headers: { Origin: base } });
+  const res = await fetch(`${base}/gated-intent?gate=${one}&to=/users&gate2=${two}&to2=/login`, { headers: { rsc: '1' } });
+  assert.equal(res.status, 200);
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  // The root first: both sections are parked, and the payload says which render it is.
+  let body = decoder.decode((await reader.read()).value, { stream: true });
+  const renderToken = /"renderToken":"([0-9a-f-]{36})"/.exec(body)?.[1];
+  assert.ok(renderToken, 'a dynamic payload names its render');
+
+  assert.equal((await openGate(one)).status, 200);
+  assert.equal((await openGate(two)).status, 200);
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    body += decoder.decode(value, { stream: true });
+  }
+
+  const digests = [...new Set(body.match(/RSVHONO_REDIRECT;[^"]+/g))];
+  assert.deepEqual(
+    digests,
+    [`RSVHONO_REDIRECT;303;%2Fusers#${renderToken}`],
+    'every signal in the payload is the first intent, with the token of this render',
+  );
+});
+
+// A prerendered payload is cached and served to everyone, so it names no render: its bytes must not vary by one.
+test('a prerendered payload carries no render token', async () => {
+  const res = await fetch(`${base}/docs/getting-started`, { headers: { rsc: '1' } });
+  assert.equal(res.status, 200);
+  assert.ok(res.headers.get('etag'), 'this is the cached payload');
+  assert.doesNotMatch(await res.text(), /renderToken/);
+});
+
 // A server function declared inside a component: the bundler hoists it, and what it closed over rides the
 // form as an *encrypted* bound argument. Three things meet in that one POST and none of the forms above
 // exercises them together — the closure's encryption, the no-JavaScript submission, and the server-reference

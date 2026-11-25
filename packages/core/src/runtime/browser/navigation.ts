@@ -6,10 +6,10 @@
  * a link, a `GET` form, `router.push`, Back or Reload. The URL, the history entry and the cancellation are
  * the browser's; this file fetches the payload, hands it to React and waits for the commit.
  */
-import { isControlDigest, parseRedirectDigest } from '../control.js';
+import { parseControlIntent, type RouteIntent } from '../control.js';
 import type { NavigationOutcome } from '../navigation.js';
 import { documentNavigation, loadDocument, reloadOnceForLateNotFound, settle } from './document.js';
-import { discard, discardPrepared, prepare, type PageResource } from './page-resource.js';
+import { discard, discardPrepared, prepare, resourceOfRender, type PageResource } from './page-resource.js';
 import { committedAttempt, createAttempt, pendingAttempt, schedule, type AttemptOptions } from './render-attempt.js';
 import { cancelElementWatches, jumpToAnchor, rememberCurrentScroll, resetFocus, scrollPointFor, scrollToPoint, scrollToTop } from './scroll.js';
 
@@ -128,6 +128,8 @@ export const navigationIntent = (): number => intents;
 let underway = 0;
 /** Whether a navigation this runtime intercepted is still fetching or rendering. */
 export const navigating = (): boolean => underway > 0;
+/** Where the newest navigation under way is going. `undefined` when none is. */
+let destination: string | undefined;
 
 let onIdle: Array<() => void> = [];
 /** Resolves once no intercepted navigation is under way — at once, when none is. */
@@ -141,6 +143,7 @@ function idle(): Promise<void> {
 /** Marks an intercepted navigation as under way. The returned function ends it, once. */
 function begin(event: NavigateEvent): () => void {
   underway++;
+  destination = event.destination.url;
   let ended = false;
   const end = () => {
     if (ended) return;
@@ -148,6 +151,7 @@ function begin(event: NavigateEvent): () => void {
     // Ended by its handler rather than by the abort: the signal has nothing left to tell this.
     event.signal.removeEventListener('abort', end);
     if (--underway !== 0) return;
+    destination = undefined;
     const waiting = onIdle;
     onIdle = [];
     for (const resolve of waiting) resolve();
@@ -157,34 +161,96 @@ function begin(event: NavigateEvent): () => void {
 }
 
 /**
- * Turns a control-signal digest — how `redirect()` / `notFound()` reach the browser — into a real
- * navigation. Returns false for anything else, so callers fall through to their own handling.
+ * Acts on a route intent. Only that: whether it *may* be acted on is the caller's to have settled, from the
+ * payload the intent arrived in — see {@link settleRenderIntent} and the callers that hold the resource.
  *
- * `hard` forces a full document load, for signals that surfaced *through React*: it unmounts the root on
- * an uncaught error, leaving no live tree to soft-navigate with.
- *
- * A redirect is followed *replacing* the entry that raised it, the way a 30x replaces the URL that answered
- * with one. `history` lets the action-reply paths that must not — the fetch catch, and a digest surfacing
- * through React during the reply's render — keep the push they have always had. `notFound()` has nowhere to
- * go but a reload, and a reload is its own entry already.
+ * A redirect that surfaces through React arrives after its render was abandoned, with no navigation in flight
+ * to turn it into, so it leaves by document load (`hard`). `history` comes from what asked for the payload:
+ * a navigation's or a document's names the URL that raised the redirect, so that entry is replaced rather
+ * than left for Back to bounce through; an action reply re-rendered the page the visitor was already on, so
+ * its redirect is a push. `notFound()` has nowhere to go but a reload, and a reload is its own entry already.
  */
-export function handleControlDigest(
-  error: unknown,
-  { hard = false, history = 'replace' }: { hard?: boolean; history?: 'push' | 'replace' } = {},
-): boolean {
-  const digest = (error as { digest?: unknown } | null)?.digest;
-  if (!isControlDigest(digest)) return false;
-  const redirect = parseRedirectDigest(digest);
-  if (!redirect) {
+function followIntent(intent: RouteIntent, { hard = false, history }: { hard?: boolean; history: 'push' | 'replace' }): void {
+  if (intent.kind === 'not-found') {
     reloadOnceForLateNotFound();
   } else if (hard) {
     // The URL is resolved first: a malformed location then throws here, before any navigation is asked for.
-    // Replacing is what keeps the URL that raised the redirect from becoming an entry Back bounces through.
-    leave(new URL(redirect.location, window.location.href).href, { replace: history === 'replace' });
+    leave(new URL(intent.location, window.location.href).href, { replace: history === 'replace' });
   } else {
-    void navigate(redirect.location, history);
+    void navigate(intent.location, history);
+  }
+}
+
+/** The history mode a redirect found in `resource`'s payload gets. */
+const historyFor = (resource: PageResource): 'push' | 'replace' => (resource.kind === 'action' ? 'push' : 'replace');
+
+/**
+ * Follows the route intent a payload's *root* was rejected with — `redirect()` or `notFound()` before
+ * anything rendered. The caller is the one reading `resource`, so the source is not in question; it has only
+ * to still be wanted, which the caller has checked. Returns whether `error` was an intent at all.
+ */
+export function followRootIntent(resource: PageResource, error: unknown): boolean {
+  const parsed = parseControlIntent(error);
+  if (!parsed) return false;
+  if (!resource.intentSettled) {
+    resource.intentSettled = true;
+    followIntent(parsed.intent, { history: historyFor(resource) });
   }
   return true;
+}
+
+/**
+ * Whether a route intent raised *while rendering* `resource`'s payload may still change where the visitor
+ * is. Being on screen is not enough: a page that is being left has lost that right to the navigation
+ * leaving it, though React is still rendering it.
+ *
+ * - A render React has been given and not committed is the newest thing asked for, so it wins — and
+ *   anything else, the page on screen included, loses to it.
+ * - Otherwise a navigation still fetching wins over the page on screen.
+ * - Otherwise the page on screen owns its own intents.
+ */
+function ownsNavigation(resource: PageResource): boolean {
+  const pending = pendingAttempt();
+  if (pending) return pending.resource === resource;
+  if (navigating()) return false;
+  const onScreen = committedAttempt();
+  // Nothing has committed yet: the document is still hydrating, and its own payload is all there is.
+  return onScreen ? onScreen.resource === resource : resource.kind === 'document';
+}
+
+/**
+ * A route intent reached React's error callbacks: a `redirect()` or `notFound()` from somewhere in a payload
+ * that was already rendering. React says *that* it happened and not *where*, so the digest's render token is
+ * what finds the payload — and an intent whose payload cannot be found, or was read twice, is nobody's.
+ *
+ * Returns `undefined` when `error` is not an intent; `'followed'` when it was acted on, or already had been;
+ * `'stale'` when it was dropped. Dropping it is all a caught error needs. An *uncaught* one has also cost
+ * the page its root, which the caller repairs with {@link recoverRoot}.
+ *
+ * `document` is the payload the page was hydrated from, which React is rendering before any attempt has
+ * committed.
+ */
+export function settleRenderIntent(error: unknown, document: PageResource): 'followed' | 'stale' | undefined {
+  const parsed = parseControlIntent(error);
+  if (!parsed) return undefined;
+  const rendering = [committedAttempt()?.resource, pendingAttempt()?.resource, document];
+  const resource = parsed.renderToken ? resourceOfRender(parsed.renderToken, rendering) : undefined;
+  if (!resource) return 'stale';
+  // One intent, several boundaries: React reports it once per boundary it reaches.
+  if (resource.intentSettled) return 'followed';
+  if (!ownsNavigation(resource)) return 'stale';
+  resource.intentSettled = true;
+  followIntent(parsed.intent, { hard: true, history: historyFor(resource) });
+  return 'followed';
+}
+
+/**
+ * The root is gone and nothing that would have replaced the page was allowed to: load a document, for where
+ * the visitor was going. A navigation still under way names that place — its own soft commit can no longer
+ * happen — and otherwise it is the URL in the address bar.
+ */
+export function recoverRoot(): void {
+  leave(destination ?? location.href);
 }
 
 // ── Showing a payload ────────────────────────────────────────────────────────────────────────────────────
@@ -210,7 +276,7 @@ async function show(
   } catch (error) {
     if (resource.controller.signal.aborted) throw superseded();
     discard(resource);
-    if (handleControlDigest(error)) return false;
+    if (followRootIntent(resource, error)) return false;
     throw error;
   }
   // Checked again after the await: the read may have resolved in the same turn it was cancelled in, and
@@ -224,7 +290,7 @@ async function show(
 
   if (payload.redirect) {
     discard(resource);
-    // Replacing for the same reason as {@link handleControlDigest}: the URL whose payload carried the
+    // Replacing for the same reason as {@link followIntent}: the URL whose payload carried the
     // redirect is the entry being left, and a push would make Back bounce through it into the same redirect.
     if (request) request.hop++;
     void navigate(payload.redirect, 'replace', request);

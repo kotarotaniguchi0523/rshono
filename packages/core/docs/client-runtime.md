@@ -107,7 +107,7 @@ result; the table is.
 
 ## The design's regression list, honestly
 
-The design named 22 cases. Browser suite: 105 pass.
+The design named 22 cases. Browser suite: 112 pass.
 
 | #      | Case                                                             | Status                                                                                                              |
 | ------ | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
@@ -134,6 +134,55 @@ The design named 22 cases. Browser suite: 105 pass.
 
 Not adopted from the design, and why: `hydrateRoot` inside a transition, `ViewTransition`, `useOptimistic`
 for pending — none was needed to make anything above work, and each is a behaviour change of its own.
+
+## Route intents: `redirect()` and `notFound()`
+
+Three things used to be one. They are kept apart now, as far as a stable React allows:
+
+- **The intent** — what the router is asked to do. `control.ts` reads it out of an error with
+  `parseControlIntent()`, which navigates nothing and decides nothing.
+- **Whether it may be acted on** — a question about the payload it arrived in. `navigation.ts` answers it
+  from the `PageResource`: `followRootIntent()` where the caller is the one reading the resource (a
+  navigation whose root was rejected, an action reply), and `settleRenderIntent()` for an intent React
+  reports from inside a payload that was already rendering.
+- **Acting on it** — `followIntent()`, which is told the history mode instead of guessing it. The mode comes
+  from `resource.kind`: a `document`'s or a `navigation`'s payload names the URL that raised the redirect, so
+  that entry is replaced; an `action` reply re-rendered the page the visitor was on, so its redirect is a
+  push. `controlDigestHistory()`, which read it off whatever attempt happened to be pending, is gone.
+
+React's `onCaughtError` and `onUncaughtError` say that an error happened and not which payload it came from.
+So a dynamic render is given an opaque **render token**, written into `RscPayload.renderToken` and appended
+to every control digest of that render (`RSVHONO_REDIRECT;303;%2Flogin#<token>`). The browser finds the
+resource by it — among the attempt on screen, the one scheduled, and the resources still being read — and an
+intent whose payload cannot be found, or was read twice, is treated as nobody's. The token is a field of the
+resource, so nothing is kept once the resource is gone. It is not a credential and not a navigation
+generation; a prerendered payload has none, so cached bytes and their `ETag` do not vary by it.
+
+A late intent from a resource is followed when that resource owns the navigation:
+
+| Where things stand                         | Who owns it                                    |
+| ------------------------------------------ | ---------------------------------------------- |
+| a render is scheduled and not committed    | that render's resource, and nothing else       |
+| a navigation is still fetching (precommit) | nobody on screen — the navigation is preferred |
+| neither                                    | the resource on screen                         |
+| nothing has committed yet                  | the document's own payload                     |
+
+So a page being left can no longer pull the visitor to its redirect target. A dropped intent that was
+_caught_ needs nothing more. One that was _uncaught_ has cost the page its root — the boundaries re-throw
+control signals, so this is the usual case — and the root is recovered by a document load of where the
+visitor was going: the pending navigation's own recovery if it has a render scheduled, `recoverRoot()`
+otherwise. An intent is acted on once per resource however many boundaries report it.
+
+On the server one render records one intent, the first (`controlSignal ??= error`), and every digest it
+writes afterwards repeats that one — a second component's different redirect, and the abort re-raising the
+signal through each open boundary, all say the same thing. A flight response winds its render down after a
+signal the same way a document past its shell does, instead of rendering the rest of a page nobody will read.
+
+**Not done, and waiting for React**: an intent delivered beside the tree rather than through an error — a
+weak thenable in the payload that `PageResource` observes. That removes the token, the digest's role as a
+transport, and the redirect handling in the two error callbacks. It needs a thenable that does not hold the
+stream open, which React 19.3.1 does not have; Waku gets it today by rewriting flight records in transit,
+which was read and deliberately not copied.
 
 ## Reviewed and left as it is
 

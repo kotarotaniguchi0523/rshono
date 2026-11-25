@@ -11,7 +11,7 @@ import { createTemporaryReferenceSet, encodeReply, setServerCallback } from '@vi
 import { isControlDigest } from '../control.js';
 import { createRscRequest } from '../request.js';
 import { documentUrl } from './document.js';
-import { handleControlDigest, mutationCompleted, navigating, navigationIntent, push, revalidate } from './navigation.js';
+import { followRootIntent, mutationCompleted, navigating, navigationIntent, push, revalidate } from './navigation.js';
 import { requestResource } from './page-resource.js';
 import { createAttempt, schedule } from './render-attempt.js';
 
@@ -42,7 +42,7 @@ export function installServerFunctions(): void {
       // the right to *show* it, not the caller's right to its result.
       const controller = new AbortController();
       const request = createRscRequest(window.location.href, { id, body: await encodeReply(args, { temporaryReferences }) });
-      const resource = requestResource(request, controller, temporaryReferences);
+      const resource = requestResource('action', request, controller, temporaryReferences);
 
       let payload;
       try {
@@ -54,7 +54,7 @@ export function installServerFunctions(): void {
           revalidate();
           return undefined;
         }
-        if (handleControlDigest(error, { history: 'push' })) return undefined;
+        if (followRootIntent(resource, error)) return undefined;
         throw error;
       }
 

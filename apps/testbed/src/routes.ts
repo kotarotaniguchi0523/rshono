@@ -144,6 +144,18 @@ export const routes = defineRoutes({
       component: () => import('./components/unloadable'),
     },
     {
+      // A late `redirect()` or `notFound()` the test triggers, from a page that may no longer be the one the
+      // visitor is going to. See navigation-intent.spec.mjs.
+      path: '/gated-intent',
+      component: () => import('./components/gated-intent'),
+    },
+    {
+      type: 'endpoint',
+      path: '/api/gate',
+      method: 'post',
+      server: () => import('./gate'),
+    },
+    {
       type: 'endpoint',
       path: '/api/quick-health',
       // `'get'` and not `'head'`, which the union no longer offers: Hono dispatches a HEAD as a GET, so

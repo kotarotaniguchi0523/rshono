@@ -7,6 +7,41 @@
  */
 const REDIRECT_PREFIX = 'RSVHONO_REDIRECT;';
 const NOT_FOUND_DIGEST = 'RSVHONO_NOT_FOUND';
+/**
+ * Separates a digest from the token of the render that wrote it. Neither digest can contain one of its own:
+ * the redirect's location is `encodeURIComponent`-ed, and the other is a constant.
+ */
+const TOKEN_MARK = '#';
+
+/** What `redirect()` and `notFound()` ask of the router, apart from how the request reached the browser. */
+export type RouteIntent = { kind: 'redirect'; location: string; status: number } | { kind: 'not-found' };
+
+/**
+ * A digest as it goes on the wire from one render: the signal's own, tagged with that render's token so the
+ * browser can tell *which payload* it arrived in. See {@link parseControlIntent}.
+ */
+export function controlDigestFor(signal: ControlSignal, renderToken: string | undefined): string {
+  return renderToken ? `${signal.digest}${TOKEN_MARK}${renderToken}` : signal.digest;
+}
+
+const untagged = (digest: string): string => {
+  const mark = digest.lastIndexOf(TOKEN_MARK);
+  return mark === -1 ? digest : digest.slice(0, mark);
+};
+
+/**
+ * Reads a route intent out of an error, and the token of the render it came from if it carries one. Reads
+ * only: nothing is navigated, reloaded or recorded here. Whether the intent may be *acted on* is a question
+ * about the payload it arrived in, which this cannot answer and does not guess at.
+ */
+export function parseControlIntent(error: unknown): { intent: RouteIntent; renderToken: string | undefined } | undefined {
+  const digest = (error as { digest?: unknown } | null)?.digest;
+  if (!isControlDigest(digest)) return undefined;
+  const mark = digest.lastIndexOf(TOKEN_MARK);
+  const renderToken = mark === -1 ? undefined : digest.slice(mark + 1);
+  const redirect = parseRedirectDigest(digest);
+  return { intent: redirect ? { kind: 'redirect', ...redirect } : { kind: 'not-found' }, renderToken };
+}
 
 export class RedirectSignal extends Error {
   readonly digest: string;
@@ -35,7 +70,7 @@ export function isControlSignal(error: unknown): error is ControlSignal {
 }
 
 export function isControlDigest(digest: unknown): digest is string {
-  return typeof digest === 'string' && (digest === NOT_FOUND_DIGEST || digest.startsWith(REDIRECT_PREFIX));
+  return typeof digest === 'string' && (untagged(digest) === NOT_FOUND_DIGEST || digest.startsWith(REDIRECT_PREFIX));
 }
 
 /**
@@ -58,7 +93,7 @@ export function cameFromPayload(error: unknown): boolean {
 
 export function parseRedirectDigest(digest: string): { location: string; status: number } | null {
   if (!digest.startsWith(REDIRECT_PREFIX)) return null;
-  const rest = digest.slice(REDIRECT_PREFIX.length);
+  const rest = untagged(digest).slice(REDIRECT_PREFIX.length);
   const sep = rest.indexOf(';');
   if (sep === -1) return null;
   const status = Number(rest.slice(0, sep));

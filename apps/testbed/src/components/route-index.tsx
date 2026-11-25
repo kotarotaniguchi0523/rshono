@@ -101,6 +101,12 @@ const META: Record<RoutePath, RouteMeta> = {
     title: 'Inline action',
     description: "A `'use server'` function declared inside a server component, carrying an encrypted closure in the form.",
   },
+  '/gated-intent': {
+    group: 'Streaming & suspense',
+    title: 'Gated intent',
+    description:
+      'A section that raises `redirect()` or `notFound()` when `POST /api/gate` says so — after the shell, and possibly after the visitor has left.',
+  },
   '/transition-probe': {
     group: 'Streaming & suspense',
     title: 'Transition probe',
@@ -220,6 +226,11 @@ const META: Record<RoutePath, RouteMeta> = {
       'Deliberately broken: the page module throws as it evaluates, which is what a missing chunk after a deploy looks like. It answers with the `error` page.',
   },
 
+  '/api/gate': {
+    group: 'API endpoints',
+    title: 'Gate',
+    description: 'POST `?id=…` to let the section of `/gated-intent` waiting on that id carry on.',
+  },
   '/api/quick-health': {
     group: 'API endpoints',
     title: 'Health check',

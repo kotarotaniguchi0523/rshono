@@ -44,6 +44,14 @@ those.
   until the screen has caught up with the last mutation — it waits for a navigation rather than cancelling
   it, discards a result that a later mutation has outdated, and bypasses the HTTP cache.
 
+- **A late `redirect()` or `notFound()` no longer takes the visitor away from a navigation they started.** A
+  signal raised inside a `<Suspense>` after the shell reaches the browser as an error, and it used to be
+  followed whatever page it came from — so a page being left could pull the visitor to its redirect target,
+  or reload itself, in the middle of the navigation leaving it. The signal is now traced to the payload it
+  arrived in and followed only if that payload still owns the navigation; the history mode comes from what
+  asked for the payload rather than from whatever was pending. A page that asks for two different redirects
+  is sent to the first.
+
 - **`navigation.finished` rejects for a navigation whose destination did not commit** — superseded, or failed
   to render — instead of resolving once something else had.
 

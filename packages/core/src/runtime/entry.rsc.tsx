@@ -27,7 +27,7 @@ import { isPageRoute, type ErrorPageInfo, type FallbackPage, type PageComponent,
 import { appendVary, etagMatches, varyWith } from '../server/headers.js';
 import { PRERENDER_NONCE_HEADER, setPrerenderFlight } from '../server/prerendered.js';
 import { beginPageRender, getRequestContext, publicUrl, readParams, reportServerError, runWithContext } from './context.js';
-import { cameFromPayload, isControlSignal, RedirectSignal, type ControlSignal } from './control.js';
+import { cameFromPayload, controlDigestFor, isControlSignal, RedirectSignal, type ControlSignal } from './control.js';
 // Types only: the module itself is in the SSR environment, reached through `import.meta.viteRsc.loadModule`.
 import type { renderHTML, RenderHTMLOptions } from './entry.ssr.js';
 import { hasServerAction, knownServerActions, referenceValidation } from './server-references.js';
@@ -95,6 +95,14 @@ export type RscPayload = {
   formState?: ReactFormState;
   redirect?: string;
   notFound?: boolean;
+  /**
+   * Names the render that produced this payload, for a dynamic render. A `redirect()` or `notFound()` raised
+   * later in that render carries the same token in its digest, so the browser can tell which payload an
+   * error React reports came from — it is told nothing else about that. Opaque, and not a credential: it
+   * grants nothing and is checked against nothing but other payloads in the same tab. A prerendered payload
+   * has none, so the bytes a build caches do not vary by it.
+   */
+  renderToken?: string;
 };
 
 /**
@@ -381,8 +389,17 @@ async function renderComponent(c: Context, Page: PageComponent, opts: ComponentR
     </>
   );
 
+  // A prerender's payload is cached and served to everyone, and it is complete before it is — there is no
+  // "later in the same render" for a token to tie anything to.
+  const renderToken = prerendering ? undefined : crypto.randomUUID();
   // `notFound` only when true, so an ordinary page's payload doesn't carry the key.
-  const rscPayload: RscPayload = { root, formState: opts.formState, returnValue: opts.returnValue, ...(opts.notFound ? { notFound: true } : null) };
+  const rscPayload: RscPayload = {
+    root,
+    formState: opts.formState,
+    returnValue: opts.returnValue,
+    ...(opts.notFound ? { notFound: true } : null),
+    ...(renderToken ? { renderToken } : null),
+  };
 
   // The last thing before the render: past here the response head is the framework's, so `ctx.setHeader()`
   // starts throwing — while the action `renderPage` just ran, and the middleware around it, legitimately wrote.
@@ -392,6 +409,12 @@ async function renderComponent(c: Context, Page: PageComponent, opts: ComponentR
 
   beginPageRender(c);
 
+  /**
+   * The route intent of this render: the first `redirect()` or `notFound()` it raised. First, because a page
+   * can raise several — two components redirecting to different places, or the abort below re-raising the
+   * one that caused it through every boundary still open — and a response answers one question once. Scoped
+   * to this call, so the error page or 404 rendered for the same request afterwards starts without it.
+   */
   let controlSignal: ControlSignal | undefined;
   /** Set once `renderHTML` has returned, which is where the response head stops being changeable. */
   let shellFlushed = false;
@@ -400,9 +423,14 @@ async function renderComponent(c: Context, Page: PageComponent, opts: ComponentR
     signal,
     onError(error: unknown) {
       if (isControlSignal(error)) {
-        controlSignal = error;
-        if (shellFlushed) {
-          if (isDev) warnLateControlSignal(c, error);
+        const first = controlSignal === undefined;
+        controlSignal ??= error;
+        // Every row says the same thing, whichever component it came from: the intent that was recorded.
+        const digest = controlDigestFor(controlSignal, renderToken);
+        // A flight response is on the wire from the start — it has no shell to wait for — so for it every
+        // signal is one the response head can no longer express, exactly as for a document past its shell.
+        if (first && (shellFlushed || opts.isRsc)) {
+          if (isDev && shellFlushed) warnLateControlSignal(c, error);
           // Past the shell the status line, the headers and the first bytes are on the wire, so the digest
           // React writes into the payload is the only path left — and everything still rendering is for a
           // page the browser is about to navigate away from. Winding it down stops those boundaries, runs
@@ -418,7 +446,7 @@ async function renderComponent(c: Context, Page: PageComponent, opts: ComponentR
           // carries the digest rather than a bare AbortError the client would paint as a fault.
           if (!signal.aborted) deferTask(() => renderAbort.abort(error));
         }
-        return error.digest;
+        return digest;
       }
       if (!signal.aborted) reportServerError(error, { source: 'render', hono: c, message: '[rsvhono] render error:' });
     },

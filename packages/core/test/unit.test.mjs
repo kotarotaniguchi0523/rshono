@@ -22,7 +22,14 @@ import { createPageCache, PRERENDER_NONCE_HEADER, setPrerenderFlight, ssgAssetPa
 import { prerenderStaticRoutes, readPrerendered, resolveSiteOrigin } from '../dist/server/ssg.js';
 import { injectFlightPayload } from '../dist/runtime/flight-inject.js';
 import { asksForRsc, createRscRequest, isActionRequest, isBrowserFormPost, parseRenderRequest, wantsRsc } from '../dist/runtime/request.js';
-import { isControlDigest, parseRedirectDigest, RedirectSignal } from '../dist/runtime/control.js';
+import {
+  controlDigestFor,
+  isControlDigest,
+  NotFoundSignal,
+  parseControlIntent,
+  parseRedirectDigest,
+  RedirectSignal,
+} from '../dist/runtime/control.js';
 import {
   beginPageRender,
   getRequestContext,
@@ -1446,6 +1453,33 @@ describe('control signals', () => {
   test('a notFound digest is a control signal but not a redirect', () => {
     assert.equal(isControlDigest('RSVHONO_NOT_FOUND'), true);
     assert.equal(parseRedirectDigest('RSVHONO_NOT_FOUND'), null);
+  });
+
+  test('a digest tagged with its render parses to the same intent, and gives the token back', () => {
+    // The location has a `#` of its own, which is what the token is split off at: it is percent-encoded
+    // inside the digest, so the split cannot land in it.
+    const redirect = new RedirectSignal('/docs#install', 307);
+    const tagged = controlDigestFor(redirect, 'render-1');
+    assert.equal(isControlDigest(tagged), true);
+    assert.deepEqual(parseRedirectDigest(tagged), { location: '/docs#install', status: 307 });
+    assert.deepEqual(parseControlIntent({ digest: tagged }), {
+      intent: { kind: 'redirect', location: '/docs#install', status: 307 },
+      renderToken: 'render-1',
+    });
+
+    const missing = controlDigestFor(new NotFoundSignal(), 'render-2');
+    assert.equal(isControlDigest(missing), true);
+    assert.deepEqual(parseControlIntent({ digest: missing }), { intent: { kind: 'not-found' }, renderToken: 'render-2' });
+  });
+
+  test('a digest with no token parses with none, and anything else is not an intent', () => {
+    // A prerendered payload's, and what `controlDigestFor` writes when it is given no token.
+    const redirect = new RedirectSignal('/a', 303);
+    assert.equal(controlDigestFor(redirect, undefined), redirect.digest);
+    assert.deepEqual(parseControlIntent(redirect), { intent: { kind: 'redirect', location: '/a', status: 303 }, renderToken: undefined });
+    for (const error of [undefined, null, new Error('boom'), { digest: 'some-react-digest' }, { digest: 'RSVHONO_NOT_FOUND_AT_ALL' }]) {
+      assert.equal(parseControlIntent(error), undefined);
+    }
   });
 
   test('an unrelated digest is left alone', () => {

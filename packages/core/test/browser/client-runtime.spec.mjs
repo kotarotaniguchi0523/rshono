@@ -359,7 +359,9 @@ test.describe('boundaries', () => {
 
   test('the happy path resolves the suspended section', async ({ page }) => {
     await page.goto('/boundary');
-    await expect(page.locator('[data-section="ok"]')).toBeVisible();
+    // The visible one: while the document streams, the resolved section exists twice for a moment — in the
+    // hidden segment the server appended and, once React moves it, in place.
+    await expect(page.locator('[data-section="ok"]').filter({ visible: true })).toBeVisible();
   });
 });
 

@@ -19,7 +19,15 @@ import { createFromReadableStream } from '@vitejs/plugin-rsc/browser';
 import type { RscPayload } from '../entry.rsc.js';
 import { createRscRequest } from '../request.js';
 
+/**
+ * What asked for the payload. It decides how a `redirect()` found in it treats history: a document's or a
+ * navigation's payload names the URL that raised the redirect, so the redirect replaces that entry; an action
+ * reply re-renders the page the visitor was already on, so its redirect is a push and Back returns there.
+ */
+export type ResourceKind = 'document' | 'navigation' | 'action';
+
 export type PageResource = {
+  readonly kind: ResourceKind;
   readonly url: URL;
   /** The only switch for this read. Inert for the document's inlined payload, which is not a request. */
   readonly controller: AbortController;
@@ -27,6 +35,13 @@ export type PageResource = {
   readonly rootReady: Promise<RscPayload>;
   /** Settles when the stream ends, however it ends — the root resolving is not the end. Never rejects. */
   readonly streamFinished: Promise<void>;
+  /**
+   * The token of the render that produced this payload, once its root has arrived. A `redirect()` raised
+   * later in the same render carries it too, which is how an error React reports is traced back here.
+   */
+  renderToken?: string;
+  /** Set once a route intent from this payload has been dealt with, so it is dealt with once. */
+  intentSettled?: boolean;
 };
 
 /** What every flight response is typed as. The charset and any other parameters follow it. */
@@ -154,6 +169,7 @@ function observed(source: Promise<ReadableStream<Uint8Array>>): { stream: Readab
 }
 
 function createResource(
+  kind: ResourceKind,
   url: URL,
   controller: AbortController,
   source: Promise<ReadableStream<Uint8Array>>,
@@ -164,20 +180,27 @@ function createResource(
   // A resource nobody ends up waiting on — a navigation cancelled mid-fetch — must not surface as an
   // unhandled rejection. Whoever does await `rootReady` still sees it reject.
   rootReady.catch(() => {});
-  return { url, controller, rootReady, streamFinished: finished };
+  const resource: PageResource = { kind, url, controller, rootReady, streamFinished: finished };
+  void rootReady.then(
+    (payload) => {
+      resource.renderToken = payload.renderToken;
+    },
+    () => {},
+  );
+  return resource;
 }
 
 const emptyBody = (): ReadableStream<Uint8Array> => new ReadableStream({ start: (controller) => controller.close() });
 
 /** Starts reading the payload `request` answers with. The request must carry `controller.signal`. */
-export function requestResource(request: Request, controller: AbortController, temporaryReferences?: unknown): PageResource {
+export function requestResource(kind: ResourceKind, request: Request, controller: AbortController, temporaryReferences?: unknown): PageResource {
   const body = payloadResponse(request).then((response) => response.body ?? emptyBody());
-  return createResource(new URL(request.url), controller, body, temporaryReferences);
+  return createResource(kind, new URL(request.url), controller, body, temporaryReferences);
 }
 
 /** The payload the server inlined into this document. Already here, so there is nothing for an abort to stop. */
 export function inlineResource(): PageResource {
-  return createResource(new URL(location.href), new AbortController(), Promise.resolve(readInlinePayload()));
+  return createResource('document', new URL(location.href), new AbortController(), Promise.resolve(readInlinePayload()));
 }
 
 // ── Ownership ────────────────────────────────────────────────────────────────────────────────────────────
@@ -215,7 +238,7 @@ export function watchPreparing(listener: (preparing: boolean) => void): () => vo
 export function prepare(href: string, navigation?: AbortSignal, cache?: RequestCache): PageResource {
   const controller = new AbortController();
   const url = new URL(href, location.href);
-  const resource = requestResource(createRscRequest(url.href, undefined, controller.signal, cache), controller);
+  const resource = requestResource('navigation', createRscRequest(url.href, undefined, controller.signal, cache), controller);
   prepared.add(resource);
   changed();
   const cancel = () => {
@@ -246,6 +269,26 @@ export function hold(resource: PageResource): void {
   if (prepared.delete(resource)) changed();
   // A stream that has ended has nothing left to stop, and no reason to be remembered.
   void resource.streamFinished.then(() => held.delete(resource));
+}
+
+/**
+ * The one live resource whose payload came from the render `renderToken` names — or `undefined` when there is
+ * none, and also when there are several: a cached payload can be read twice, and which read an error belongs
+ * to is then not something the token says. The caller treats both as "source unknown".
+ *
+ * `rendering` is what React has been given — the attempt on screen and the one scheduled — which is looked at
+ * as well because a resource leaves `held` when its stream ends, and a payload's last error can reach React
+ * after that. Nothing is kept for any of this: the token is a field of the resource, so it is forgotten when
+ * the resource is.
+ */
+export function resourceOfRender(renderToken: string, rendering: Array<PageResource | undefined>): PageResource | undefined {
+  let found: PageResource | undefined;
+  for (const resource of new Set([...rendering, ...held, ...prepared])) {
+    if (resource?.renderToken !== renderToken) continue;
+    if (found) return undefined;
+    found = resource;
+  }
+  return found;
 }
 
 /** Stops every held resource `stillRead` does not vouch for. Called when a render commits. */
