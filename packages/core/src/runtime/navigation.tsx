@@ -40,6 +40,13 @@ export interface NavigationRouter {
   forward(): Promise<NavigationOutcome>;
   /** Re-fetches the current route from the server, re-running its server components. */
   refresh(): Promise<NavigationOutcome>;
+  /**
+   * Starts fetching the page at `href` ahead of a navigation to it. Nothing visible changes: no URL, no
+   * `pending`, and a redirect in what comes back is not followed unless a navigation takes it over. The
+   * payload is used once, by the next navigation to that URL within 30 seconds, and is thrown away by any
+   * server function that runs in between. A link can ask for the same thing with `data-prefetch`.
+   */
+  prefetch(href: string): void;
   /** `true` while a soft navigation is in flight — use it to disable controls or show a spinner. */
   pending: boolean;
 }
@@ -62,7 +69,7 @@ export interface NavigationState {
 
 const noop = (): Promise<NavigationOutcome> => Promise.resolve({ kind: 'no-op' });
 
-const defaultRouter: NavigationRouter = { push: noop, replace: noop, back: noop, forward: noop, refresh: noop, pending: false };
+const defaultRouter: NavigationRouter = { push: noop, replace: noop, back: noop, forward: noop, refresh: noop, prefetch: () => {}, pending: false };
 
 /**
  * Carries the live {@link NavigationRouter} from the hydration runtime to {@link useNavigation}.

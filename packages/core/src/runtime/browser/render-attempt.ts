@@ -6,6 +6,7 @@
  * outcome. The attempt *is* the React state (`root.tsx`), so "which attempt committed" is the identity of the
  * object React hands the layout effect, with nothing to look up.
  */
+import { measure, started } from './timing.js';
 import type { RscPayload } from '../entry.rsc.js';
 import { hold, retire, type PageResource } from './page-resource.js';
 
@@ -98,6 +99,9 @@ export function schedule(attempt: RenderAttempt, { urgent = false }: { urgent?: 
   scheduled = attempt;
   replaced?.settle({ kind: 'superseded' });
   hold(attempt.resource);
+  // From React being handed the render to whatever becomes of it: committed, superseded or failed.
+  const start = started();
+  void attempt.completion.then((outcome) => measure(`render ${attempt.href} — ${outcome.kind}`, start));
   dispatch(attempt, urgent);
   return attempt.completion;
 }

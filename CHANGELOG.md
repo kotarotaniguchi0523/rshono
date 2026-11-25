@@ -79,6 +79,16 @@ those.
   registers — `react: { compiler: true }` turns on the React Compiler (Oxc, client code only; needs
   `oxc-transform-react`). A second `react()` under `vite.plugins` would register the plugin twice.
 
+- **`data-prefetch` and `router.prefetch(href)`.** A link marked `data-prefetch` has its payload fetched on
+  hover, focus or touch; the click that follows uses that fetch instead of making another. The payload is
+  held outside any navigation — the URL does not move, `router.pending` stays false, and a redirect in it is
+  not followed unless a navigation takes it over. At most four are kept, for thirty seconds, and any server
+  function throws them away. Still an ordinary `<a>`.
+
+- **In development, the Performance panel has an `rsvhono` track** beside React's: when each payload's root
+  arrived and its stream ended, and how long each render took from being handed to React to committing. Not
+  in a production bundle.
+
 - **`setServerFunctionRefresh('explicit')` and `requestRefresh()`.** By default a server function called
   from client code is still answered with the page rendered again. In `'explicit'` mode the reply is the
   return value alone — the page module is not loaded and nothing is rendered — unless the function called

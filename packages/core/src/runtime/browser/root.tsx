@@ -3,7 +3,7 @@
 /// <reference types="react/canary" />
 import { addTransitionType, useLayoutEffect, useMemo, useState, useTransition } from 'react';
 import { BrowserAddressContext, RouterContext, type NavigationRouter } from '../navigation.js';
-import { back, forward, listenNavigation, push, refresh, replace } from './navigation.js';
+import { back, forward, listenNavigation, prefetch, push, refresh, replace } from './navigation.js';
 import { watchPreparing } from './page-resource.js';
 import { acknowledgeCommit, connectRoot, type RenderAttempt } from './render-attempt.js';
 
@@ -63,7 +63,7 @@ export function BrowserRoot({ initial }: { initial: RenderAttempt }) {
   const [preparing, setPreparing] = useState(false);
   useLayoutEffect(() => watchPreparing(setPreparing), []);
   const pending = rendering || preparing;
-  const router = useMemo<NavigationRouter>(() => ({ push, replace, back, forward, refresh, pending }), [pending]);
+  const router = useMemo<NavigationRouter>(() => ({ push, replace, back, forward, refresh, prefetch, pending }), [pending]);
 
   return (
     <RouterContext.Provider value={router}>

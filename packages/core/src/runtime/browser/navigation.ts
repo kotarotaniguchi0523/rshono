@@ -9,7 +9,7 @@
 import { parseControlIntent, type RouteIntent } from '../control.js';
 import type { NavigationOutcome } from '../navigation.js';
 import { documentNavigation, loadDocument, reloadOnceForLateNotFound, settle } from './document.js';
-import { discard, discardPrepared, prepare, resourceOfRender, type PageResource } from './page-resource.js';
+import { discard, discardPrefetched, discardPrepared, prefetch, prepare, resourceOfRender, type PageResource } from './page-resource.js';
 import { committedAttempt, createAttempt, pendingAttempt, schedule, type AttemptOptions } from './render-attempt.js';
 import { cancelElementWatches, jumpToAnchor, rememberCurrentScroll, resetFocus, scrollPointFor, scrollToPoint, scrollToTop } from './scroll.js';
 
@@ -321,6 +321,7 @@ async function perform(event: NavigateEvent, resource: PageResource, end: () => 
 /** Re-reads the page at the current URL in place — a dev server's edit to a server component. */
 export function refetch(): void {
   discardPrepared();
+  discardPrefetched();
   void show(prepare(location.href), {}).catch((error: unknown) => {
     if (!isSuperseded(error)) leave();
   });
@@ -353,6 +354,8 @@ export function revalidate(): void {
  * its result must not be the last thing shown.
  */
 export function mutationCompleted(): void {
+  // Anything fetched ahead was rendered before this mutation, or may have been.
+  discardPrefetched();
   if (converging) stale++;
 }
 
@@ -564,7 +567,29 @@ function interceptTraversal(event: NavigateEvent, end: () => void, transitionTyp
   });
 }
 
+/**
+ * A link asks to be fetched ahead with `data-prefetch`: on hover, on keyboard focus, and on touch — the
+ * moments just before a click. An ordinary `<a>`; the navigation that follows is the browser's, and it finds
+ * the payload already on its way. Opt-in per link because a fetch ahead renders the page on the server
+ * whether or not anyone goes there.
+ */
+function listenPrefetch(): () => void {
+  const onIntent = (event: Event) => {
+    const link = event.target instanceof Element ? event.target.closest('a[data-prefetch]') : null;
+    if (link instanceof HTMLAnchorElement && link.href) prefetch(link.href);
+  };
+  const types = ['pointerenter', 'focusin', 'touchstart'] as const;
+  // Capture: `pointerenter` does not bubble.
+  for (const type of types) document.addEventListener(type, onIntent, { capture: true, passive: true });
+  return () => {
+    for (const type of types) document.removeEventListener(type, onIntent, { capture: true });
+  };
+}
+
+export { prefetch };
+
 export function listenNavigation(): () => void {
+  const stopPrefetch = listenPrefetch();
   const onNavigate = (event: NavigateEvent) => {
     // React's own: with a transition pending and no navigation under way it starts one at the current URL,
     // so the browser shows its loading indicator, and intercepts it itself. Not a navigation of the page.
@@ -598,6 +623,8 @@ export function listenNavigation(): () => void {
   navigation.addEventListener('navigate', onNavigate);
   return () => {
     navigation.removeEventListener('navigate', onNavigate);
+    stopPrefetch();
     discardPrepared();
+    discardPrefetched();
   };
 }

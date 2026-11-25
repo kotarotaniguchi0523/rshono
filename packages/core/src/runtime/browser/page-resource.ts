@@ -19,6 +19,7 @@ import { createFromReadableStream } from '@vitejs/plugin-rsc/browser';
 import type { RscPayload } from '../entry.rsc.js';
 import { BUILD_HEADER, BuildMismatchError, isOtherBuild } from '../build-id.js';
 import { createRscRequest } from '../request.js';
+import { measure, started } from './timing.js';
 
 /**
  * What asked for the payload. It decides how a `redirect()` found in it treats history: a document's or a
@@ -189,12 +190,16 @@ function createResource(
   // unhandled rejection. Whoever does await `rootReady` still sees it reject.
   rootReady.catch(() => {});
   const resource: PageResource = { kind, url, controller, rootReady, streamFinished: finished };
+  const start = started();
+  const label = `${kind} ${url.pathname}`;
   void rootReady.then(
     (payload) => {
       resource.renderToken = payload.renderToken;
+      measure(`${label} — root ready`, start);
     },
     () => {},
   );
+  void finished.then(() => measure(`${label} — stream ended`, start));
   return resource;
 }
 
@@ -244,9 +249,10 @@ export function watchPreparing(listener: (preparing: boolean) => void): () => vo
  * `cache` is the fetch's cache mode, for a re-read that must not be answered from the HTTP cache.
  */
 export function prepare(href: string, navigation?: AbortSignal, cache?: RequestCache): PageResource {
-  const controller = new AbortController();
   const url = new URL(href, location.href);
-  const resource = requestResource('navigation', createRscRequest(url.href, undefined, controller.signal, cache), controller);
+  // A payload fetched ahead for this URL becomes this navigation's: the same resource, the same controller,
+  // no second request. Not for a re-read that asked to bypass the cache — that wants a fresh answer.
+  const resource = (cache === undefined ? takePrefetched(url) : undefined) ?? fetchPayload(url, cache);
   prepared.add(resource);
   changed();
   const cancel = () => {
@@ -257,6 +263,72 @@ export function prepare(href: string, navigation?: AbortSignal, cache?: RequestC
   // However the read ends, the navigation's signal has nothing left to cancel.
   void resource.streamFinished.then(() => navigation?.removeEventListener('abort', cancel));
   return resource;
+}
+
+function fetchPayload(url: URL, cache?: RequestCache): PageResource {
+  const controller = new AbortController();
+  return requestResource('navigation', createRscRequest(url.href, undefined, controller.signal, cache), controller);
+}
+
+// ── Fetching ahead ───────────────────────────────────────────────────────────────────────────────────────
+
+/** How many payloads may be held ahead of a navigation at once. One more evicts the oldest. */
+const PREFETCH_LIMIT = 4;
+/** How long a payload fetched ahead is good for. Past it the page may have changed, and it is fetched again. */
+const PREFETCH_TTL_MS = 30_000;
+
+/**
+ * Payloads fetched before anyone navigated, by URL. Not `prepared`: nothing is navigating, so nothing is
+ * pending and no navigation's signal applies. A resource is in exactly one of the two — {@link prepare}
+ * moves it across, and from then on it is an ordinary navigation's resource.
+ *
+ * Deliberately small and short-lived. It is not a cache of pages: an entry is used at most once, by the
+ * navigation it was fetched for, and every mutation empties it.
+ */
+const prefetched = new Map<string, { resource: PageResource; expires: ReturnType<typeof setTimeout> }>();
+
+const prefetchKey = (url: URL): string => url.origin + url.pathname + url.search;
+
+function dropPrefetched(key: string): void {
+  const entry = prefetched.get(key);
+  if (!entry) return;
+  prefetched.delete(key);
+  clearTimeout(entry.expires);
+  entry.resource.controller.abort(new DOMException('Prefetch discarded', 'AbortError'));
+}
+
+/**
+ * Starts fetching the payload for `href` ahead of a navigation that may follow. Changes nothing a visitor
+ * can see: the URL does not move, nothing is pending, and whatever the payload says — a redirect, a
+ * `notFound()` — is not acted on unless a navigation takes it over.
+ */
+export function prefetch(href: string): void {
+  const url = new URL(href, location.href);
+  if (url.origin !== location.origin) return;
+  const key = prefetchKey(url);
+  if (prefetched.has(key)) return;
+  if (prefetched.size >= PREFETCH_LIMIT) dropPrefetched(prefetched.keys().next().value!);
+  const resource = fetchPayload(url);
+  prefetched.set(key, { resource, expires: setTimeout(() => dropPrefetched(key), PREFETCH_TTL_MS) });
+  // A fetch that failed is not worth handing to a navigation: it would only fail again, later.
+  resource.rootReady.catch(() => {
+    if (prefetched.get(key)?.resource === resource) dropPrefetched(key);
+  });
+}
+
+/** Hands a payload fetched ahead to the navigation that wants it, if there is one still being read. */
+function takePrefetched(url: URL): PageResource | undefined {
+  const key = prefetchKey(url);
+  const entry = prefetched.get(key);
+  if (!entry) return undefined;
+  prefetched.delete(key);
+  clearTimeout(entry.expires);
+  return entry.resource.controller.signal.aborted ? undefined : entry.resource;
+}
+
+/** Throws away everything fetched ahead: a mutation has run, and any of it may have been rendered before. */
+export function discardPrefetched(): void {
+  for (const key of [...prefetched.keys()]) dropPrefetched(key);
 }
 
 /** Stops a prepared resource and forgets it. A no-op for one React already holds. */

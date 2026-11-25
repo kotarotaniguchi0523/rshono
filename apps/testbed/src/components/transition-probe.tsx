@@ -1,5 +1,6 @@
 import type { PageProps } from '@rsvhono/core';
 import { Layout } from './layout';
+import { NavInfo } from './nav-info';
 import { TransitionProbePanel } from './transition-probe-panel';
 
 /** Not inside a `<Suspense>`: the payload's root arrives at once, and the render that shows it waits here. */
@@ -25,7 +26,16 @@ export default function TransitionProbe({ ctx }: PageProps<'/transition-probe'>)
         </a>{' '}
         <a data-probe-go="fast" href="/transition-probe?visit=fast">
           fast
+        </a>{' '}
+        {/* Fetched ahead on hover, focus or touch. See prefetch.spec.mjs. */}
+        <a data-prefetch data-probe-go="prefetched" href="/users">
+          users (prefetched)
+        </a>{' '}
+        <a data-prefetch data-probe-go="prefetched-redirect" href="/canonical">
+          canonical (prefetched, redirects)
         </a>
+        {/* Shows `router.pending`, which a fetch ahead must leave alone. */}
+        <NavInfo />
         <TransitionProbePanel />
         {ms > 0 && <SlowBody ms={ms} />}
       </div>

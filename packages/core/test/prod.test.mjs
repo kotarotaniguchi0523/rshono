@@ -1823,6 +1823,12 @@ describe('what the build put where', () => {
     assert.match(server, /\$\$rsvhonoAssets/, 'its stylesheets are an export beside it');
   });
 
+  test('the development-only timing track is not in a production bundle', () => {
+    // `browser/timing.ts` measures behind a condition on `process.env.NODE_ENV`, a literal in this bundle.
+    assert.ok(!browser.includes('track-entry'), 'the measure call was dropped with its condition');
+    assert.ok(!browser.includes('stream ended'));
+  });
+
   test('the public process the SSR pass reads is one module, not a copy per client component', () => {
     const ssr = read(join('server', 'ssr'));
     assert.equal(ssr.split('Object.create(globalThis.process').length - 1, 1);
