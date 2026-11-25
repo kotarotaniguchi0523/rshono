@@ -11,11 +11,12 @@ import react from '@vitejs/plugin-react';
 import rsc, { getPluginApi } from '@vitejs/plugin-rsc';
 import { hasDirective, transformWrapExport } from '@vitejs/plugin-rsc/transforms';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
-import { dirname, join, relative, sep } from 'node:path';
+import { join, relative } from 'node:path';
 import {
+  createIdResolver,
   isRunnableDevEnvironment,
   mergeConfig,
+  normalizePath,
   parseAstAsync,
   type EnvironmentOptions,
   type InlineConfig,
@@ -154,43 +155,44 @@ function rsvhonoPages(pageFiles: Set<string>): Plugin {
 }
 
 /** `@import 'pkg'` / `@import "pkg/file.css"` — a bare specifier, so not a relative path, an absolute one or a URL. */
-const CSS_PACKAGE_IMPORT = /(@import\s+)(['"])((?:@[\w.-]+\/)?[\w][\w.-]*)((?:\/[^'"]*)?)\2/g;
-
-/** The file a stylesheet means by `@import '<name><subpath>'`, the way a CSS toolchain reads a package. */
-function resolveCssPackage(name: string, subpath: string, importer: string): string | undefined {
-  try {
-    const manifestFile = createRequire(importer).resolve(`${name}/package.json`);
-    if (subpath) return join(dirname(manifestFile), subpath);
-    const manifest = JSON.parse(readFileSync(manifestFile, 'utf8')) as { style?: string; main?: string; exports?: Record<string, unknown> };
-    const root = manifest.exports?.['.'];
-    const style = (typeof root === 'object' && root !== null ? (root as { style?: unknown }).style : undefined) ?? manifest.style;
-    const entry = typeof style === 'string' ? style : manifest.main?.endsWith('.css') ? manifest.main : undefined;
-    return entry ? join(dirname(manifestFile), entry) : undefined;
-  } catch {
-    return undefined;
-  }
-}
+const CSS_PACKAGE_IMPORT = /(@import\s+)(['"])((?:@[\w.-]+\/)?[\w][\w.-]*(?:\/[^'"]*)?)\2/g;
 
 /**
  * Points a stylesheet's package imports at the files they name, in the two server environments.
  *
  * A server component's CSS is compiled in the RSC environment, and that environment leaves `node_modules`
  * external — which Vite's CSS resolver takes to mean `@import 'tailwindcss'` has nothing to inline, and
- * then fails looking for a file of that name beside the stylesheet. Resolving it here, ahead of Vite's CSS
- * plugin, is the same answer the client environment would have given.
+ * then fails looking for a file of that name beside the stylesheet. So the import is resolved here, ahead of
+ * Vite's CSS plugin, by Vite's own resolver set up the way that plugin sets it up for a stylesheet — the
+ * `style` condition and field, conditional and subpath `exports` included — with the one difference that
+ * nothing is external. The answer is the one the client environment gives.
  */
 function rsvhonoCssPackageImports(): Plugin {
+  let resolveStyle: ReturnType<typeof createIdResolver> | undefined;
   return {
     name: 'rsvhono:css-package-imports',
     enforce: 'pre',
-    transform(code, id) {
-      if (this.environment.name === 'client') return;
+    configResolved(config) {
+      resolveStyle = createIdResolver(config, {
+        extensions: ['.css'],
+        mainFields: ['style'],
+        conditions: ['style', config.isProduction ? 'production' : 'development'],
+        tryIndex: false,
+        preferRelative: true,
+        noExternal: true,
+        external: [],
+      });
+    },
+    async transform(code, id) {
+      if (this.environment.name === 'client' || !resolveStyle) return;
       const file = fileOf(id);
       if (!file.endsWith('.css') || !code.includes('@import')) return;
-      const rewritten = code.replace(CSS_PACKAGE_IMPORT, (match, at: string, quote: string, name: string, subpath: string) => {
-        const resolved = resolveCssPackage(name, subpath, file);
-        return resolved ? `${at}${quote}${resolved.split(sep).join('/')}${quote}` : match;
-      });
+      let rewritten = code;
+      for (const [match, at, quote, specifier] of code.matchAll(CSS_PACKAGE_IMPORT)) {
+        const resolved = await resolveStyle(this.environment, specifier, file);
+        // Unresolved is left as written: a file beside the stylesheet spelled without `./`, which Vite reads.
+        if (resolved && resolved !== specifier) rewritten = rewritten.replace(match, `${at}${quote}${normalizePath(resolved)}${quote}`);
+      }
       return rewritten === code ? undefined : { code: rewritten, map: null };
     },
   };
@@ -202,7 +204,8 @@ function rsvhonoCssPackageImports(): Plugin {
  * every other transform has had the module.
  */
 function rsvhonoEnvShadow(env: Record<string, string>, nodeEnv: string, srcDir: string): Plugin {
-  const appSrcPrefix = srcDir + sep;
+  // As Vite spells a module id, so the prefix matches on Windows too.
+  const appSrcPrefix = normalizePath(srcDir) + '/';
   return {
     name: 'rsvhono:env-shadow',
     enforce: 'post',
@@ -236,12 +239,16 @@ function rsvhonoCore(aliases: ReadonlyMap<string, string>, routesFile: string, s
   return {
     name: 'rsvhono',
 
-    // The plugin names its own runtime in `optimizeDeps.include`, resolvable from the project root only when
-    // the app installed it. An app installs `@rsvhono/core`, so each entry is reached through that instead.
+    // The plugin names its own runtime and React's RSC runtime in `optimizeDeps.include`, resolvable from the
+    // project root only when the app installed them. An app installs `@rsvhono/core`, so each one it did not
+    // install itself is reached through that instead.
     configEnvironment(_name, config) {
       const include = config.optimizeDeps?.include;
-      if (!include || existsSync(join(rootDir, 'node_modules', '@vitejs', 'plugin-rsc'))) return;
-      config.optimizeDeps!.include = include.map((entry) => (entry.startsWith('@vitejs/plugin-rsc') ? `${PACKAGE_NAME} > ${entry}` : entry));
+      if (!include) return;
+      config.optimizeDeps!.include = include.map((entry) => {
+        const carried = ['@vitejs/plugin-rsc', 'react-server-dom-webpack'].find((name) => entry === name || entry.startsWith(`${name}/`));
+        return carried && !existsSync(join(rootDir, 'node_modules', carried)) ? `${PACKAGE_NAME} > ${entry}` : entry;
+      });
     },
 
     configResolved(config) {
@@ -286,7 +293,7 @@ function rsvhonoCore(aliases: ReadonlyMap<string, string>, routesFile: string, s
 
     // A route added or re-pointed while the dev server runs is a page the next transform has to recognise.
     watchChange(id) {
-      if (id === routesFile) scanPageFiles(routesFile, srcDir, pageFiles);
+      if (normalizePath(id) === normalizePath(routesFile)) scanPageFiles(routesFile, srcDir, pageFiles);
     },
 
     resolveId: {

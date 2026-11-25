@@ -1,22 +1,13 @@
 /** The React side: one piece of state — the attempt being shown — and the router context around it. */
-import { useLayoutEffect, useMemo, useState, useTransition } from 'react';
+// `addTransitionType` ships in React 19.3; `@types/react` still declares it under the canary entry.
+/// <reference types="react/canary" />
+import { addTransitionType, useLayoutEffect, useMemo, useState, useTransition } from 'react';
 import { BrowserAddressContext, RouterContext, type NavigationRouter } from '../navigation.js';
 import { back, forward, listenNavigation, push, refresh, replace } from './navigation.js';
 import { watchPreparing } from './page-resource.js';
 import { acknowledgeCommit, connectRoot, type RenderAttempt } from './render-attempt.js';
 
-function subscribeToAddress(onChange: () => void): () => void {
-  if (typeof navigation !== 'undefined') navigation.addEventListener('currententrychange', onChange);
-  window.addEventListener('hashchange', onChange);
-  window.addEventListener('popstate', onChange);
-  return () => {
-    if (typeof navigation !== 'undefined') navigation.removeEventListener('currententrychange', onChange);
-    window.removeEventListener('hashchange', onChange);
-    window.removeEventListener('popstate', onChange);
-  };
-}
-
-const readAddress = (): string => (typeof navigation !== 'undefined' ? navigation.currentEntry?.url : undefined) ?? location.href;
+const readAddress = (): string => navigation.currentEntry?.url ?? location.href;
 
 /**
  * What the root renders: the attempt, and the address it is rendered at. One state rather than two because
@@ -33,7 +24,11 @@ export function BrowserRoot({ initial }: { initial: RenderAttempt }) {
   useLayoutEffect(
     () =>
       connectRoot((attempt, urgent) => {
-        const show = () => setShown({ attempt, address: readAddress() });
+        const show = () => {
+          // Only inside a transition: the type belongs to one, and an urgent update has none.
+          if (!urgent && attempt.transitionType) addTransitionType(attempt.transitionType);
+          setShown({ attempt, address: readAddress() });
+        };
         if (urgent) show();
         // Synchronous, and from this hook: the scope ends once the update is scheduled, and React holds
         // `rendering` until that update commits — through any suspension. Nothing awaits the commit in here;
@@ -46,20 +41,16 @@ export function BrowserRoot({ initial }: { initial: RenderAttempt }) {
   // The address moves without an attempt too: a fragment jump, and — where the URL commits before the payload
   // is fetched — the stretch in between. Same hook, so `pending` covers a component suspending on it.
   useLayoutEffect(() => {
-    let last: string | undefined;
+    // `currententrychange` is the one event every same-document change of entry fires — push, replace,
+    // traversal, fragment — so it is the only subscription.
     const follow = () => {
       const address = readAddress();
-      // Several events report one change (`currententrychange`, then `popstate`). A second transition for an
-      // address already on its way is not a no-op: on React 19.3.1 it was observed to commit the first with
-      // its Suspense fallbacks showing, where one transition alone keeps the previous screen.
-      if (address === last) return;
-      last = address;
       startTransition(() => setShown((current) => (current.address === address ? current : { ...current, address })));
     };
-    const unsubscribe = subscribeToAddress(follow);
+    navigation.addEventListener('currententrychange', follow);
     // Catch a change between rendering and subscribing.
     follow();
-    return unsubscribe;
+    return () => navigation.removeEventListener('currententrychange', follow);
   }, [startTransition]);
 
   // Keyed on the attempt, not on its payload: showing the same payload again is a new attempt, and commits anew.

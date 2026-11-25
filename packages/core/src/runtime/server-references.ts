@@ -35,6 +35,21 @@ export async function hasServerAction(actionId: string): Promise<boolean> {
 }
 
 /**
+ * The same allowlist, for the references React resolves *while decoding* — a bound action inside a reply's
+ * arguments, the action a form names, the one a `useActionState` key points at. Passed to every decoder, so
+ * no path loads a module for a reference the direct-call check would have refused.
+ *
+ * Says nothing on the dev server, where there is no list: the plugin validates each reference itself there.
+ */
+export const referenceValidation = {
+  onServerReference({ id, name }: { id: string; name: string }): void {
+    if (references && !(Object.hasOwn(references, id) && references[id].includes(name))) {
+      throw new Error(`[rsvhono] unknown server reference ${id}#${name}`);
+    }
+  },
+};
+
+/**
  * `[actionId, moduleKey]` for every action the build registered — what the build-time check and
  * `cannotLoadServerActions` walk. Empty on the dev server, which cannot enumerate them.
  */

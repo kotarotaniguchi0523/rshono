@@ -1427,6 +1427,20 @@ test('an action body that will not decode is a 400, and never pages the error tr
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ $ACTION_REF_1: '', '$ACTION_1:0': 'not-a-flight-row', $ACTION_KEY: 'k1' }).toString(),
     },
+    // A reference *inside the arguments*: the action called is real, and one of its arguments claims to be
+    // a server function the build does not hold — an export that module never had. The id in the header is
+    // checked before anything is decoded; this one only exists once `decodeReply` reads the body, so the
+    // same allowlist has to be asked there.
+    {
+      what: 'an unknown server reference among the arguments',
+      headers: { 'x-rsc-action': id },
+      body: (() => {
+        const form = new FormData();
+        form.set('0', '["$h1"]');
+        form.set('1', JSON.stringify({ id: `${id.slice(0, id.lastIndexOf('#'))}#neverExported`, bound: null }));
+        return form;
+      })(),
+    },
   ];
 
   for (const { what, headers, body } of shapes) {

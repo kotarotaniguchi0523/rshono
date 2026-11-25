@@ -30,7 +30,7 @@ import { beginPageRender, getRequestContext, publicUrl, readParams, reportServer
 import { cameFromPayload, isControlSignal, RedirectSignal, type ControlSignal } from './control.js';
 // Types only: the module itself is in the SSR environment, reached through `import.meta.viteRsc.loadModule`.
 import type { renderHTML, RenderHTMLOptions } from './entry.ssr.js';
-import { hasServerAction, knownServerActions } from './server-references.js';
+import { hasServerAction, knownServerActions, referenceValidation } from './server-references.js';
 import { failureDocument } from './failure-document.js';
 // Type-only, so it is erased — the RSC layer does not take its own instance of the SSR layer's module.
 import type { CancellableTransformer } from './flight-inject.js';
@@ -605,7 +605,7 @@ async function renderPage(c: Context, loadPage: () => Promise<PageComponent>): P
         const contentType = request.headers.get('content-type');
         const body = contentType?.startsWith('multipart/form-data') ? await request.formData() : await request.text();
         temporaryReferences = createTemporaryReferenceSet();
-        args = await decodeReply(body, { temporaryReferences });
+        args = await decodeReply(body, { temporaryReferences }, referenceValidation);
       } catch {
         return malformedAction(c);
       }
@@ -652,7 +652,7 @@ async function renderPage(c: Context, loadPage: () => Promise<PageComponent>): P
       }
       let decodedAction: (() => Promise<unknown>) | null;
       try {
-        decodedAction = await decodeAction(formData);
+        decodedAction = await decodeAction(formData, referenceValidation);
       } catch (error) {
         // Split from the read above, for the reason F3 split the client-initiated path: `decodeAction` is
         // two things at once. It reads the caller's body *and* — through `loadServerReference` —
@@ -683,7 +683,7 @@ async function renderPage(c: Context, loadPage: () => Promise<PageComponent>): P
           throw error;
         }
         try {
-          formState = (await decodeFormState(result, formData)) ?? undefined;
+          formState = (await decodeFormState(result, formData, referenceValidation)) ?? undefined;
         } catch (error) {
           // The action has already run, and may well have written something, so this cannot be refused the
           // way an undecodable body *before* it is — the guard above answers 400 precisely because nothing

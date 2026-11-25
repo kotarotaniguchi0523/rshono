@@ -319,10 +319,10 @@ Every target streams, which is the bar a new one has to clear.
   round trip that Next.js and TanStack Start have usually already paid.
 - No incremental static regeneration: `render: 'static'` is decided at build time, and a static page changes
   when you rebuild.
-- **Soft navigation needs the [Navigation API](https://developer.mozilla.org/en-US/docs/Web/API/Navigation_API)**
+- **The client runtime needs the [Navigation API](https://developer.mozilla.org/en-US/docs/Web/API/Navigation_API)**
   — Chrome/Edge 135, Firefox 147, Safari 26.2, [Baseline](https://web.dev/blog/baseline-navigation-api) since
-  January 2026. Where it is missing there is no interception at all and every link is a real browser load,
-  which a server-rendered app answers correctly; only the soft part is gone. On a soft navigation the runtime
+  January 2026. Where it is missing the page is not hydrated: it stays the document the server rendered,
+  with real links and forms and no client components running. On a soft navigation the runtime
   owns the scroll: a push reaches the top or its fragment, a traversal returns to where the entry was left,
   and focus resets — `history.scrollRestoration` is `manual` for the document and positions are kept per
   entry, in `sessionStorage` too, so a reload lands where the last document was left. A same-page fragment

@@ -1,5 +1,5 @@
 /** Scroll and focus across soft navigations: remembered per history entry, restored at commit. */
-import { canSoftNavigate } from './document.js';
+import { supported } from './document.js';
 
 /** A scroll offset, in the coordinates `window.scrollTo` takes and `window.scrollX`/`window.scrollY` return. */
 export type ScrollPoint = { x: number; y: number };
@@ -17,9 +17,9 @@ const SCROLL_STORAGE_KEY = 'rsvhono:scroll';
 /** How many entries are kept in that snapshot; the oldest falls out first — `Map` iteration order. */
 const SCROLL_STORAGE_LIMIT = 50;
 
-/** The key of the history entry being shown, or `undefined` where the soft router does not exist. */
+/** The key of the history entry being shown. */
 export function currentEntryKey(): string | undefined {
-  return canSoftNavigate ? navigation.currentEntry?.key : undefined;
+  return navigation.currentEntry?.key;
 }
 
 /**
@@ -74,7 +74,7 @@ function persistScrollPositions(): void {
  * now that `manual` has stopped the browser restoring it. Nothing here depends on the router being mounted,
  * so it does not wait for {@link listenNavigation}.
  */
-if (canSoftNavigate) {
+if (supported) {
   window.addEventListener('pagehide', () => {
     rememberCurrentScroll();
     persistScrollPositions();

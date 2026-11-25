@@ -61,13 +61,22 @@ result; the table is.
   a transition of its own. Under React 19.3's independent transitions that let the payload commit — and
   `router.pending` clear, and `finished` resolve — with the page still suspended. The address and the
   attempt are now one state.
-- **A superseded navigation's handler returns only after whatever replaced it has committed.**
-- **A server action's page payload is shown only on the visit that called it** — same document, same history
-  entry, and no other page shown in between — and never over a newer action's. The return value or error
-  reaches the caller regardless.
-
-Not changed: below the Navigation API the router still falls back to document navigations, in about ten
-lines. Removing that was considered and is not worth a broken `router.push()` on a browser without the API.
+- **`navigation.finished` resolves only when its own destination committed.** A navigation that lost the
+  screen rejects with an `AbortError`, and one whose render failed rejects with the error — the document load
+  that recovers it is a new navigation.
+- **Everything an action reply does to the screen passes one test**: no navigation has been asked for since
+  the call (`navigationIntent()`), and none is under way. That covers the re-rendered page, a `redirect()` and
+  a `notFound()` alike. A reply that fails the test changes nothing — it does not cancel the navigation
+  either — and the page the visitor ends up on is re-read once that navigation is through, because it may
+  have been rendered before the mutation. The return value or error reaches the caller regardless.
+- **Two actions in flight together end in one re-read of the page.** The order calls were made in is not the
+  order the server applied them in, so neither reply is trusted to be the newer snapshot.
+- **Navigations carry a React transition type**: `navigation-push`, `-replace`, `-reload`, `-back`,
+  `-forward`, decided at dispatch. A `<ViewTransition>` can key its direction on them.
+- **No Navigation API, no hydration.** The runtime has no other way to navigate, so where the API is missing
+  the document stays as the server rendered it. One check, in `entry.client.tsx`; the `location.*` fallbacks
+  are gone. `NavigationPrecommitController` is still feature-detected: Safari ships the API without it, and
+  that is a current browser, not an old one.
 
 ## Things found on the way
 
@@ -77,7 +86,11 @@ lines. Removing that was considered and is not worth a broken `router.push()` on
   ignored now.
 - **Two transitions for one address change.** A traversal fires `currententrychange` and then `popstate`.
   Starting a transition for each was observed, on 19.3.1, to commit the first with its Suspense fallbacks
-  showing. The address follower drops the repeat. _Why_ React does that was not investigated.
+  showing. The address follower now listens to `currententrychange` alone, which every change of entry fires.
+- **A pending action holds a navigation's commit.** With a `useActionState` action in flight, a navigation
+  started meanwhile fetches its payload but does not commit until the action's reply has been read — React
+  19.3.1 entangles the two transitions. Seen while writing the stale-redirect test, not designed for; it is
+  the opposite of what "parallel transitions" suggests, and case 16 below is still untested.
 - **`reapplyPayload`** worked around React not retrying a transition after a late flight chunk. With it
   removed the suite passes on 19.3.1, including the case written for it (`navigation-address.spec.mjs`,
   "URL-selected Suspense resolves without … a stuck pending state"). That is evidence it is unnecessary
@@ -87,7 +100,7 @@ lines. Removing that was considered and is not worth a broken `router.push()` on
 
 ## The design's regression list, honestly
 
-The design named 22 cases. Browser suite: 98 pass (95 that existed, two of them re-pointed, plus three new).
+The design named 22 cases. Browser suite: 99 pass.
 
 | #      | Case                                                             | Status                                                                                                              |
 | ------ | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
@@ -97,14 +110,14 @@ The design named 22 cases. Browser suite: 98 pass (95 that existed, two of them 
 | 5      | the page on screen is not aborted when a navigation starts       | by construction; not separately asserted                                                                            |
 | 6      | an unapplied fetch is aborted promptly                           | existing cancellation cases; the abort itself is not asserted                                                       |
 | 7      | an old navigation does not overwrite a newer page                | existing (`navigation-action.spec.mjs`, lifecycle cases)                                                            |
-| 8      | A → B → A distinguishes old work                                 | implemented (history entry + visit count); **not tested**                                                           |
+| 8      | A → B → A distinguishes old work                                 | implemented (navigation intent count); **not tested** for A → B → A itself                                          |
 | 9      | `finished` does not succeed during a pending commit              | **tested** — prepared payloads (existing) and traversals (new)                                                      |
 | 10     | restoring the same resource commits anew                         | exercised by "Back abandons suspension"; the notification is not asserted                                           |
-| 11     | a superseded attempt is not a success                            | router calls reject with `AbortError`; not asserted for every path                                                  |
-| 12     | a failed render does not leave waiters hanging                   | existing ("a prepared payload whose render fails settles …")                                                        |
+| 11     | a superseded attempt is not a success                            | router calls and `navigation.finished` both reject; asserted for the router, not for every `finished` path          |
+| 12     | a failed render does not leave waiters hanging                   | **tested** ("a prepared payload whose render fails rejects …")                                                      |
 | 13     | no listeners left after a failed or aborted stream               | by construction; **not tested**                                                                                     |
 | 14     | a discarded action payload keeps its return value                | page-not-repainted is **tested**; the return value reaching the caller is not                                       |
-| 15     | racing actions and navigations do not go back to an old snapshot | existing snapshot case; action-versus-action ordering **not tested**                                                |
+| 15     | racing actions and navigations do not go back to an old snapshot | **tested** for action vs navigation (both commit orders) and a stale redirect; action vs action **not tested**      |
 | 16     | a slow navigation does not block an independent transition       | **not tested**                                                                                                      |
 | 17, 18 | SSR / hydration agree; static pages read URL, query, hash        | existing (`navigation-address.spec.mjs`)                                                                            |
 | 19     | Back, Forward, redirect, scroll, focus                           | existing suite                                                                                                      |
@@ -112,6 +125,21 @@ The design named 22 cases. Browser suite: 98 pass (95 that existed, two of them 
 | 21     | the streaming retry workaround is unnecessary                    | removed; suite passes — see above                                                                                   |
 | 22     | the existing suite passes                                        | yes, with two cases changed on purpose: `finished` on traversal, and which line reports a corrupt bootstrap payload |
 
-Not adopted from the design, and why: `hydrateRoot` inside a transition, `ViewTransition`,
-`addTransitionType`, `useOptimistic` for pending — none was needed to make anything above work, and each is
-a behaviour change of its own.
+Not adopted from the design, and why: `hydrateRoot` inside a transition, `ViewTransition`, `useOptimistic`
+for pending — none was needed to make anything above work, and each is a behaviour change of its own.
+
+## Reviewed and left as it is
+
+- **CSP nonce on client-reference preloads.** `@vitejs/plugin-rsc` 0.5.39 — the newest release — calls
+  `ReactDOM.preloadModule` / `preinit` for a client reference's dependencies with no nonce and no hook to add
+  one (`setResourceOptionsCallback` is not in it). Nothing here can supply it until a release has that API.
+- **The page wrapper (`rsvhono:pages`).** Still needed: the plugin's own CSS wrapper re-creates the element
+  with `createElement(Page, props)` and drops the non-enumerable `ctx`. Removing it needs that changed
+  upstream, or `ctx` delivered another way.
+- **`env-shadow`.** No Vite setting isolates `process.env` in the SSR environment; `define` replaces one
+  spelling of the read out of six. A module that declares its own `process` still fails the build rather
+  than shipping.
+- **The dev request path** (`serverHandler: false`), **`prerender()` for SSG** and **rendering the router
+  context straight from the server component** were not tried.
+- **Which resources `retire` keeps** — the committed attempt's and the newest scheduled one's — has not been
+  checked against several transitions rendering at once.

@@ -1796,15 +1796,28 @@ describe('checkReactVersions', () => {
     return dir;
   };
 
-  test('refuses a react/react-dom split, naming both versions', () => {
-    const dir = appWith({ react: '19.2.8', 'react-dom': '19.1.0' });
-    assert.throws(() => checkReactVersions(dir), /react 19\.2\.8 and react-dom 19\.1\.0 resolve to different versions/);
+  /** The RSC runtime the framework itself carries: what an app's React has to match. */
+  const RUNTIME = JSON.parse(
+    readFileSync(join(import.meta.dirname, '..', 'node_modules', 'react-server-dom-webpack', 'package.json'), 'utf8'),
+  ).version;
+
+  test('refuses a react/react-dom split, naming every version', () => {
+    const dir = appWith({ react: RUNTIME, 'react-dom': '19.1.0' });
+    assert.throws(
+      () => checkReactVersions(dir),
+      new RegExp(`react ${RUNTIME}, react-dom 19\\.1\\.0 and react-server-dom-webpack ${RUNTIME} resolve to different versions`),
+    );
     // The advice has to name the escape hatch, since a transitive dependency is the usual cause.
     assert.throws(() => checkReactVersions(dir), /overrides/);
   });
 
-  test('accepts a matching pair', () => {
-    checkReactVersions(appWith({ react: '19.2.8', 'react-dom': '19.2.8' }));
+  test('refuses a matching pair that is not the RSC runtime’s version', () => {
+    // The pair agreeing is not enough: the runtime compiled into the server bundle is a third build.
+    assert.throws(() => checkReactVersions(appWith({ react: '19.2.8', 'react-dom': '19.2.8' })), new RegExp(`exactly ${RUNTIME}`));
+  });
+
+  test('accepts all three at one version', () => {
+    checkReactVersions(appWith({ react: RUNTIME, 'react-dom': RUNTIME }));
   });
 
   test('says nothing when neither is installed — the resolver reports that better', () => {
@@ -1967,9 +1980,7 @@ describe('the security-middleware build warning', () => {
     } finally {
       console.warn = warn;
     }
-    // The react-version warning is `checkReactVersions`'s, and depends on what `react` happens to resolve
-    // to from a bare temp directory — whatever this machine has installed above it, if anything.
-    return lines.filter((line) => !/is not the \d+\.\d+\.x this rsvhono was tested against/.test(line)).join('\n');
+    return lines.join('\n');
   }
 
   test('an app with no src/server.ts is told it has neither control', () => {

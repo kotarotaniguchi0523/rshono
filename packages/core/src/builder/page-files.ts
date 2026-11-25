@@ -1,17 +1,16 @@
 /**
- * Finds the page modules named by inline `component: () => import('…')` thunks in `routes.ts`, so the server
- * compiler can put `page-entry-loader.cjs` in front of exactly those files. A page wired up any other way
- * declares its `'use server-entry'` directive itself.
+ * Finds the page modules named by inline `component: () => import('…')` thunks in `routes.ts`, so the page
+ * transform wraps exactly those files. A page wired up any other way declares its `'use server-entry'`
+ * directive itself.
  */
 import { readFileSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { normalizePath } from 'vite';
 
 const COMPONENT_THUNK = /component:\s*(?:async\s*)?\(\s*\)\s*=>\s*import\(\s*(['"])([^'"]+)\1\s*\)/g;
 
 const EXTENSIONS = ['.tsx', '.ts', '.jsx', '.js'];
 
-// `join` rather than `base + '/index…'`: these are compared against the bundler's own module ids, which on
-// Windows carry backslashes.
 function resolveCandidates(base: string): string[] {
   return [...EXTENSIONS.map((ext) => base + ext), ...EXTENSIONS.map((ext) => join(base, `index${ext}`)), base];
 }
@@ -40,7 +39,8 @@ export function scanPageFiles(routesFile: string, srcDir: string, into: Set<stri
     if (!base) continue;
     for (const candidate of resolveCandidates(base)) {
       if (isFile(candidate)) {
-        into.add(candidate);
+        // As Vite spells a module id: forward slashes on every platform, which `node:path` does not give on Windows.
+        into.add(normalizePath(candidate));
         break;
       }
     }

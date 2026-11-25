@@ -104,18 +104,14 @@ function showLateNotFound(): void {
 }
 
 /**
- * Whether the browser hands us its navigations. Gated on `sourceElement` rather than on `navigation` itself:
- * Chrome shipped the event in 102 and that property only in 135, and without it a `data-native` link cannot
- * be told from any other — so the older window would soft-navigate the very links that asked not to be.
+ * Whether this browser can run the client runtime at all: the Navigation API, with `sourceElement` (Chrome
+ * and Edge 135, Firefox 147, Safari 26.2). The runtime is built on it and has no other way to navigate.
  *
- * Where this is false there is no interception at all and every navigation is a real browser load, which a
- * server-rendered app answers correctly on its own. Only the soft part is missing.
- *
- * Both globals are tested, and neither is touched before: this runs at module scope, where a ReferenceError
- * would take the whole client runtime down with it rather than degrading anything.
+ * Read once, by `entry.client.tsx`, which does not hydrate where this is false: the document stays what the
+ * server rendered — links and forms are the browser's — rather than half-running. The only other readers are
+ * the two module-scope side effects that would otherwise run before that decision is made.
  */
-export const canSoftNavigate =
-  typeof navigation !== 'undefined' && typeof NavigateEvent !== 'undefined' && 'sourceElement' in NavigateEvent.prototype;
+export const supported = typeof navigation !== 'undefined' && typeof NavigateEvent !== 'undefined' && 'sourceElement' in NavigateEvent.prototype;
 
 /**
  * The runtime owns a soft navigation's scroll, so the browser's own restoration has to be off: left on, a
@@ -124,12 +120,8 @@ export const canSoftNavigate =
  * document creates — a navigation to another document creates its own entry `auto` — and it also turns the
  * browser's reload restoration off, which {@link readStoredScrollPositions} and the first layout effect put
  * back.
- *
- * Gated on the soft router: below the Navigation API floor every navigation is a real document load, which
- * a server-rendered app answers correctly and the browser restores correctly, and taking that over without
- * a router to repaint the entry would strand the visitor at the top.
  */
-if (canSoftNavigate) {
+if (supported) {
   try {
     history.scrollRestoration = 'manual';
   } catch {
@@ -171,17 +163,9 @@ export const documentNavigation = Symbol('rsvhono:document-navigation');
  *
  * The mark rides the navigation itself, through `info`, so the listener recognizes the event that owns it
  * instead of consuming a flag set in advance. There is no state to clear and none to leak: a navigation the
- * browser refuses cannot make the next one a full load. Below the Navigation API there is no interception to
- * opt out of, and `location.*` is already a document load.
+ * browser refuses cannot make the next one a full load.
  */
 export function loadDocument(href?: string, { replace = false }: { replace?: boolean } = {}): void {
-  if (!canSoftNavigate) {
-    if (href === undefined) window.location.reload();
-    else if (replace) window.location.replace(href);
-    else window.location.assign(href);
-    return;
-  }
-
   try {
     settle(
       href === undefined

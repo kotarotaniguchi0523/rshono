@@ -29,7 +29,31 @@ those.
   modules and HMR are served under `/_static/`, and every other request is handled by the app in-process. A
   client edit is Fast Refresh; a server-component edit re-renders the page in place, client state kept.
 
-- **React 19.3.1**, with `react-server-dom-webpack` to match.
+- **React 19.3.1**, with `react-server-dom-webpack` to match — and required: the peer range is exactly
+  `19.3.1`, and a build fails unless `react`, `react-dom` and the RSC runtime resolve to one version. It used
+  to check the first two and warn about the minor.
+
+- **The client runtime needs the Navigation API** (Chrome/Edge 135, Firefox 147, Safari 26.2). Without it
+  the page is no longer hydrated at all — it stays the server-rendered document — where `router.push()` used
+  to fall back to `location.assign()`.
+
+- **A server action's reply changes the screen only if nothing has asked to navigate since the call.** That
+  now covers its `redirect()` and `notFound()` as well as its re-rendered page, and a reply that loses no
+  longer cancels the navigation that won: the destination commits and is re-read. Two actions in flight
+  together end in one re-read. Return values and errors reach the caller as before.
+
+- **`navigation.finished` rejects for a navigation whose destination did not commit** — superseded, or failed
+  to render — instead of resolving once something else had.
+
+- **Navigations render under a React transition type** (`navigation-push`, `-replace`, `-reload`, `-back`,
+  `-forward`), for `<ViewTransition>`.
+
+### Security
+
+- **Every server reference is checked against the build's allowlist, on every decode path.** The id in an
+  action call's header already was; a reference inside the arguments, in a form's `$ACTION_REF`, or in a
+  `useActionState` key was left to the loader. An export the module never had is now a 400 before anything
+  loads.
 
 - **The client runtime is rebuilt** around two objects: a `PageResource` (one payload being read — one fetch,
   one `AbortController`, from the Navigation API's precommit phase to the render that shows it) and a

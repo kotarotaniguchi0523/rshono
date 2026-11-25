@@ -39,15 +39,17 @@ export type RenderAttempt = {
    * been shown.
    */
   readonly afterCommit?: () => void;
+  /** The React transition type this attempt renders under — see `transitionTypeFor` in `navigation.ts`. */
+  readonly transitionType?: string;
 };
 
-export type AttemptOptions = { afterCommit?: () => void; recoversByLoad?: boolean };
+export type AttemptOptions = { afterCommit?: () => void; recoversByLoad?: boolean; transitionType?: string };
 
 export function createAttempt(
   resource: PageResource,
   payload: RscPayload,
   href: string,
-  { afterCommit, recoversByLoad = true }: AttemptOptions = {},
+  { afterCommit, recoversByLoad = true, transitionType }: AttemptOptions = {},
 ): RenderAttempt {
   const { promise: completion, resolve } = Promise.withResolvers<RenderOutcome>();
   let settled = false;
@@ -57,7 +59,7 @@ export function createAttempt(
     resolve(outcome);
     return true;
   };
-  return { resource, href, payload, completion, recoversByLoad, settle, afterCommit };
+  return { resource, href, payload, completion, recoversByLoad, settle, afterCommit, transitionType };
 }
 
 /** The attempt React was last asked to show. Equal to {@link committed} when nothing is in flight. */
@@ -84,13 +86,6 @@ export function connectRoot(next: Dispatch): () => void {
 
 export const committedAttempt = (): RenderAttempt | undefined => committed;
 
-let visits = 0;
-/**
- * How many times the page on screen has changed to a different document. With the history entry and the URL,
- * this is what tells a visit to a page from an earlier visit to the same one — A → B → A.
- */
-export const pageVisits = (): number => visits;
-
 /** The attempt React has been given and has not committed, if there is one. */
 export const pendingAttempt = (): RenderAttempt | undefined => (scheduled !== committed ? scheduled : undefined);
 
@@ -109,7 +104,6 @@ export function schedule(attempt: RenderAttempt, { urgent = false }: { urgent?: 
 
 /** React committed `attempt`. Called from the root's layout effect, with the state it rendered. */
 export function acknowledgeCommit(attempt: RenderAttempt): void {
-  if (committed && committed.href !== attempt.href) visits++;
   committed = attempt;
   scheduled ??= attempt;
   // An attempt that was superseded and committed anyway — React finished it before reaching the newer update

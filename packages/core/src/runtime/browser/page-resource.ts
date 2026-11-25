@@ -123,10 +123,17 @@ function readInlinePayload(): ReadableStream<Uint8Array> {
 function observed(source: Promise<ReadableStream<Uint8Array>>): { stream: ReadableStream<Uint8Array>; finished: Promise<void> } {
   const { promise: finished, resolve } = Promise.withResolvers<void>();
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  let cancelled: { reason: unknown } | undefined;
   const stream = new ReadableStream<Uint8Array>({
     async pull(controller) {
       try {
-        reader ??= (await source).getReader();
+        if (!reader) {
+          const body = await source;
+          // Cancelled while the response was still on its way: there was no reader to cancel then, so the
+          // body that has just arrived is released here instead of being read by nobody.
+          if (cancelled) return void body.cancel(cancelled.reason).catch(() => {});
+          reader = body.getReader();
+        }
         const { done, value } = await reader.read();
         if (done) {
           controller.close();
@@ -138,6 +145,7 @@ function observed(source: Promise<ReadableStream<Uint8Array>>): { stream: Readab
       }
     },
     cancel(reason) {
+      cancelled = { reason };
       resolve();
       return reader?.cancel(reason);
     },

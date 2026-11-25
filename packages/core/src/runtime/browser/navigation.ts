@@ -8,7 +8,7 @@
  */
 import { isControlDigest, parseRedirectDigest } from '../control.js';
 import type { NavigationOutcome } from '../navigation.js';
-import { canSoftNavigate, documentNavigation, loadDocument, reloadOnceForLateNotFound, settle } from './document.js';
+import { documentNavigation, loadDocument, reloadOnceForLateNotFound, settle } from './document.js';
 import { discard, discardPrepared, prepare, type PageResource } from './page-resource.js';
 import { committedAttempt, createAttempt, pendingAttempt, schedule, type AttemptOptions } from './render-attempt.js';
 import { cancelElementWatches, jumpToAnchor, rememberCurrentScroll, resetFocus, scrollPointFor, scrollToPoint, scrollToTop } from './scroll.js';
@@ -85,14 +85,7 @@ function ask(run: (request: NavigationRequest) => NavigationResult, request = ne
   return request.promise;
 }
 
-/** Below the Navigation API every navigation is a document load, which a server-rendered app answers correctly. */
-function documentOnly(go: () => void): Promise<NavigationOutcome> {
-  go();
-  return Promise.resolve({ kind: 'document-navigation' });
-}
-
 function navigate(href: string, history: 'push' | 'replace', request?: NavigationRequest): Promise<NavigationOutcome> {
-  if (!canSoftNavigate) return documentOnly(() => (history === 'replace' ? window.location.replace(href) : window.location.assign(href)));
   return ask((info) => navigation.navigate(href, { history, info }), request);
 }
 
@@ -100,19 +93,16 @@ export const push = (href: string): Promise<NavigationOutcome> => navigate(href,
 export const replace = (href: string): Promise<NavigationOutcome> => navigate(href, 'replace');
 
 export function back(): Promise<NavigationOutcome> {
-  if (!canSoftNavigate) return documentOnly(() => window.history.back());
   if (!navigation.canGoBack) return Promise.resolve({ kind: 'no-op' });
   return ask((info) => navigation.back({ info }));
 }
 
 export function forward(): Promise<NavigationOutcome> {
-  if (!canSoftNavigate) return documentOnly(() => window.history.forward());
   if (!navigation.canGoForward) return Promise.resolve({ kind: 'no-op' });
   return ask((info) => navigation.forward({ info }));
 }
 
 export function refresh(): Promise<NavigationOutcome> {
-  if (!canSoftNavigate) return documentOnly(() => window.location.reload());
   return ask((info) => navigation.reload({ info }));
 }
 
@@ -125,9 +115,31 @@ export function leave(href?: string, options?: { replace?: boolean }): void {
   loadDocument(href, options);
 }
 
-/** A server action's reply is taking the screen: the navigation a caller was awaiting will not be what is shown. */
-export function supersedeActiveRequest(): void {
-  rejectRequest(activeRequest, superseded('Navigation superseded by server action'));
+// ── What a server function may know about navigations ────────────────────────────────────────────────────
+
+let intents = 0;
+/**
+ * Counts the navigations this document has been asked for — every one, whatever became of it. Two readings
+ * that agree mean nothing has asked to change the page in between, which is what an action reply needs to
+ * know before it takes the screen: the URL cannot say so, because it does not move until a navigation commits.
+ */
+export const navigationIntent = (): number => intents;
+
+let underway = 0;
+/** Whether a navigation this runtime intercepted is still fetching or rendering. */
+export const navigating = (): boolean => underway > 0;
+
+/** Marks an intercepted navigation as under way. The returned function ends it, once. */
+function begin(event: NavigateEvent): () => void {
+  underway++;
+  let ended = false;
+  const end = () => {
+    if (ended) return;
+    ended = true;
+    underway--;
+  };
+  event.signal.addEventListener('abort', end, { once: true });
+  return end;
 }
 
 /**
@@ -204,24 +216,24 @@ async function show(resource: PageResource, options: AttemptOptions, request?: N
  * {@link show}, as the body of a navigation handler: what it resolves or rejects with is what the browser
  * reports as `navigation.finished`, and the router call that started the navigation is settled alongside.
  *
- * Losing the screen is not this navigation failing, so it is not reported as one — but neither does the
- * handler return before *something* has committed: it waits for whatever took over.
+ * Losing the screen rejects, with the `AbortError`: `navigation.finished` means *this* destination committed,
+ * and another render committing in its place is not that. Nothing is repaired on that path — whatever took
+ * the screen is showing.
  */
-async function perform(event: NavigateEvent, resource: PageResource, afterCommit?: () => void): Promise<void> {
+async function perform(event: NavigateEvent, resource: PageResource, end: () => void, options: AttemptOptions = {}): Promise<void> {
   const request = requestOf(event);
   const hop = request?.hop;
   try {
-    const shown = await show(resource, { afterCommit }, request);
+    const shown = await show(resource, options, request);
     if (shown && request?.hop === hop && !event.signal.aborted) finishRequest(request, rendered());
   } catch (error) {
     rejectRequest(request, error);
-    if (isSuperseded(error)) {
-      await pendingAttempt()?.completion;
-      return;
-    }
     // The root this would have rendered into is gone, or the server answered with something that is not a
     // payload. Either way the document load asks the server the same question and shows its answer.
-    leave();
+    if (!isSuperseded(error)) leave();
+    throw error;
+  } finally {
+    end();
   }
 }
 
@@ -231,6 +243,21 @@ export function refetch(): void {
   void show(prepare(location.href), {}).catch((error: unknown) => {
     if (!isSuperseded(error)) leave();
   });
+}
+
+let revalidation: Promise<void> | undefined;
+/**
+ * Re-reads whatever page the visitor ends up on, once no navigation is under way. For a mutation whose own
+ * reply could not be shown: the page on screen — or the one arriving — may have been rendered before it.
+ * One re-read however many callers ask while it is waiting.
+ */
+export function revalidate(): void {
+  revalidation ??= (async () => {
+    // A navigation under way is left to finish: cancelling it would undo what the visitor asked for.
+    while (navigating()) await navigation.transition?.finished.catch(() => {});
+    revalidation = undefined;
+    refetch();
+  })();
 }
 
 // ── The navigate listener ────────────────────────────────────────────────────────────────────────────────
@@ -285,7 +312,21 @@ function afterCommitFor(event: NavigateEvent): (() => void) | undefined {
   return hash === '' ? scrollToTop : () => jumpToAnchor(hash);
 }
 
-/** `event.intercept({ precommitHandler })`, where the browser has it: the URL is held until the payload is known. */
+/**
+ * The React transition type a navigation renders under — what a `<ViewTransition>` keys its direction on.
+ * Decided here, at dispatch: a traversal's direction is the destination's index against the entry being
+ * left, and once the browser commits there is no "entry being left" to compare with.
+ */
+function transitionTypeFor(event: NavigateEvent): string {
+  if (event.navigationType !== 'traverse') return `navigation-${event.navigationType}`;
+  return event.destination.index < (navigation.currentEntry?.index ?? 0) ? 'navigation-back' : 'navigation-forward';
+}
+
+/**
+ * `event.intercept({ precommitHandler })`, where the browser has it: the URL is held until the payload is
+ * known. Feature detection for a current browser, not a fallback for an old one — Safari ships the
+ * Navigation API without the precommit phase.
+ */
 const canPrecommit = typeof NavigationPrecommitController !== 'undefined';
 
 const REDIRECT_LIMIT = 10;
@@ -298,7 +339,7 @@ const REDIRECT_LIMIT = 10;
  * Each hop is its own resource; the ones a redirect leaves behind are discarded as it goes. The resource the
  * loop ends on is the one the handler shows: the same object, the same fetch, the same abort switch.
  */
-function interceptBeforeCommit(event: NavigateEvent): void {
+function interceptBeforeCommit(event: NavigateEvent, end: () => void, options: AttemptOptions): void {
   event.intercept({
     scroll: 'manual',
     focusReset: event.navigationType === 'replace' ? 'manual' : 'after-transition',
@@ -330,13 +371,14 @@ function interceptBeforeCommit(event: NavigateEvent): void {
         }
         if (href !== event.destination.url) controller.redirect(href);
         const ready = resource;
-        controller.addHandler(() => perform(event, ready, afterCommitFor(event)));
+        controller.addHandler(() => perform(event, ready, end, options));
       } catch (error) {
         const cancelled = event.signal.aborted || resource?.controller.signal.aborted === true;
         if (resource) discard(resource);
         // Nothing has committed, so the document load starts from the page still on screen — and lets the
         // server answer for the destination itself: its error page, its 404, its cross-origin redirect.
         if (!cancelled) leave(recovery ?? event.destination.url);
+        end();
         throw error;
       }
     },
@@ -344,14 +386,14 @@ function interceptBeforeCommit(event: NavigateEvent): void {
 }
 
 /** A reload — or a push or replace where the browser has no precommit phase: the URL commits, then the payload is fetched. */
-function interceptAfterCommit(event: NavigateEvent): void {
+function interceptAfterCommit(event: NavigateEvent, end: () => void, options: AttemptOptions): void {
   const inPlace = event.navigationType === 'replace' || event.navigationType === 'reload';
   event.intercept({
     scroll: 'manual',
     focusReset: inPlace ? 'manual' : 'after-transition',
     handler: () => {
       discardPrepared();
-      return perform(event, prepare(event.destination.url, event.signal), afterCommitFor(event));
+      return perform(event, prepare(event.destination.url, event.signal), end, options);
     },
   });
 }
@@ -365,7 +407,7 @@ function interceptAfterCommit(event: NavigateEvent): void {
  * payload is shown again, urgently: that releases the suspended destination, and — being a new attempt on
  * the same resource — commits and reports like any other.
  */
-function interceptTraversal(event: NavigateEvent): void {
+function interceptTraversal(event: NavigateEvent, end: () => void, transitionType: string): void {
   const request = requestOf(event);
   const destination = new URL(event.destination.url);
   const key = event.destination.key;
@@ -382,32 +424,36 @@ function interceptTraversal(event: NavigateEvent): void {
       discardPrepared();
       const onScreen = committedAttempt();
       if (!onScreen || documentPart(destination) !== onScreen.href) {
-        return perform(event, prepare(destination.href, event.signal), () => {
+        const afterCommit = () => {
           restoreScroll();
           resetFocus();
-        });
+        };
+        return perform(event, prepare(destination.href, event.signal), end, { afterCommit, transitionType });
       }
-      if (pendingAttempt()) {
-        const again = createAttempt(onScreen.resource, onScreen.payload, onScreen.href, { afterCommit: restoreScroll });
-        const outcome = await schedule(again, { urgent: true });
-        // The payload has rendered before, but an uncaught error would still tear the root down.
-        if (outcome.kind === 'failed') return leave();
-        if (outcome.kind === 'superseded') return;
-      } else restoreScroll();
-      if (!event.signal.aborted) finishRequest(request, rendered());
+      try {
+        if (pendingAttempt()) {
+          const again = createAttempt(onScreen.resource, onScreen.payload, onScreen.href, { afterCommit: restoreScroll });
+          const outcome = await schedule(again, { urgent: true });
+          // The payload has rendered before, but an uncaught error would still tear the root down.
+          if (outcome.kind === 'failed') return leave();
+          if (outcome.kind === 'superseded') throw superseded();
+        } else restoreScroll();
+        if (!event.signal.aborted) finishRequest(request, rendered());
+      } finally {
+        end();
+      }
     },
   });
 }
 
 export function listenNavigation(): () => void {
-  if (!canSoftNavigate) return () => {};
-
   const onNavigate = (event: NavigateEvent) => {
     // React's own: with a transition pending and no navigation under way it starts one at the current URL,
     // so the browser shows its loading indicator, and intercepts it itself. Not a navigation of the page.
     if (event.info === 'react-transition') return;
     if (event.info === documentNavigation) return;
 
+    intents++;
     const request = requestOf(event);
     if (activeRequest && activeRequest !== request) rejectRequest(activeRequest, superseded());
     activeRequest = request;
@@ -415,7 +461,8 @@ export function listenNavigation(): () => void {
     // Before the browser moves: the offset belongs to the entry being left.
     rememberCurrentScroll();
 
-    if (event.canIntercept && event.navigationType === 'traverse') return interceptTraversal(event);
+    const transitionType = transitionTypeFor(event);
+    if (event.canIntercept && event.navigationType === 'traverse') return interceptTraversal(event, begin(event), transitionType);
 
     if (!event.canIntercept || leaveToBrowser(event)) {
       if (!request) return;
@@ -425,8 +472,9 @@ export function listenNavigation(): () => void {
       return;
     }
 
-    if (canPrecommit && event.navigationType !== 'reload') interceptBeforeCommit(event);
-    else interceptAfterCommit(event);
+    const options = { afterCommit: afterCommitFor(event), transitionType };
+    if (canPrecommit && event.navigationType !== 'reload') interceptBeforeCommit(event, begin(event), options);
+    else interceptAfterCommit(event, begin(event), options);
   };
 
   navigation.addEventListener('navigate', onNavigate);

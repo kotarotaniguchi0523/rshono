@@ -11,7 +11,7 @@
  *   scroll.ts           scroll and focus across navigations
  */
 import { hydrateRoot } from 'react-dom/client';
-import { RECOVERY_GRACE_MS, documentUrl, lateNotFoundKey, showFatal } from './browser/document.js';
+import { RECOVERY_GRACE_MS, documentUrl, lateNotFoundKey, showFatal, supported } from './browser/document.js';
 import { handleControlDigest, refetch } from './browser/navigation.js';
 import { inlineResource } from './browser/page-resource.js';
 import { createAttempt, failPending, pendingAttempt } from './browser/render-attempt.js';
@@ -29,6 +29,12 @@ import { installServerFunctions } from './browser/server-function.js';
 const controlDigestHistory = (): 'push' | 'replace' => (pendingAttempt()?.recoversByLoad === false ? 'push' : 'replace');
 
 async function main() {
+  // Not hydrated rather than half-run: the server-rendered document works as a document without this.
+  if (!supported) {
+    console.warn('[rsvhono] this browser has no Navigation API, so the page is not hydrated: it stays as the server rendered it.');
+    return;
+  }
+
   // The document's own payload is a resource like any other; only its abort switch is inert.
   const resource = inlineResource();
   const payload = await resource.rootReady;
