@@ -148,3 +148,78 @@ test('a link without data-prefetch fetches nothing until it is clicked', async (
   await expect(page.locator('[data-probe-visit*="visit=fast"]')).toBeVisible();
   expect(gets.count).toBe(1);
 });
+
+/*
+ * Which links are worth fetching ahead for: exactly the ones a click on would soft-navigate. A payload for a
+ * link the browser is going to handle itself — a download, another tab, a file, a jump within this page — is
+ * a request nobody reads.
+ */
+test.describe('what is not fetched ahead', () => {
+  /** Adds one `data-prefetch` anchor with `attributes`, shows intent on it, and reports the payload GETs it caused. */
+  async function intentOn(page, href, attributes = {}) {
+    const requests = [];
+    const onRequest = (request) => {
+      if (request.method() === 'GET' && request.headers().rsc === '1') requests.push(new URL(request.url()).pathname + new URL(request.url()).search);
+    };
+    page.on('request', onRequest);
+    await page.evaluate(
+      ([to, extra]) => {
+        const anchor = document.createElement('a');
+        anchor.setAttribute('href', to);
+        anchor.dataset.prefetch = '';
+        for (const [name, value] of Object.entries(extra)) anchor.setAttribute(name, value);
+        document.body.append(anchor);
+        for (const type of ['pointerenter', 'focusin', 'touchstart']) anchor.dispatchEvent(new Event(type, { bubbles: type === 'focusin' }));
+      },
+      [href, attributes],
+    );
+    await page.waitForTimeout(300);
+    page.off('request', onRequest);
+    return requests;
+  }
+
+  test.beforeEach(async ({ page }) => {
+    await open(page);
+  });
+
+  for (const [name, href, attributes] of [
+    ['a link marked data-native', '/users', { 'data-native': '' }],
+    ['a download link', '/users', { download: '' }],
+    ['a link that opens another browsing context', '/users', { target: '_blank' }],
+    ['a link into a named frame', '/users', { target: 'sidebar' }],
+    ['a link to a file', '/favicon.svg', {}],
+    ['a link to a file with a query', '/llms.txt?v=2', {}],
+    ['a link to another origin', 'https://example.com/users', {}],
+    ['a link that is not http at all', 'mailto:someone@example.com', {}],
+    ['a link to the page already on screen', '/transition-probe', {}],
+    ['a link that differs from this page only by its fragment', '/transition-probe#section', {}],
+    ['a bare fragment', '#section', {}],
+  ]) {
+    test(`${name} fetches nothing`, async ({ page }) => {
+      expect(await intentOn(page, href, attributes)).toEqual([]);
+      await expect(page).toHaveURL('/transition-probe');
+    });
+  }
+
+  test('target="_self" is this browsing context, and is fetched', async ({ page }) => {
+    expect(await intentOn(page, '/users', { target: '_self' })).toEqual(['/users']);
+  });
+
+  test('the same page with another query is another page, and is fetched', async ({ page }) => {
+    expect(await intentOn(page, '/transition-probe?visit=ahead')).toEqual(['/transition-probe?visit=ahead']);
+  });
+
+  test('router.prefetch() takes the caller at its word about the page on screen, and still refuses what cannot be soft-navigated', async ({ page }) => {
+    const requests = [];
+    page.on('request', (request) => {
+      if (request.method() === 'GET' && request.headers().rsc === '1') requests.push(new URL(request.url()).pathname);
+    });
+    const router = (href) => page.evaluate((to) => document.querySelector('[data-nav-router]').router.prefetch(to), href);
+    await router('/favicon.svg');
+    await router('https://example.com/users');
+    await page.waitForTimeout(300);
+    expect(requests, 'a file and another origin have no payload to fetch').toEqual([]);
+    await router('/transition-probe');
+    await expect.poll(() => requests).toEqual(['/transition-probe']);
+  });
+});

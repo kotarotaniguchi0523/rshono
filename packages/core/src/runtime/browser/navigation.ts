@@ -9,7 +9,7 @@
 import { parseControlIntent, type RouteIntent } from '../control.js';
 import type { NavigationOutcome } from '../navigation.js';
 import { documentNavigation, loadDocument, reloadOnceForLateNotFound, settle } from './document.js';
-import { discard, discardPrefetched, discardPrepared, prefetch, prepare, resourceOfRender, type PageResource } from './page-resource.js';
+import { discard, discardPrefetched, discardPrepared, prefetch as fetchAhead, prepare, resourceOfRender, type PageResource } from './page-resource.js';
 import { committedAttempt, createAttempt, pendingAttempt, schedule, type AttemptOptions } from './render-attempt.js';
 import { cancelElementWatches, jumpToAnchor, rememberCurrentScroll, resetFocus, scrollPointFor, scrollToPoint, scrollToTop } from './scroll.js';
 
@@ -410,6 +410,17 @@ function namesAFile(href: string): boolean {
  * - a link marked `data-native`, the documented opt-out;
  * - a destination that names a file — see {@link namesAFile}.
  */
+/** Whether a URL is one this runtime can render a payload for at all: this origin, and a page rather than a file. */
+function softNavigable(url: URL): boolean {
+  return url.origin === location.origin && !namesAFile(url.href);
+}
+
+/** The attributes by which a link says the browser, not this runtime, handles a click on it. */
+function linkIsBrowsers(link: Element): boolean {
+  const target = link.getAttribute('target');
+  return link.hasAttribute('data-native') || link.hasAttribute('download') || (target !== null && target !== '' && target.toLowerCase() !== '_self');
+}
+
 function leaveToBrowser(event: NavigateEvent): boolean {
   return (
     event.hashChange ||
@@ -479,7 +490,7 @@ function interceptBeforeCommit(event: NavigateEvent, end: () => void, options: A
           if (event.signal.aborted || resource.controller.signal.aborted) throw superseded();
           if (!root.redirect) break;
           const target = new URL(root.redirect, href);
-          if (target.origin !== location.origin || namesAFile(target.href)) {
+          if (!softNavigable(target)) {
             recovery = target.href;
             throw new Error(`[rsvhono] cannot soft-navigate to ${target.href}`);
           }
@@ -570,21 +581,41 @@ function interceptTraversal(event: NavigateEvent, end: () => void, transitionTyp
  * moments just before a click. An ordinary `<a>`; the navigation that follows is the browser's, and it finds
  * the payload already on its way. Opt-in per link because a fetch ahead renders the page on the server
  * whether or not anyone goes there.
+ *
+ * Only for a link a click on would soft-navigate — the same questions the `navigate` handler asks of the
+ * click itself (`leaveToBrowser`), asked here of the link, because there is no navigation yet to ask. A link
+ * the browser will handle (another context, a download, `data-native`), a file, another origin, and a jump
+ * within the page on screen all have no payload anybody would read.
  */
 function listenPrefetch(): () => void {
   const onIntent = (event: Event) => {
     const link = event.target instanceof Element ? event.target.closest('a[data-prefetch]') : null;
-    if (link instanceof HTMLAnchorElement && link.href) prefetch(link.href);
+    if (!(link instanceof HTMLAnchorElement) || !link.href || linkIsBrowsers(link)) return;
+    const url = new URL(link.href);
+    // The page on screen, with or without a fragment: following the link scrolls, or re-reads what is here.
+    if (url.origin === location.origin && documentPart(url) === documentPart(new URL(location.href))) return;
+    prefetch(url.href);
   };
   const types = ['pointerenter', 'focusin', 'touchstart'] as const;
-  // Capture: `pointerenter` does not bubble.
   for (const type of types) document.addEventListener(type, onIntent, { capture: true, passive: true });
   return () => {
     for (const type of types) document.removeEventListener(type, onIntent, { capture: true });
   };
 }
 
-export { prefetch };
+/**
+ * `router.prefetch()`. Narrower than a link's rule in one way: the caller named the URL, so the page on
+ * screen is fetched if that is what was asked for. A URL that cannot be soft-navigated has no payload.
+ */
+export function prefetch(href: string): void {
+  let url: URL;
+  try {
+    url = new URL(href, location.href);
+  } catch {
+    return;
+  }
+  if (softNavigable(url)) fetchAhead(url.href);
+}
 
 export function listenNavigation(): () => void {
   const stopPrefetch = listenPrefetch();
