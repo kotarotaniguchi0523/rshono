@@ -25,6 +25,24 @@ those.
   modules and HMR are served under `/_static/`, and every other request is handled by the app in-process. A
   client edit is Fast Refresh; a server-component edit re-renders the page in place, client state kept.
 
+- **React 19.3.1**, with `react-server-dom-webpack` to match.
+
+- **The client runtime is rebuilt** around two objects: a `PageResource` (one payload being read — one fetch,
+  one `AbortController`, from the Navigation API's precommit phase to the render that shows it) and a
+  `RenderAttempt` (one request to show it, settled when React commits). Back and Forward are intercepted
+  like any other navigation instead of being answered from `popstate`.
+  [`packages/core/docs/client-runtime.md`](packages/core/docs/client-runtime.md) has what replaced what.
+  - `navigation.finished` now waits for a traversal's page to commit.
+  - A component suspending on `useNavigation().url` holds `router.pending` and the navigation until it
+    resolves, where under React 19.3 it would have been left behind.
+  - A server action's re-rendered page is shown only on the visit that called it; its return value always
+    reaches the caller.
+
+### Fixed
+
+- **A client disconnecting while the `error` page rendered** could still be logged as `the error page failed
+to render`, when the abort landed in the RSC half of that render.
+
 ### Breaking
 
 - **`rspack` in `rshono.config.ts` is replaced by `vite`** — a Vite config merged over the generated one.

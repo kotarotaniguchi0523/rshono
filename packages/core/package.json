@@ -64,7 +64,7 @@
     "@hono/node-server": "^2.1.8",
     "@vitejs/plugin-react": "6.3.0",
     "@vitejs/plugin-rsc": "0.5.39",
-    "react-server-dom-webpack": "19.2.8",
+    "react-server-dom-webpack": "19.3.1",
     "vite": "8.3.8"
   },
   "devDependencies": {
@@ -73,8 +73,8 @@
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.5",
     "hono": "^4.13.17",
-    "react": "19.2.8",
-    "react-dom": "19.2.8",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
     "typescript": "^7.0.2"
   },
   "peerDependencies": {

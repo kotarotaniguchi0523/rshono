@@ -1056,8 +1056,14 @@ function buildApp(): Hono {
         // The signal is read here rather than reusing the sample above: this render started after that one
         // was taken, and a client that left while it was running rejects it with the same abort. Reporting
         // that would be the very disconnect noise the check above exists to keep out.
-        if (cameFromPayload(renderError)) console.error(message, renderError);
-        else if (!c.req.raw.signal.aborted) reportServerError(renderError, { source: 'request', hono: c, message });
+        //
+        // And it is read *first*. An aborted RSC render reaches the SSR pass through the payload, as a
+        // stand-in like any other render error — so testing `cameFromPayload` ahead of the signal printed the
+        // disconnect after all, whenever the abort landed in the RSC half rather than the SSR half.
+        if (c.req.raw.signal.aborted) {
+          // Nobody is there to answer, and nothing went wrong.
+        } else if (cameFromPayload(renderError)) console.error(message, renderError);
+        else reportServerError(renderError, { source: 'request', hono: c, message });
       }
     }
     // A client that asked for HTML gets a document, even here: this is the last resort for an app with no

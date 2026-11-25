@@ -1967,7 +1967,9 @@ describe('the security-middleware build warning', () => {
     } finally {
       console.warn = warn;
     }
-    return lines.join('\n');
+    // The react-version warning is `checkReactVersions`'s, and depends on what `react` happens to resolve
+    // to from a bare temp directory — whatever this machine has installed above it, if anything.
+    return lines.filter((line) => !/is not the \d+\.\d+\.x this rshono was tested against/.test(line)).join('\n');
   }
 
   test('an app with no src/server.ts is told it has neither control', () => {

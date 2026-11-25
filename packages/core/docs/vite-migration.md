@@ -35,13 +35,12 @@ they describe a bundler this package no longer uses until they are re-run.
 | `vite`                     | 8.3.8  |                                                                                     |
 | `@vitejs/plugin-rsc`       | 0.5.39 | a `0.x`: pinned exactly                                                             |
 | `@vitejs/plugin-react`     | 6.3.0  |                                                                                     |
-| `react-server-dom-webpack` | 19.2.8 | **must equal `react` / `react-dom`**; in the workspace `overrides` and `check:pins` |
-| `react`, `react-dom`       | 19.2.8 | unchanged — see "Still open"                                                        |
+| `react-server-dom-webpack` | 19.3.1 | **must equal `react` / `react-dom`**; in the workspace `overrides` and `check:pins` |
+| `react`, `react-dom`       | 19.3.1 | raised after the swap — see "After the bundler"                                     |
 
-The plugin vendors its own copy of the RSC runtime (19.3.1 in this release) and uses an installed
-`react-server-dom-webpack` instead when it finds one. A silent fallback would pair that copy with React
-19.2.8, so `test/hmr.test.mjs` asserts the built bundle contains the installed package and not the vendored
-one.
+The plugin vendors its own copy of the RSC runtime and uses an installed `react-server-dom-webpack` instead
+when it finds one. A silent fallback could pair a different version with the pinned React, so
+`test/hmr.test.mjs` asserts the built bundle contains the installed package and not the vendored one.
 
 ## What replaced what
 
@@ -108,14 +107,8 @@ used to do, so `importAppBundle` now imports each build from a private copy.
 - **Real hosts.** `cloudflare` was checked with `wrangler deploy --dry-run`; `vercel` and `aws-lambda` by the
   suite's in-process drivers. None was deployed.
 
-## Still open from the design
+## After the bundler
 
-The design this followed (ADR-001 … ADR-012) asked for more than a bundler swap. Not done:
-
-- **React 19.3.1+** (ADR-005). The pin stayed on 19.2.8 so that every change in this replacement could be
-  attributed to the bundler. With Rspack gone nothing holds it there.
-- **Navigation API only** (ADR-006 … 010, issues #29 #40 #78 – #81 #85 #87). The History fallback, the
-  `SnapshotRegistry`-centred history model, commit-synchronised `finished` and the rest of the navigation
-  redesign are untouched: `entry.client.tsx` changed by its imports and its dev client, nothing else.
-- **`hydrateRoot(document)` in a transition, `onCaughtError` / `onUncaughtError`** — as they were.
-- **Re-running the benchmarks.**
+The design asked for more than a bundler swap, and it was done separately so each change could be told
+apart: React 19.3.1, and the client runtime rebuilt around `PageResource` and `RenderAttempt`. That is
+[`client-runtime.md`](client-runtime.md). Still not done from the original design: re-running the benchmarks.

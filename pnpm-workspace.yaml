@@ -8,9 +8,9 @@ packages:
 # ReactSharedInternals and emits a flight payload the matching react-dom must parse.
 # A single resolution of each is enforced here so no transitive dep can split them.
 overrides:
-  react: 19.2.8
-  react-dom: 19.2.8
-  react-server-dom-webpack: 19.2.8
+  react: 19.3.1
+  react-dom: 19.3.1
+  react-server-dom-webpack: 19.3.1
 allowBuilds:
   esbuild: false
   # wrangler brings workerd, whose install script only picks the platform binary out of the optional

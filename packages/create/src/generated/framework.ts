@@ -15,8 +15,8 @@ export const NODE_ENGINE = '>=22.18.0';
  */
 export const FRAMEWORK_DEPS = {
   hono: '^4.13.17',
-  react: '19.2.8',
-  'react-dom': '19.2.8',
+  react: '19.3.1',
+  'react-dom': '19.3.1',
   typescript: '^7.0.2',
   '@types/node': '^26.6.6',
   '@types/react': '^19.2.18',

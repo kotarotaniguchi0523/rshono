@@ -590,10 +590,11 @@ test.describe('no blank screens', () => {
       });
     });
 
-    const consoleErrors = [];
+    const reported = [];
     page.on('console', (message) => {
-      if (message.type() === 'error') consoleErrors.push(message.text());
+      if (message.type() === 'error') reported.push(message.text());
     });
+    page.on('pageerror', (error) => reported.push(error.message));
 
     await page.goto('/crash');
 
@@ -603,7 +604,10 @@ test.describe('no blank screens', () => {
     await expect(overlay.getByRole('button', { name: 'Reload page' })).toBeVisible();
     // Production must not put the stack on screen — that is the dev-only branch.
     await expect(overlay).not.toContainText('Component stack:');
-    expect(consoleErrors.join('\n')).toContain('the client runtime failed to start');
+    // And it is said out loud, not only painted. Which line says it depends on where the corruption lands:
+    // a payload whose root never arrives fails the bootstrap; one whose root arrives and whose later rows do
+    // not (React 19.3 on this document) fails the first render, and reaches the console through `reportError`.
+    expect(reported.join('\n')).toMatch(/the client runtime failed to start|Minified React error/);
   });
 
   /*
