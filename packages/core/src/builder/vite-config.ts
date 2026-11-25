@@ -9,7 +9,7 @@
 import { getRequestListener } from '@hono/node-server';
 import react from '@vitejs/plugin-react';
 import rsc, { getPluginApi } from '@vitejs/plugin-rsc';
-import { hasDirective, transformWrapExport } from '@vitejs/plugin-rsc/transforms';
+import { hasDirective } from '@vitejs/plugin-rsc/transforms';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
@@ -26,7 +26,7 @@ import {
 } from 'vite';
 import type { RsvhonoConfig } from '../config.js';
 import type { DeployPreset } from '../deploy/presets.js';
-import { PAGE_MARK } from '../runtime/validate-entries.js';
+import { PAGE_ASSETS, PAGE_MARK } from '../runtime/validate-entries.js';
 import { resolveServerConfig, type ServerConfig } from '../server/server-config.js';
 import { PUBLIC_PROCESS_ID, publicProcessModule, readsRealProcess, shadowProcessEnv } from './env-shadow.js';
 import { scanPageFiles } from './page-files.js';
@@ -107,29 +107,21 @@ function firstExisting(dir: string, names: string[]): string | undefined {
 }
 
 /** Appended to a page module by {@link rsvhonoPages}. `jsx(value, props)`, never `createElement` — see there. */
-const WRAP_PAGE = `
-import { jsx as __rsvhono_jsx, jsxs as __rsvhono_jsxs, Fragment as __rsvhono_Fragment } from "react/jsx-runtime";
-function __rsvhono_wrap_page__(value, name, key) {
-  if (typeof value !== "function") return value;
-  function __wrapper(props) {
-    return __rsvhono_jsxs(__rsvhono_Fragment, { children: [import.meta.viteRsc.loadCss(), __rsvhono_jsx(value, props)] });
-  }
-  Object.defineProperty(__wrapper, "name", { value: name });
-  Object.defineProperty(__wrapper, ${JSON.stringify(PAGE_MARK)}, { value: key });
-  return __wrapper;
-}
-`;
-
 /**
- * Attaches a page's stylesheets to the page — for the modules `routes.ts` names with an inline `component: () => import('…')` thunk, plus
- * any that declare `'use server-entry'` themselves.
+ * Marks a page module as one and exposes its stylesheets — for the modules `routes.ts` names with an inline
+ * `component: () => import('…')` thunk, plus any that declare `'use server-entry'` themselves.
  *
- * `@vitejs/plugin-rsc` would do this by itself for a component whose module imports CSS, and it must not be
- * allowed to for a page: its wrapper re-creates the element with `createElement(Page, props)`, which copies
- * the *enumerable* props and so drops `ctx` — deliberately non-enumerable, see `pageProps` in
- * `runtime/entry.rsc.tsx`. The page would render with `ctx` undefined. So pages are taken out of the plugin's
- * transform (`rscCssTransform.filter` in {@link createViteConfig}) and wrapped here instead, passing the props object
- * through untouched. Registered ahead of the plugin so a hand-written directive is seen before its filter runs.
+ * Two exports are appended and nothing else changes: the page's key, and a function returning
+ * `import.meta.viteRsc.loadCss()` — the plugin's own API for "the CSS this module imports, directly or not",
+ * resolved lazily in dev and from the assets manifest in a build. `renderComponent` renders that beside the
+ * page. The page's default export is left exactly as written.
+ *
+ * `@vitejs/plugin-rsc` would attach the CSS itself for a component whose module imports some, and it must
+ * not be allowed to for a page: it does so by wrapping the export and re-creating the element with
+ * `createElement(Page, props)`, which copies the *enumerable* props and so drops `ctx` — deliberately
+ * non-enumerable, see `pageProps` in `runtime/entry.rsc.tsx`. So pages are taken out of the plugin's transform
+ * (`rscCssTransform.filter` in {@link createViteConfig}). Registered ahead of the plugin so a hand-written
+ * directive is seen before its filter runs.
  */
 /** A page module's key: its path under `src/`, as Vite spells paths. */
 const pageKey = (srcDir: string, file: string): string => normalizePath(relative(srcDir, file));
@@ -229,17 +221,12 @@ function rsvhonoPages(pageFiles: Set<string>, srcDir: string): Plugin {
         if (!hasDirective(ast.body, 'use server-entry')) return;
         pageFiles.add(file);
       }
-      const { output } = transformWrapExport(code, ast, {
-        // The key is the page's path under `src/`: stable across builds, and what the route-function manifest
-        // is recorded under. See `rsvhonoRouteFunctions`.
-        runtime: (value, name, meta) =>
-          `__rsvhono_wrap_page__(${value}, ${JSON.stringify(meta.defaultExportIdentifierName ?? name)}, ${JSON.stringify(pageKey(srcDir, file))})`,
-        filter: (name) => name === 'default',
-        ignoreExportAllDeclaration: true,
-      });
-      if (!output.hasChanged()) return;
-      output.append(WRAP_PAGE);
-      return { code: output.toString(), map: output.generateMap({ hires: 'boundary' }) };
+      // Appended, so every line of the page keeps its place and its mappings. The key is the page's path
+      // under `src/`: stable across builds, and what the route-functions manifest is recorded under.
+      const exports =
+        `\nexport const ${PAGE_MARK} = ${JSON.stringify(pageKey(srcDir, file))};` +
+        `\nexport const ${PAGE_ASSETS} = () => import.meta.viteRsc.loadCss();\n`;
+      return { code: code + exports, map: null };
     },
   };
 }

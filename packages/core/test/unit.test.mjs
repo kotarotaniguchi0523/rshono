@@ -2265,8 +2265,9 @@ describe('validateServerApp', () => {
  * turns a method-named export into `TypeError: r is not a function` from a minified frame.
  */
 describe('assertRouteModules', () => {
-  /** What a page module's default export looks like once the build has wrapped it. */
-  const serverPage = Object.assign(() => null, { $$rsvhonoPage: true });
+  const serverPage = () => null;
+  /** What the build adds to a page module: its key, beside a default export it leaves alone. */
+  const built = { $$rsvhonoPage: 'pages/x.tsx' };
   /** And what a `'use client'` one looks like — a client reference. */
   const clientPage = Object.assign(() => null, { $$typeof: Symbol.for('react.client.reference') });
 
@@ -2275,9 +2276,9 @@ describe('assertRouteModules', () => {
 
   test('accepts a table whose every module is what it claims to be', async () => {
     await assertRouteModules({
-      routes: [page('/', { default: serverPage }), endpoint('/api/health', { handler: () => null })],
-      notFound: { component: () => Promise.resolve({ default: serverPage }) },
-      error: { component: () => Promise.resolve({ default: serverPage }) },
+      routes: [page('/', { default: serverPage, ...built }), endpoint('/api/health', { handler: () => null })],
+      notFound: { component: () => Promise.resolve({ default: serverPage, ...built }) },
+      error: { component: () => Promise.resolve({ default: serverPage, ...built }) },
     });
   });
 
@@ -2292,7 +2293,7 @@ describe('assertRouteModules', () => {
 
   test('refuses a page module with no default export', async () => {
     await assert.rejects(
-      assertRouteModules({ routes: [page('/noexport', { Page: serverPage })] }),
+      assertRouteModules({ routes: [page('/noexport', { Page: serverPage, ...built })] }),
       /\[rsvhono\] The page module for "\/noexport" must default-export a server component\./,
     );
   });
@@ -2326,7 +2327,7 @@ describe('assertRouteModules', () => {
   test('names every broken route at once, so fixing four of them costs one build', async () => {
     await assert.rejects(
       assertRouteModules({
-        routes: [page('/ok', { default: serverPage }), page('/clientpage', { default: clientPage }), page('/noexport', {})],
+        routes: [page('/ok', { default: serverPage, ...built }), page('/clientpage', { default: clientPage }), page('/noexport', {})],
       }),
       (error) => {
         assert.match(error.message, /\[rsvhono\] 2 route modules cannot serve a request:/);
@@ -2350,7 +2351,7 @@ describe('assertRouteModules', () => {
       await assertRouteModules({
         routes: [
           { path: '/side-effect', component: () => Promise.reject(new Error('DATABASE_URL is not set')) },
-          page('/ok', { default: serverPage }),
+          page('/ok', { default: serverPage, ...built }),
         ],
       });
       await assert.rejects(

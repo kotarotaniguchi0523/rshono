@@ -321,18 +321,38 @@ export function validateServerApp(exported: unknown): Hono | null {
 const CLIENT_REFERENCE = Symbol.for('react.client.reference');
 
 /**
- * The property the build puts on a page's default export — see `rsvhonoPages` in `builder/vite-config.ts`,
- * which wraps every page module so its stylesheets render with it and its props arrive untouched.
+ * The two exports the build adds to a page module — see `rsvhonoPages` in `builder/vite-config.ts`. The page
+ * itself is not touched: its default export is the function its author wrote.
  *
- * Its value is the page's key: the module's path under `src/`. That is what ties a route to the build's
- * record of what its page reaches (`route-functions.ts`) without anyone parsing `routes.ts` for it.
+ * `PAGE_MARK` is the page's key, its path under `src/`. It says the build saw this module as a page, and it
+ * ties a route to the build's record of what its page reaches (`route-functions.ts`) without anyone parsing
+ * `routes.ts`. `PAGE_ASSETS` returns the stylesheets the module imports, as elements to render beside it.
  */
 export const PAGE_MARK = '$$rsvhonoPage';
+export const PAGE_ASSETS = '$$rsvhonoAssets';
 
-/** The key of a page module the build wrapped, or `undefined` for anything else. */
-export function pageKeyOf(mod: { default?: unknown } | null | undefined): string | undefined {
-  const key = (mod?.default as { [PAGE_MARK]?: unknown } | undefined)?.[PAGE_MARK];
+/** A page module as the build leaves it. */
+interface PageModule {
+  default?: unknown;
+  [PAGE_MARK]?: unknown;
+  [PAGE_ASSETS]?: unknown;
+}
+
+/** The key of a page module the build recognised, or `undefined` for anything else. */
+export function pageKeyOf(mod: PageModule | null | undefined): string | undefined {
+  const key = mod?.[PAGE_MARK];
   return typeof key === 'string' ? key : undefined;
+}
+
+/**
+ * Each page's stylesheets, by the page. Beside the component rather than on it: the function is the app's,
+ * and nothing is written to it.
+ */
+const assets = new WeakMap<PageComponent, () => unknown>();
+
+/** The stylesheets `Page`'s module imports, as React elements — or nothing, for a page that imports none. */
+export function pageAssets(Page: PageComponent): unknown {
+  return assets.get(Page)?.();
 }
 
 /**
@@ -344,11 +364,11 @@ export function pageKeyOf(mod: { default?: unknown } | null | undefined): string
  * - no default export at all — a named `export function Page`, or a file that exports its layout instead;
  * - a `'use client'` page. That module's default export is a client reference, not something to render on
  *   the server with `ctx`;
- * - a page the build did not recognise as one, so it was never wrapped. Left alone, the RSC plugin's own
- *   stylesheet wrapper could re-create its element from the enumerable props and silently drop `ctx`.
+ * - a page the build did not recognise as one. Left alone, the RSC plugin's own stylesheet wrapper could
+ *   re-create its element from the enumerable props and silently drop `ctx`.
  */
-export function assertPageModule(mod: { default?: unknown }, label: string): PageComponent {
-  const Page = mod.default as (PageComponent & { $$typeof?: symbol; [PAGE_MARK]?: string }) | undefined;
+export function assertPageModule(mod: PageModule, label: string): PageComponent {
+  const Page = mod.default as (PageComponent & { $$typeof?: symbol }) | undefined;
   if (typeof Page !== 'function') {
     fail(`The page module for ${label} must default-export a server component.`);
   }
@@ -358,13 +378,15 @@ export function assertPageModule(mod: { default?: unknown }, label: string): Pag
         "A page must be a server component — wrap the 'use client' component in one instead.",
     );
   }
-  if (!Page[PAGE_MARK]) {
+  if (pageKeyOf(mod) === undefined) {
     fail(
       `The page component for ${label} was not built as a page ('use server-entry'). ` +
         "That happens automatically for inline `component: () => import('…')` thunks in routes.ts. " +
         "If this page is wired up another way, put 'use server-entry' on the first line of the page module yourself.",
     );
   }
+  const load = mod[PAGE_ASSETS];
+  if (typeof load === 'function') assets.set(Page, load as () => unknown);
   return Page;
 }
 

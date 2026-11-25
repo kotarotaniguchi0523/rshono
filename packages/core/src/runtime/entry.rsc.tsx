@@ -53,6 +53,7 @@ import {
   assertEndpointModule,
   assertPageModule,
   assertRouteModules,
+  pageAssets,
   pageKeyOf,
   validateRoutesModule,
   validateServerApp,
@@ -411,6 +412,8 @@ async function renderComponent(c: Context, Page: PageComponent, opts: ComponentR
       {nonce && <meta property="csp-nonce" nonce={nonce} />}
       {/* `href`, not the `URL`: these props cross into a client component, so they have to be serializable. */}
       <RouterProvider href={props.url.href} params={props.params}>
+        {/* The page's stylesheets, then the page — called with the props object itself, never a copy of it. */}
+        {pageAssets(Page) as React.ReactNode}
         {jsx(Page, props)}
       </RouterProvider>
     </>
