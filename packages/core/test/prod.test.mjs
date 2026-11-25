@@ -1792,3 +1792,39 @@ describe('the build id', () => {
     }
   });
 });
+
+// ── What is in the files, not what the server answers ────────────────────────────────────────────────────
+//
+// After `@vitejs/plugin-rsc`'s own `basic` example, which reads its build output for strings that must not be
+// there. A page working says nothing about what else was shipped with it.
+describe('what the build put where', () => {
+  const read = (dir) =>
+    readdirSync(join(TESTBED_DIST, dir), { recursive: true })
+      .filter((file) => /\.(?:m?js|css|html|rsc|json)$/.test(file))
+      .map((file) => readFileSync(join(TESTBED_DIST, dir, file), 'utf8'))
+      .join('\n');
+  const browser = read('static');
+  const server = read('server');
+
+  test('a client component nothing renders is not in the browser bundle', () => {
+    assert.ok(server.includes('reachBarrel') || browser.includes('reachBarrel'), 'the module it shares with a rendered component is built');
+    assert.ok(!browser.includes('__unused_client_reference__'), 'client references are per export, and this export has none');
+  });
+
+  test('a server function’s body and a server component’s constants stay on the server', () => {
+    assert.ok(server.includes('__server_function_body__'), 'the function is in the server bundle');
+    assert.ok(!browser.includes('__server_function_body__'), 'and only its reference is in the browser’s');
+    // The constant itself is folded away in the server bundle; what matters is where it is not.
+    assert.ok(!browser.includes('__server_component_only__'));
+  });
+
+  test('a page is in the server bundle as its author wrote it, with no wrapper around it', () => {
+    assert.ok(!server.includes('__rsvhono_wrap_page__'));
+    assert.match(server, /\$\$rsvhonoAssets/, 'its stylesheets are an export beside it');
+  });
+
+  test('the public process the SSR pass reads is one module, not a copy per client component', () => {
+    const ssr = read(join('server', 'ssr'));
+    assert.equal(ssr.split('Object.create(globalThis.process').length - 1, 1);
+  });
+});

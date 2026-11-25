@@ -443,6 +443,43 @@ test("a 'use client' module importing @rsvhono/core/server fails the build namin
 });
 
 /*
+ * An app's own server-only module is `@vitejs/plugin-rsc`'s to guard, not this framework's: `import
+ * 'server-only'` at the top of it, and the plugin refuses the build if the module reaches the browser bundle
+ * — through however many files — printing the chain of imports that got it there. Nothing here implements
+ * that; this is that it is switched on and survives the framework's own configuration.
+ */
+test("a module marked with 'server-only' fails the build when a client component reaches it, with the import chain", () => {
+  const dir = appWithRoutes(HOME_AND("  { path: '/secretive', component: () => import('./pages/secretive') },\n"));
+  const write = (name, source) => writeFileSync(join(dir, 'src', 'pages', name), source);
+  write(
+    'secretive.tsx',
+    'import { Badge } from \'./badge\';\nexport default function Secretive() {\n  return (\n    <html lang="en">\n      <body>\n        <Badge />\n      </body>\n    </html>\n  );\n}\n',
+  );
+  // The client component does not import the marked module itself: it goes through a re-export.
+  write('badge.tsx', "'use client';\nimport { secret } from './barrel';\nexport function Badge() {\n  return <p>{secret}</p>;\n}\n");
+  write('barrel.ts', "export { secret } from './secrets';\n");
+  write('secrets.ts', "import 'server-only';\nexport const secret = 'SERVER_ONLY_FIXTURE_VALUE';\n");
+
+  const { status, output } = runCli(dir, ['build']);
+  assert.equal(status, 1, `the build must not exit 0:\n${output}`);
+  const plain = output.replaceAll(new RegExp(String.fromCharCode(27) + '\\[\\d+m', 'g'), '');
+  assert.match(plain, /'server-only' cannot be imported in client build/);
+  // The chain, innermost first: the marked module, the re-export, the client component.
+  for (const file of ['secrets.ts', 'barrel.ts', 'badge.tsx']) assert.match(plain, new RegExp(file.replace('.', '\\.')), `${file} is on the chain`);
+});
+
+test("a module marked with 'server-only' builds when only server components reach it", () => {
+  const dir = appWithRoutes(HOME_AND("  { path: '/discreet', component: () => import('./pages/discreet') },\n"));
+  writeFileSync(join(dir, 'src', 'pages', 'secrets.ts'), "import 'server-only';\nexport const secret = 'kept on the server';\n");
+  writeFileSync(
+    join(dir, 'src', 'pages', 'discreet.tsx'),
+    'import { secret } from \'./secrets\';\nexport default function Discreet() {\n  return (\n    <html lang="en">\n      <body>{secret.length}</body>\n    </html>\n  );\n}\n',
+  );
+  const { status, output } = runCli(dir, ['build']);
+  assert.equal(status, 0, output);
+});
+
+/*
  * A `'use client'` page is a mistake the framework has a message for, and one line above it used to hide the
  * message entirely. `page-entry-loader` prepends `'use server-entry'` to a page module that declares no
  * directive of its own, and it only recognised a directive that came *first* — so a page opening
