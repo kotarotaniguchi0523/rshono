@@ -11,6 +11,8 @@ export const FIXTURES_DIR = join(ROOT, 'packages', 'core', 'test', 'fixtures');
 export const MINIMAL_APP_DIR = join(FIXTURES_DIR, 'minimal-app');
 /** An app whose CSS only compiles if the builder found its `postcss.config.mjs`. */
 export const POSTCSS_APP_DIR = join(FIXTURES_DIR, 'postcss-app');
+/** An app that turns on React Compiler and an import transform through the framework's config, each by env switch. */
+export const TOOLCHAIN_APP_DIR = join(FIXTURES_DIR, 'toolchain-app');
 const CLI = join(ROOT, 'packages', 'core', 'bin', 'rsvhono.mjs');
 
 /** What each command prints once it is listening; the capture group is the port. */
