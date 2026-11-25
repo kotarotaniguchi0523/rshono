@@ -2558,3 +2558,534 @@ describe('route-functions: reading the manifest', async () => {
     assert.throws(() => unknown.onServerReference({ id: 'm1', name: 'save' }), UnreachableServerReferenceError);
   });
 });
+
+// ── The pieces the browser and e2e suites reach only through a whole app ───────────────────────────────
+
+describe('build id', () => {
+  // The id is a build-time define, read once at module load, so each case imports its own copy of the module.
+  const load = async (id) => {
+    if (id === undefined) delete globalThis.__RSVHONO_BUILD_ID__;
+    else globalThis.__RSVHONO_BUILD_ID__ = id;
+    try {
+      return await import(`../dist/runtime/build-id.js?case=${encodeURIComponent(String(id))}-${Math.random()}`);
+    } finally {
+      delete globalThis.__RSVHONO_BUILD_ID__;
+    }
+  };
+
+  test('another build is one that names itself and is not this one', async () => {
+    const { BUILD_ID, isOtherBuild } = await load('build-a');
+    assert.equal(BUILD_ID, 'build-a');
+    assert.equal(isOtherBuild('build-b'), true);
+    assert.equal(isOtherBuild('build-a'), false);
+  });
+
+  test('a request that claims no build is not a mismatch', async () => {
+    const { isOtherBuild } = await load('build-a');
+    for (const absent of [null, undefined, '']) assert.equal(isOtherBuild(absent), false, `${String(absent)} claims nothing`);
+  });
+
+  test('under dev there is no id, and nothing is ever another build', async () => {
+    const { BUILD_ID, isOtherBuild } = await load(undefined);
+    assert.equal(BUILD_ID, undefined);
+    assert.equal(isOtherBuild('anything'), false);
+  });
+
+  test('a define that is not a string is no id', async () => {
+    const { BUILD_ID } = await load(42);
+    assert.equal(BUILD_ID, undefined);
+  });
+
+  test('the mismatch error is recognisable by code and carries the server’s build', async () => {
+    const { BuildMismatchError, BUILD_HEADER } = await load('build-a');
+    const error = new BuildMismatchError('build-b');
+    assert.equal(error.code, 'RSVHONO_BUILD_MISMATCH');
+    assert.equal(error.name, 'BuildMismatchError');
+    assert.equal(error.serverBuild, 'build-b');
+    assert.ok(error instanceof Error);
+    assert.equal(BUILD_HEADER, 'x-rsvhono-build');
+  });
+
+  test('a server function call carries the build, and a page fetch does not', () => {
+    // Its own process: the id is read when `build-id.js` first loads, and this file loaded it long ago.
+    const run = spawnSync(
+      process.execPath,
+      [
+        '--input-type=module',
+        '-e',
+        `globalThis.__RSVHONO_BUILD_ID__ = 'build-a';
+         globalThis.location = { origin: 'http://example.test' };
+         const { createRscRequest } = await import(${JSON.stringify(new URL('../dist/runtime/request.js', import.meta.url).href)});
+         const call = createRscRequest('/p', { id: 'm#f', body: 'x' });
+         const page = createRscRequest('/p');
+         console.log(JSON.stringify({ call: call.headers.get('x-rsvhono-build'), page: page.headers.get('x-rsvhono-build') }));`,
+      ],
+      { encoding: 'utf8' },
+    );
+    // A GET says nothing about its build: the reply's header is what gets compared.
+    assert.deepEqual(JSON.parse(run.stdout), { call: 'build-a', page: null });
+  });
+});
+
+describe('chunk recovery preamble', async () => {
+  const { runInNewContext } = await import('node:vm');
+  const { CHUNK_RELOAD_KEY, chunkRecoveryPreamble } = await import('../dist/runtime/chunk-recovery.js');
+  const ENTRY = '/_static/assets/entry-abc123.js';
+
+  /** A window just large enough for the preamble: listeners, a session store, a ready state, a reload count. */
+  function page({ readyState = 'complete', storage = 'works', entry = ENTRY } = {}) {
+    const listeners = new Map();
+    const store = new Map();
+    const state = { reloads: 0 };
+    const sessionStorage =
+      storage === 'throws'
+        ? {
+            getItem() {
+              throw new Error('storage is blocked');
+            },
+            setItem() {
+              throw new Error('storage is blocked');
+            },
+          }
+        : { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => void store.set(k, String(v)) };
+    const sandbox = {
+      addEventListener: (type, fn, capture) => void listeners.set(type, [...(listeners.get(type) ?? []), { fn, capture }]),
+      sessionStorage,
+      document: { readyState },
+      location: { reload: () => void state.reloads++ },
+    };
+    runInNewContext(chunkRecoveryPreamble(entry), sandbox);
+    const fire = (type, event = {}) => (listeners.get(type) ?? []).map(({ fn }) => fn(event));
+    return { fire, state, store, listeners, sandbox };
+  }
+
+  test('a failed preload reloads the page once, and records that it did', () => {
+    const p = page();
+    p.fire('vite:preloadError');
+    assert.equal(p.state.reloads, 1);
+    assert.equal(p.store.get(CHUNK_RELOAD_KEY), '1');
+  });
+
+  test('a second failure in the same session does not reload again', () => {
+    const p = page();
+    p.fire('vite:preloadError');
+    p.fire('vite:preloadError');
+    p.fire('error', { target: { tagName: 'SCRIPT', src: `http://example.test${ENTRY}` } });
+    assert.equal(p.state.reloads, 1, 'the key is the count: one reload per session until a boot releases it');
+  });
+
+  test('the entry script failing to load is the same failure', () => {
+    const p = page();
+    p.fire('error', { target: { tagName: 'SCRIPT', src: `http://example.test${ENTRY}` } });
+    assert.equal(p.state.reloads, 1);
+    assert.equal(p.listeners.get('error')[0].capture, true, 'a script’s error does not bubble, so the listener has to capture');
+  });
+
+  test('an error from anything else is not', () => {
+    const p = page();
+    p.fire('error', { target: { tagName: 'IMG', src: `http://example.test${ENTRY}` } });
+    p.fire('error', { target: { tagName: 'SCRIPT', src: 'http://example.test/analytics.js' } });
+    p.fire('error', { target: { tagName: 'SCRIPT', src: '' } });
+    p.fire('error', { target: null });
+    p.fire('error', {});
+    assert.equal(p.state.reloads, 0);
+    assert.equal(p.store.size, 0, 'and nothing was spent on them');
+  });
+
+  test('a page being left fails its imports as a matter of course', () => {
+    const p = page();
+    p.fire('pagehide');
+    p.fire('vite:preloadError');
+    assert.equal(p.state.reloads, 0);
+    assert.equal(p.store.size, 0);
+    // Restored from the back/forward cache, it is a live page again.
+    p.fire('pageshow');
+    p.fire('vite:preloadError');
+    assert.equal(p.state.reloads, 1);
+  });
+
+  test('mid-parse, the reload waits for the document', () => {
+    const p = page({ readyState: 'loading' });
+    p.fire('vite:preloadError');
+    assert.equal(p.state.reloads, 0, 'what has streamed so far is still a readable page');
+    assert.equal(p.store.get(CHUNK_RELOAD_KEY), '1', 'the reload is already spent, so a second failure cannot queue another');
+    p.fire('DOMContentLoaded');
+    assert.equal(p.state.reloads, 1);
+  });
+
+  test('without session storage there is no count, so there is no reload', () => {
+    const p = page({ storage: 'throws' });
+    p.fire('vite:preloadError');
+    assert.equal(p.state.reloads, 0, 'an uncounted reload is a loop');
+  });
+
+  test('the preload error is left uncancelled', () => {
+    const p = page();
+    let prevented = false;
+    p.fire('vite:preloadError', { preventDefault: () => void (prevented = true) });
+    assert.equal(prevented, false, 'cancelling resolves the import with nothing, and the caller fails on that instead');
+  });
+
+  test('an entry url cannot close the script it is written into', () => {
+    const hostile = '/_static/</script><script>globalThis.pwned=1</script>.js';
+    const source = chunkRecoveryPreamble(hostile);
+    assert.doesNotMatch(source, /<\/script/i);
+    assert.doesNotMatch(source, /</, 'every `<` is escaped, which is what keeps it inside one inline script');
+    // And it is still the url the listener compares against.
+    const p = page({ entry: hostile });
+    p.fire('error', { target: { tagName: 'SCRIPT', src: `http://example.test${hostile}` } });
+    assert.equal(p.state.reloads, 1);
+    assert.equal(p.sandbox.pwned, undefined);
+  });
+});
+
+describe('browser document helpers', async () => {
+  const { CHUNK_RELOAD_KEY } = await import('../dist/runtime/chunk-recovery.js');
+  const doc = await import('../dist/runtime/browser/document.js');
+
+  /** The three globals these helpers read, for one test. */
+  function withBrowser({ storage = new Map(), throws = false, reloadThrows = false } = {}, fn) {
+    const calls = [];
+    const saved = { sessionStorage: globalThis.sessionStorage, navigation: globalThis.navigation, window: globalThis.window };
+    const define = (name, value) => Object.defineProperty(globalThis, name, { value, configurable: true, writable: true });
+    define(
+      'sessionStorage',
+      throws
+        ? {
+            getItem() {
+              throw new Error('blocked');
+            },
+            setItem() {
+              throw new Error('blocked');
+            },
+          }
+        : { getItem: (k) => (storage.has(k) ? storage.get(k) : null), setItem: (k, v) => void storage.set(k, v) },
+    );
+    const done = { committed: Promise.resolve(), finished: Promise.resolve() };
+    define('navigation', {
+      reload(options) {
+        if (reloadThrows) throw new Error('document is not fully active');
+        calls.push(['navigation.reload', options.info]);
+        return done;
+      },
+      navigate(href, options) {
+        if (reloadThrows) throw new Error('document is not fully active');
+        calls.push(['navigation.navigate', href, options.history, options.info]);
+        return done;
+      },
+    });
+    define('window', {
+      location: {
+        reload: () => void calls.push(['location.reload']),
+        replace: (href) => void calls.push(['location.replace', href]),
+        assign: (href) => void calls.push(['location.assign', href]),
+      },
+    });
+    try {
+      fn({ calls, storage });
+    } finally {
+      for (const [name, value] of Object.entries(saved)) {
+        if (value === undefined) delete globalThis[name];
+        else define(name, value);
+      }
+    }
+  }
+
+  test('spendOnce is true exactly once per key', () => {
+    withBrowser({}, () => {
+      assert.equal(doc.spendOnce('k'), true);
+      assert.equal(doc.spendOnce('k'), false);
+      assert.equal(doc.spendOnce('other'), true);
+    });
+  });
+
+  test('spendOnce is false when it cannot keep count', () => {
+    withBrowser({ throws: true }, () => assert.equal(doc.spendOnce('k'), false));
+  });
+
+  test('a build mismatch reloads once per server build', () => {
+    withBrowser({}, ({ calls }) => {
+      doc.reloadForBuild('build-b');
+      doc.reloadForBuild('build-b');
+      assert.equal(calls.filter(([name]) => name === 'navigation.reload').length, 1, 'the same new build twice is one reload');
+      doc.reloadForBuild('build-c');
+      assert.equal(calls.filter(([name]) => name === 'navigation.reload').length, 2, 'a build after that is a new reason');
+      assert.equal(calls[0][1], doc.documentNavigation, 'marked as the framework’s own, so the router lets it through');
+    });
+  });
+
+  test('a reload stands down while the chunk preamble’s own reload is still unredeemed', () => {
+    withBrowser({ storage: new Map([[CHUNK_RELOAD_KEY, '1']]) }, ({ calls }) => {
+      doc.loadDocument();
+      assert.deepEqual(calls, [], 'a second reload for the same missing file is the loop the count prevents');
+      // A navigation somewhere else is not that reload.
+      doc.loadDocument('/elsewhere');
+      assert.deepEqual(
+        calls.map(([name, href]) => [name, href]),
+        [['navigation.navigate', '/elsewhere']],
+      );
+    });
+  });
+
+  test('loadDocument navigates with the history mode it was asked for', () => {
+    withBrowser({}, ({ calls }) => {
+      doc.loadDocument('/a');
+      doc.loadDocument('/b', { replace: true });
+      assert.deepEqual(
+        calls.map(([, href, history]) => [href, history]),
+        [
+          ['/a', 'auto'],
+          ['/b', 'replace'],
+        ],
+      );
+    });
+  });
+
+  test('when the Navigation API refuses, location does the same load', () => {
+    withBrowser({ reloadThrows: true }, ({ calls }) => {
+      doc.loadDocument();
+      doc.loadDocument('/a');
+      doc.loadDocument('/b', { replace: true });
+      assert.deepEqual(calls, [['location.reload'], ['location.assign', '/a'], ['location.replace', '/b']]);
+    });
+  });
+});
+
+describe('dev timing track', async () => {
+  // Node has `performance`, and the suite does not run as production, so this is the dev behaviour.
+  const { measure, started } = await import('../dist/runtime/browser/timing.js');
+
+  test('a measure lands on the rsvhono devtools track', () => {
+    const start = started();
+    assert.ok(start > 0);
+    measure('rsvhono unit probe', start);
+    const [entry] = performance.getEntriesByName('rsvhono unit probe');
+    assert.ok(entry, 'the measure was recorded');
+    assert.equal(entry.detail.devtools.track, 'rsvhono');
+    assert.ok(entry.duration >= 0);
+    performance.clearMeasures('rsvhono unit probe');
+  });
+
+  test('a start the browser rejects is swallowed', () => {
+    assert.doesNotThrow(() => measure('rsvhono bad probe', -1), 'timing is never worth an error');
+  });
+
+  test('in a production bundle it measures nothing', () => {
+    const run = spawnSync(
+      process.execPath,
+      [
+        '--input-type=module',
+        '-e',
+        `const t = await import(${JSON.stringify(new URL('../dist/runtime/browser/timing.js', import.meta.url).href)});
+         const s = t.started(); t.measure('prod probe', s);
+         console.log(JSON.stringify({ s, entries: performance.getEntriesByName('prod probe').length }));`,
+      ],
+      { env: { ...process.env, NODE_ENV: 'production' }, encoding: 'utf8' },
+    );
+    assert.deepEqual(JSON.parse(run.stdout), { s: 0, entries: 0 });
+  });
+});
+
+describe('server function policy', async () => {
+  const ctx = await import('../dist/runtime/context.js');
+  const hono = (path = '/p') => ({
+    req: { url: `http://example.test${path}`, raw: new Request(`http://example.test${path}`, { method: 'POST' }), param: () => ({}) },
+    env: {},
+  });
+
+  after(() => {
+    // Module-level settings: put the defaults back for whatever runs after this file's suites.
+    ctx.beforeServerFunction(() => {});
+    ctx.trustServerFunctionOrigins([]);
+    ctx.setServerFunctionRefresh('auto');
+  });
+
+  test('the guard sees the call before it runs, and its throw is the refusal', async () => {
+    const seen = [];
+    ctx.beforeServerFunction((call) => {
+      seen.push([call.kind, call.id, call.request.method, call.hono === c]);
+      if (call.id === 'm#forbidden') throw new Error('not for you');
+    });
+    const c = hono();
+    await ctx.authorizeServerFunction(c, 'rsc-action', 'm#allowed');
+    await assert.rejects(ctx.authorizeServerFunction(c, 'rsc-action', 'm#forbidden'), /not for you/);
+    // A plain form post arrives before its id has been decoded.
+    await ctx.authorizeServerFunction(c, 'form-action', undefined);
+    assert.deepEqual(seen, [
+      ['rsc-action', 'm#allowed', 'POST', true],
+      ['rsc-action', 'm#forbidden', 'POST', true],
+      ['form-action', undefined, 'POST', true],
+    ]);
+  });
+
+  test('an async guard is awaited', async () => {
+    let finished = false;
+    ctx.beforeServerFunction(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      finished = true;
+    });
+    await ctx.authorizeServerFunction(hono(), 'rsc-action', 'm#f');
+    assert.equal(finished, true);
+    ctx.beforeServerFunction(async () => {
+      await Promise.resolve();
+      throw new Error('late no');
+    });
+    await assert.rejects(ctx.authorizeServerFunction(hono(), 'rsc-action', 'm#f'), /late no/);
+  });
+
+  test('the last guard registered is the guard', async () => {
+    const order = [];
+    ctx.beforeServerFunction(() => void order.push('first'));
+    ctx.beforeServerFunction(() => void order.push('second'));
+    await ctx.authorizeServerFunction(hono(), 'rsc-action', 'm#f');
+    assert.deepEqual(order, ['second']);
+  });
+
+  test('a listed origin is trusted exactly, and nothing near it is', () => {
+    ctx.trustServerFunctionOrigins(['https://admin.example.com']);
+    const c = hono();
+    assert.equal(ctx.isTrustedOrigin('https://admin.example.com', c), true);
+    for (const near of [
+      'https://admin.example.com.evil.test',
+      'http://admin.example.com',
+      'https://admin.example.com:8443',
+      'https://ADMIN.example.com',
+      'null',
+      '',
+    ])
+      assert.equal(ctx.isTrustedOrigin(near, c), false, `${near || '(empty)'} is a different origin`);
+  });
+
+  test('an empty list trusts no one', () => {
+    ctx.trustServerFunctionOrigins([]);
+    assert.equal(ctx.isTrustedOrigin('https://admin.example.com', hono()), false);
+  });
+
+  test('a predicate decides per request', () => {
+    const asked = [];
+    ctx.trustServerFunctionOrigins((origin, c) => {
+      asked.push([origin, new URL(c.req.url).pathname]);
+      return origin.endsWith('.preview.example.com');
+    });
+    assert.equal(ctx.isTrustedOrigin('https://pr-12.preview.example.com', hono('/a')), true);
+    assert.equal(ctx.isTrustedOrigin('https://example.org', hono('/b')), false);
+    assert.deepEqual(asked, [
+      ['https://pr-12.preview.example.com', '/a'],
+      ['https://example.org', '/b'],
+    ]);
+  });
+
+  test('in auto mode every function reply renders the page', () => {
+    ctx.setServerFunctionRefresh('auto');
+    const c = hono();
+    ctx.beginServerFunction(c);
+    assert.equal(ctx.wantsRefresh(c), true);
+    assert.equal(ctx.wantsRefresh(hono()), true, 'even for a request that never began a function');
+  });
+
+  test('in explicit mode the page is rendered only for the request that asked', () => {
+    ctx.setServerFunctionRefresh('explicit');
+    const asked = hono('/asked');
+    const silent = hono('/silent');
+    ctx.beginServerFunction(asked);
+    ctx.beginServerFunction(silent);
+    assert.equal(ctx.wantsRefresh(asked), false);
+    ctx.runWithContext(asked, () => ctx.requestRefresh());
+    assert.equal(ctx.wantsRefresh(asked), true);
+    assert.equal(ctx.wantsRefresh(silent), false, 'one request asking does not answer for another');
+    // A new function run on the same request starts from not having asked.
+    ctx.beginServerFunction(asked);
+    assert.equal(ctx.wantsRefresh(asked), false);
+  });
+
+  test('requestRefresh outside a server function says so', () => {
+    assert.throws(() => ctx.requestRefresh(), /outside a server function/, 'no request at all');
+    // Inside a request, but a page render rather than a function.
+    assert.throws(() => ctx.runWithContext(hono(), () => ctx.requestRefresh()), /outside a server function/);
+  });
+
+  test('redirect and notFound throw the signals the renderer reads', () => {
+    assert.throws(
+      () => ctx.redirect('/login'),
+      (error) => error instanceof RedirectSignal && error.status === 303 && error.location === '/login',
+    );
+    assert.throws(
+      () => ctx.redirect('/moved', 308),
+      (error) => error instanceof RedirectSignal && error.status === 308,
+    );
+    assert.throws(() => ctx.notFound(), NotFoundSignal);
+  });
+});
+
+describe('request and control helpers', async () => {
+  const request = await import('../dist/runtime/request.js');
+  const control = await import('../dist/runtime/control.js');
+
+  test('classifyRequest is the parser the renderer uses', () => {
+    const page = new Request('http://example.test/p');
+    const flight = new Request('http://example.test/p', { headers: { RSC: '1' } });
+    assert.deepEqual(request.classifyRequest(page), parseRenderRequest(page));
+    assert.deepEqual(request.classifyRequest(flight), parseRenderRequest(flight));
+    assert.notEqual(request.classifyRequest(page).kind, request.classifyRequest(flight).kind);
+  });
+
+  test('requestWantsRsc answers from the request alone', () => {
+    assert.equal(request.requestWantsRsc(new Request('http://example.test/p')), false);
+    assert.equal(request.requestWantsRsc(new Request('http://example.test/p', { headers: { RSC: '1' } })), true);
+    assert.equal(
+      request.requestWantsRsc(new Request('http://example.test/p', { method: 'POST', headers: { RSC: '1', 'x-rsc-action': 'm#f' }, body: 'x' })),
+      true,
+    );
+  });
+
+  test('a control signal is one of the two, and nothing that merely looks like one', () => {
+    assert.equal(control.isControlSignal(new RedirectSignal('/a', 303)), true);
+    assert.equal(control.isControlSignal(new NotFoundSignal()), true);
+    assert.equal(control.isControlSignal(new Error('[rsvhono] notFound')), false);
+    assert.equal(control.isControlSignal({ name: 'NotFoundSignal' }), false);
+    assert.equal(control.isControlSignal(null), false);
+  });
+
+  test('an error with a digest came out of a payload', () => {
+    assert.equal(control.cameFromPayload(Object.assign(new Error('x'), { digest: 'abc' })), true);
+    assert.equal(control.cameFromPayload(new Error('x')), false);
+    assert.equal(control.cameFromPayload(Object.assign(new Error('x'), { digest: 7 })), false);
+    assert.equal(control.cameFromPayload(null), false);
+    assert.equal(control.cameFromPayload(undefined), false);
+  });
+});
+
+describe('defineRoutes and shutdown', async () => {
+  const { defineRoutes, isPageRoute } = await import('../dist/router.js');
+  const { onShutdown } = await import('../dist/server/shutdown.js');
+
+  test('a bare array is the routes of a config with no fallback pages', () => {
+    const routes = [{ path: '/', component: async () => ({ default: () => null }) }];
+    assert.deepEqual(defineRoutes(routes), { routes });
+    const config = { routes, notFound: { component: async () => ({ default: () => null }) } };
+    assert.equal(defineRoutes(config), config, 'the object form is returned as it was given');
+  });
+
+  test('a route is a page unless it says it is an endpoint', () => {
+    assert.equal(isPageRoute({ path: '/' }), true);
+    assert.equal(isPageRoute({ type: 'page', path: '/' }), true);
+    assert.equal(isPageRoute({ type: 'endpoint', path: '/api' }), false);
+  });
+
+  test('onShutdown hears both signals a process manager sends', () => {
+    const before = { SIGINT: process.listeners('SIGINT'), SIGTERM: process.listeners('SIGTERM') };
+    const heard = [];
+    onShutdown((signal) => heard.push(signal));
+    try {
+      for (const signal of ['SIGINT', 'SIGTERM']) {
+        const added = process.listeners(signal).filter((listener) => !before[signal].includes(listener));
+        assert.equal(added.length, 1, `one handler for ${signal}`);
+        added[0]();
+      }
+      assert.deepEqual(heard, ['SIGINT', 'SIGTERM']);
+    } finally {
+      for (const signal of ['SIGINT', 'SIGTERM'])
+        for (const listener of process.listeners(signal)) if (!before[signal].includes(listener)) process.removeListener(signal, listener);
+    }
+  });
+});
