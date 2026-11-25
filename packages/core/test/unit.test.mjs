@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 
 import { scanPageFiles } from '../dist/builder/page-files.js';
 import { checkReactVersions } from '../dist/builder/react-versions.js';
-import { readsGlobalProcess, shadowProcessEnv } from '../dist/builder/env-shadow.js';
+import { publicProcessModule, readsRealProcess, shadowProcessEnv } from '../dist/builder/env-shadow.js';
 import { createViteConfig } from '../dist/builder/vite-config.js';
 import { DEPLOY_TARGETS, deployHintFor, NODE_PRESET, resolveDeployPreset } from '../dist/deploy/presets.js';
 import { publicRouteCollisions } from '../dist/deploy/public-paths.js';
@@ -2414,62 +2414,88 @@ describe('exit', () => {
 });
 
 describe('shadowProcessEnv', () => {
-  const options = { env: { NODE_ENV: 'production', PUBLIC_URL: 'https://example.test' }, nodeEnv: 'production' };
-  const PRELUDE = `const process = Object.assign(Object.create(globalThis.process ?? Object.prototype), { env: ${JSON.stringify(options.env)} }); `;
-  const run = (source) => shadowProcessEnv(source, options);
+  const env = { NODE_ENV: 'production', PUBLIC_URL: 'https://example.test' };
+  const IMPORT = 'import { process } from "virtual:rsvhono/public-process";';
+  const run = async (source) => (await shadowProcessEnv(source, '/app/src/widget.js', 'production'))?.code ?? null;
 
-  test('leaves a module that never mentions process untouched', () => {
-    assert.equal(run('export const x = 1;'), null);
-    // A word that merely contains it is not a mention.
-    for (const source of ['export const x = preprocess(1);', 'export const x = processEnv;', "import cp from 'node:child_process';"]) {
-      assert.equal(run(source), null, `"${source}" must not drag the prelude in`);
+  test('leaves a module that never reads the global process untouched', async () => {
+    for (const source of [
+      'export const x = 1;',
+      'export const x = preprocess(1);',
+      'export const x = processEnv;',
+      "import cp from 'node:child_process';",
+    ]) {
+      assert.equal(await run(source), null, `"${source}" must not be rebound`);
     }
   });
 
-  test('shadows every shape that reads the env through the process binding, not just the literal process.env', () => {
-    // A `define` on `process.env` sees the first two of these. The prelude replaces the whole binding.
+  test('rebinds every shape that reads the env through the free identifier, not just the literal process.env', async () => {
     for (const source of [
       'export const x = process.env.DATABASE_URL;',
-      'const { DATABASE_URL } = process.env;',
+      'export const { DATABASE_URL } = process.env;',
       'export const x = process?.env.DATABASE_URL;',
       "export const x = process['env'].DATABASE_URL;",
-      'const { env } = process;',
+      'const { env } = process; export const x = env.DATABASE_URL;',
       'const p = process; export const x = p.env.DATABASE_URL;',
       "export const x = typeof process !== 'undefined' ? process.env.DATABASE_URL : '';",
     ]) {
-      assert.equal(run(source), PRELUDE + source, `"${source}" must be shadowed`);
+      assert.ok((await run(source)).includes(IMPORT), `"${source}" must read the public process`);
     }
   });
 
-  test('the shadow really hides a secret, and keeps the rest of process', () => {
+  test('a binding of the module’s own named process is its own, wherever it is declared', async () => {
+    // What a text transform cannot tell from the global: here `process` is a parameter, a local, an import.
+    for (const source of [
+      'export function f(process) { return process.env.SECRET; }',
+      'export function f() { const process = { env: {} }; return process.env.SECRET; }',
+      "import process from 'node:process'; export const x = process.env.SECRET;",
+    ]) {
+      assert.doesNotMatch((await run(source)) ?? source, /public-process/, source);
+    }
+  });
+
+  test('prose that says process is prose: a regex, a string, the text of a template', async () => {
+    assert.equal(await run('export const r = /process.env/; export const s = "process.env.X";'), null);
+    const template = await run('export const t = `${process.env.A} process.env.B`;');
+    assert.ok(template.includes(IMPORT));
+    assert.ok(template.includes('process.env.B`'), 'the text of the template is not code');
+  });
+
+  test('the import goes after the whole directive prologue, so no directive stops being one', async () => {
+    const out = await run("'use client';\n'use strict';\nexport const x = process.env.A;");
+    assert.match(out, /^"use client";\n"use strict";\nimport \{ process \}/);
+  });
+
+  test('hands process.env.NODE_ENV back as a literal, and does not rebind for it alone', async () => {
+    const out = await run("export const mode = process.env.NODE_ENV === 'production' ? 'a' : 'b';");
+    assert.match(out, /"production" === ["']production["']/);
+    assert.doesNotMatch(out, /public-process/, 'nothing else read process, so there is nothing to import');
+  });
+
+  test('keeps a source map', async () => {
+    const result = await shadowProcessEnv('export const x = process.env.A;', '/app/src/widget.js', 'production');
+    assert.ok(result.map?.mappings, 'a stack trace through a shadowed module still points at its lines');
+  });
+
+  test('the public process hides a secret and keeps the rest of process', async () => {
     process.env.SHADOW_UNIT_SECRET = 'hunter2';
     try {
-      const read = new Function(`${run('return [process?.env.SHADOW_UNIT_SECRET, process.env.PUBLIC_URL, typeof process.version];')}`);
-      assert.deepEqual(read(), [undefined, 'https://example.test', 'string']);
+      const source = publicProcessModule(env).replace('export const process =', 'return');
+      const shadow = new Function(source)();
+      assert.deepEqual([shadow.env.SHADOW_UNIT_SECRET, shadow.env.PUBLIC_URL, typeof shadow.version], [undefined, 'https://example.test', 'string']);
     } finally {
       delete process.env.SHADOW_UNIT_SECRET;
     }
   });
 
-  test('goes after the whole directive prologue, so no directive stops being one', () => {
-    for (const prologue of ["'use client';\n", '"use strict";\n\'use client\';\n', "// a comment\n'use client';\n"]) {
-      const out = run(`${prologue}export const x = process.env.A;`);
-      assert.equal(out, `${prologue}${PRELUDE}export const x = process.env.A;`);
-    }
-  });
-
-  test('hands process.env.NODE_ENV back as a literal, in code and nowhere else', () => {
-    assert.equal(run("if (process.env.NODE_ENV === 'production') a();"), `${PRELUDE}if ("production" === 'production') a();`);
-    const untouched = ["throw new Error('set process.env.NODE_ENV');", 'x(`process.env.NODE_ENV`, process);', 'this.process.env.NODE_ENV; process;'];
-    for (const source of untouched) assert.equal(run(source), PRELUDE + source, source);
-    assert.match(run('process; // process.env.NODE_ENV'), /\/\/ process\.env\.NODE_ENV$/, 'a comment is prose');
-  });
-
-  test('a read through the global object is recognised, since no binding can shadow it', () => {
+  test('a read that goes round the binding is recognised for what it is', () => {
     for (const source of ['globalThis.process.env.X', 'globalThis?.process', "global['process'].env", 'self.process']) {
-      assert.equal(readsGlobalProcess(source), true, source);
+      assert.equal(readsRealProcess(source), 'global', source);
     }
-    assert.equal(readsGlobalProcess('process.env.X'), false);
+    for (const source of ["import process from 'node:process';", "import { env } from 'process';", "const p = require('node:process');"]) {
+      assert.equal(readsRealProcess(source), 'import', source);
+    }
+    assert.equal(readsRealProcess('process.env.X'), null);
   });
 });
 

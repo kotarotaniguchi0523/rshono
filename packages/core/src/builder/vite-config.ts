@@ -28,7 +28,7 @@ import type { RsvhonoConfig } from '../config.js';
 import type { DeployPreset } from '../deploy/presets.js';
 import { PAGE_MARK } from '../runtime/validate-entries.js';
 import { resolveServerConfig, type ServerConfig } from '../server/server-config.js';
-import { readsGlobalProcess, shadowProcessEnv } from './env-shadow.js';
+import { PUBLIC_PROCESS_ID, publicProcessModule, readsRealProcess, shadowProcessEnv } from './env-shadow.js';
 import { scanPageFiles } from './page-files.js';
 import { publicEnv } from './public-env.js';
 import { checkReactVersions } from './react-versions.js';
@@ -296,18 +296,35 @@ function rsvhonoCssPackageImports(): Plugin {
 function rsvhonoEnvShadow(env: Record<string, string>, nodeEnv: string, srcDir: string): Plugin {
   // As Vite spells a module id, so the prefix matches on Windows too.
   const appSrcPrefix = normalizePath(srcDir) + '/';
+  const resolvedId = '\0' + PUBLIC_PROCESS_ID;
   return {
     name: 'rsvhono:env-shadow',
     enforce: 'post',
-    transform(code, id) {
-      if (this.environment.name !== 'ssr') return;
+    resolveId(source) {
+      if (source === PUBLIC_PROCESS_ID && this.environment.name === 'ssr') return resolvedId;
+    },
+    load(id) {
+      if (id === resolvedId) return publicProcessModule(env);
+    },
+    async transform(code, id) {
+      // Not the module the binding comes from: it is the one place the real `process` is meant to be read.
+      if (this.environment.name !== 'ssr' || id === resolvedId) return;
       const file = fileOf(id);
       if (!SOURCE_FILE.test(file)) return;
-      const shadowed = shadowProcessEnv(code, { env, nodeEnv });
-      if (shadowed === null) return;
       // Only for the app's own source: a library feature-detecting `globalThis.process` is doing nothing
       // wrong and has no app secret to read.
-      if (file.startsWith(appSrcPrefix) && readsGlobalProcess(code)) {
+      const real = file.startsWith(appSrcPrefix) ? readsRealProcess(code) : null;
+      if (real === 'import') {
+        // The text-prelude this replaced failed such a module by accident — two declarations of `process`.
+        // Now that nothing collides, it is refused on purpose: the alternative is the build going green with
+        // a client component that reads the server's environment.
+        this.error(
+          `[rsvhono] ${relative(srcDir, file)} imports \`process\` itself. It is rendered on the server as part of a client ` +
+            'component, where `process.env` is replaced with the `PUBLIC_`-only view — and an import of the real ' +
+            '`process` goes around that, so whatever it reads ends up in the HTML. Use the global `process.env` instead.',
+        );
+      }
+      if (real === 'global') {
         this.warn(
           `[rsvhono] ${relative(srcDir, file)} reads \`process\` through the global object. It is rendered on the server as part ` +
             'of a client component, where `process.env` is shadowed with the `PUBLIC_`-only view — and that ' +
@@ -315,9 +332,7 @@ function rsvhonoEnvShadow(env: Record<string, string>, nodeEnv: string, srcDir: 
             'one, and it ends up in the HTML. Read `process.env` directly instead.',
         );
       }
-      // The prelude sits on the first line, so every mapping is still on its own line; columns on that one
-      // line shift, which is the precision of a stack trace already.
-      return { code: shadowed, map: null };
+      return shadowProcessEnv(code, file, nodeEnv);
     },
   };
 }
