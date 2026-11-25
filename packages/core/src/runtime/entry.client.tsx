@@ -1,7 +1,6 @@
 import React from 'react';
 import { hydrateRoot } from 'react-dom/client';
-// Resolved at build time to the bundler that is compiling this — see `bundler/contract.ts`.
-import { browser } from '@rshono/bundler/browser';
+import { createFromFetch, createFromReadableStream, createTemporaryReferenceSet, encodeReply, setServerCallback } from '@vitejs/plugin-rsc/browser';
 import {
   cancelNavigationPreparation,
   isPreparedNavigation,
@@ -14,8 +13,6 @@ import type { RscPayload } from './entry.rsc.js';
 import { RouterContext, type NavigationRouter, type NavigationOutcome } from './navigation.js';
 import { createRscRequest } from './request.js';
 import { startNavigationPayload, useNavigationTransition } from './navigation-transition.js';
-
-const { createFromFetch, createFromReadableStream, createTemporaryReferenceSet, encodeReply, setServerCallback } = browser;
 
 const isDev = process.env.NODE_ENV === 'development';
 
@@ -1267,13 +1264,6 @@ function listenNavigation(): () => void {
 }
 
 async function main() {
-  // The assertion is load-bearing under the compiler that builds this: TypeScript 7 declares `nonce` on
-  // HTMLElement, 6 declares it on Element. ESLint runs the older lib — where the narrowing is redundant —
-  // so it reports an assertion that `tsc` requires. Believe `typecheck`, not the rule.
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
-  const cspMeta = document.querySelector('meta[property="csp-nonce"]') as HTMLMetaElement | null;
-  if (cspMeta?.nonce) browser.setNonce(cspMeta.nonce);
-
   const initialPayload = await createFromReadableStream<RscPayload>(flightStream);
 
   // The recovery reload landed: this document *is* the `notFound` page, so the signal that could only be a
@@ -1497,13 +1487,13 @@ async function main() {
     },
   });
 
-  // Behind `isDev`, which a production build compiles to `false` — so the dev client is dropped there.
-  if (isDev) {
-    browser.connectDevUpdates({
-      refetch: () => loadPayload(window.location.href).catch(() => loadDocument()),
-      loadDocument: () => loadDocument(),
-    });
-  }
+  // Client modules are Vite's own Fast Refresh. This is the other half: a server component changed, so
+  // re-fetch the flight payload and commit it — client state is kept. `import.meta.hot` is `undefined` in a
+  // production build, which drops the block.
+  import.meta.hot?.on('rsc:update', () => {
+    console.log('[rshono] server components updated');
+    void loadPayload(window.location.href).catch(() => loadDocument());
+  });
 }
 
 // A bootstrap failure — a truncated initial payload, most likely — would otherwise be an unhandled

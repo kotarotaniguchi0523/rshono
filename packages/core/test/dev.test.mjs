@@ -2,10 +2,10 @@
 // indirection is what these test: everything has to arrive at the browser as if it were served
 // directly, and dev is also where React's debug channel is live and can leak what prod never would.
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { runCli, startTestbed, stopServer, TESTBED_DEV_DIR, TESTBED_DIR } from './helpers.mjs';
+import { runCli, startTestbed, stopServer, TESTBED_DIR } from './helpers.mjs';
 
 // Served under the testbed's hardened profile, so the dev-only half of the CSP contract is covered
 // here: the app writes one policy for both environments and the framework widens it for React Refresh.
@@ -16,6 +16,10 @@ after(() => stopServer(child));
 // already committed (see the README's "Requirements & limitations"). The fix is in app code, so the
 // framework says so where the app is being written. Production stays silent; prod.test.mjs asserts that.
 test('dev warns when a control signal arrives after the page shell has been sent', async () => {
+  // Once to warm the route: the page signals 50ms in, and the first request to a dev server spends longer
+  // than that transforming the modules its shell needs — so that one is still a real 303, as it should be.
+  await (await fetch(`${base}/late-signal`, { redirect: 'manual' })).text();
+
   const logsBefore = getOutput().length;
   const res = await fetch(`${base}/late-signal`, { redirect: 'manual' });
   await res.text();
@@ -28,19 +32,19 @@ test('dev warns when a control signal arrives after the page shell has been sent
   assert.match(logged, /middleware/, 'and where the decision belongs instead');
 });
 
-test('dev serves both representations of a page through the worker proxy', async () => {
+test('dev serves both representations of a page through the dev server', async () => {
   const document = await fetch(`${base}/`);
   assert.equal(document.status, 200);
   const html = await document.text();
   assert.match(html, /__FLIGHT_DATA/);
-  assert.match(html, /\/_static\/chunks\/main\.js/, 'dev assets are unhashed, so a reload picks up a rebuild');
+  assert.match(html, /<script type="module" src="\/_static\/[^"]+"/, 'the client entry is a module Vite serves under /_static/');
 
   const flight = await fetch(`${base}/users`, { headers: { RSC: '1' } });
   assert.equal(flight.status, 200);
   assert.match(flight.headers.get('content-type'), /text\/x-component/);
 });
 
-test('dev resolves the browser-facing URL through the proxy, not the worker address', async () => {
+test('dev resolves the browser-facing URL as the address the browser used', async () => {
   // `trustProxy` is off by default but forced on in dev, because the dev front-end proxies to a
   // worker on a random localhost port and X-Forwarded-Host is the only thing that knows the real
   // one. Without it every page would see the internal 127.0.0.1:<worker> address.
@@ -113,124 +117,62 @@ test('dev answers /_static itself, so the app’s middleware does not run for an
   await page.text();
   assert.ok(page.headers.get('x-response-time'), 'a page goes through the app, so its middleware runs');
 
-  const asset = await fetch(`${base}/_static/chunks/main.js`);
+  const entry = (await (await fetch(base)).text()).match(/<script type="module" src="(\/_static\/[^"]+)"/)[1];
+  const asset = await fetch(`${base}${entry}`);
   await asset.text();
   assert.equal(asset.status, 200, 'the browser still gets its bundle');
   assert.equal(asset.headers.get('x-response-time'), null, 'and it is answered by the dev front-end, not the app');
 });
 
-test('public/ files are served at the web root in dev (through the worker proxy)', async () => {
+test('public/ files are served at the web root in dev (through the dev server)', async () => {
   const res = await fetch(`${base}/robots.txt`);
   assert.equal(res.status, 200);
   assert.match(await res.text(), /User-agent: \*/);
   assert.equal(res.headers.get('cache-control'), 'no-cache', 'dev serves public assets without caching');
 });
 
-test('a second dev server refuses the port instead of wiping the first one’s output', async () => {
-  // `rshono dev` empties its output directory as its first action, so a second one started against a
-  // running server used to delete the chunks that server imports lazily, at request time, and only
-  // *then* exit on EADDRINUSE. The first server was left serving a build no longer on disk — 500s on
-  // every route it had not already loaded, 404 on the client bundle — and its watcher never re-emits
-  // them, because it compares against what it believes it wrote rather than against the disk.
-  //
-  // So the exit code proves nothing on its own: the unguarded version exited 1 too, just after doing
-  // the damage. What is asserted is that the first server is untouched.
-
-  // A request parks until the first build has landed, so this is also what makes the listing below
-  // meaningful: `rshono dev` reports its address as soon as it is listening, which is before the
-  // compilers have written anything.
+test('a second dev server refuses the port, and the first keeps serving', async () => {
   assert.equal((await fetch(`${base}/`)).status, 200);
-  // Tolerating ENOENT so the damage arrives as a diff against the assertion below rather than as a
-  // bare throw: the unguarded version deletes the directory outright, it does not merely change it.
-  const chunks = join(TESTBED_DEV_DIR, 'server', 'chunks');
-  const listChunks = () => {
-    try {
-      return readdirSync(chunks);
-    } catch {
-      return [];
-    }
-  };
-  const before = listChunks();
-  assert.ok(before.length > 0, 'the running dev server should have route chunks on disk to protect');
 
   const second = runCli(TESTBED_DIR, ['dev'], { env: { PORT: String(port) } });
   assert.equal(second.status, 1, `a second dev server on port ${port} should refuse to start:\n${second.output}`);
 
-  assert.deepEqual(listChunks(), before, "the running server's route chunks must all survive");
-  assert.equal((await fetch(`${base}/boundary`)).status, 200, 'a route the first server had not yet imported must still load');
-  assert.equal((await fetch(`${base}/_static/chunks/main.js`)).status, 200, 'and the browser must still get its bundle');
-  // Last, so a reworded refusal fails on its wording and not before the invariants above are checked.
+  assert.equal((await fetch(`${base}/boundary`)).status, 200, 'a route the first server had not yet loaded must still load');
+  // Last, so a reworded refusal fails on its wording and not before the invariant above is checked.
   assert.match(second.output, /port \d+ is already in use/, 'the refusal should say so, not crash on EADDRINUSE');
 });
 
-/*
- * The dev server replaces its worker thread on every server rebuild, and it used to do that with
- * `terminate()`: a worker stopped that way never runs its HTTP server's `close()`, so a response still being
- * served had its connection destroyed under it — a streamed page mid-body, a session fetch in flight. The
- * worker is asked to drain instead (a `shutdown` message closes the listener and the worker exits once the
- * requests it is serving finish), and only a worker that misses the deadline is terminated.
- *
- * `/slow-stream` is shell-first and then suspended for two seconds: long enough for an incremental rebuild
- * to land while the response is open. The fetch is read to the shell before the rebuild is triggered, so the
- * request is provably mid-stream and not merely queued.
- */
-test('a rebuild drains the old worker instead of cutting its in-flight response', async () => {
-  const component = join(TESTBED_DIR, 'src', 'components', 'slow-stream.tsx');
-  const original = readFileSync(component, 'utf8');
-
-  const response = await fetch(`${base}/slow-stream`);
-  assert.equal(response.status, 200);
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let html = '';
-  while (!html.includes('data-slow-stream-shell')) {
-    const { value, done } = await reader.read();
-    assert.equal(done, false, `the shell must arrive before the rebuild:\n${html}`);
-    html += decoder.decode(value, { stream: true });
-  }
-
-  // Wait for a rebuild to finish, proved by the CLI's own line rather than by how long it usually takes.
-  const rebuildFinished = async (since) => {
-    const deadline = Date.now() + 30_000;
-    while (!/✓ rebuilt/.test(getOutput().slice(since))) {
-      if (Date.now() > deadline) assert.fail(`the rebuild never finished:\n${getOutput().slice(since)}`);
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-  };
-
+test('an edit to a server module is served on the next request, with no restart', async () => {
+  const file = join(TESTBED_DIR, 'src', 'components', 'whoami.tsx');
+  const source = readFileSync(file, 'utf8');
   try {
-    // Same bytes plus a newline: the module's behaviour is unchanged while the watcher still sees an edit to
-    // a file in the server graph. The route itself is unaffected, so the response stays this worker's to finish.
-    const logsBefore = getOutput().length;
-    writeFileSync(component, `${original}\n`);
-    await rebuildFinished(logsBefore);
-
-    // The old worker has been asked to stop. The response it was streaming must still arrive whole — content
-    // included — rather than as a severed connection the front-end turns into a failed fetch.
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      html += decoder.decode(value, { stream: true });
+    await (await fetch(`${base}/whoami`)).text();
+    writeFileSync(file, `${source}\nexport const __devEditProbe = 'edited-${Date.now()}';\n`);
+    // The module runner invalidates on the watcher's event; poll rather than guess how long that takes.
+    let status = 0;
+    for (let attempt = 0; attempt < 40 && status !== 200; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      status = (await fetch(`${base}/whoami`)).status;
     }
-    assert.match(html, /data-slow-stream-content/, 'the streamed content must survive the worker handover');
+    assert.equal(status, 200, 'the edited page still renders');
   } finally {
-    // Restore the source and let the second rebuild settle, so the tests after this one start from a quiescent
-    // dev server rather than racing the handover this one left behind.
-    const logsBeforeRestore = getOutput().length;
-    writeFileSync(component, original);
-    await rebuildFinished(logsBeforeRestore);
+    writeFileSync(file, source);
   }
 });
 
-test('HMR SSE channel greets with the current build hash', async () => {
-  const controller = new AbortController();
-  const res = await fetch(`${base}/_rshono/hmr`, { signal: controller.signal });
-  assert.match(res.headers.get('content-type'), /text\/event-stream/);
-  const reader = res.body.getReader();
-  const { value } = await reader.read();
-  const text = new TextDecoder().decode(value);
-  assert.match(text, /"type":"hello"/);
-  controller.abort();
+test('on the dev server an action id is only ever an export of a "use server" module', async () => {
+  // There is no list of server references to check against here — a `'use server'` module is discovered when
+  // it is transformed — so an id is a path the client chose. A page module, an endpoint, a file outside the
+  // app and a module that does not exist must all be refused before anything is called.
+  for (const id of ['/src/components/whoami.tsx#default', '/src/server.ts#default', '/etc/passwd#x', '/src/missing.ts#x', '/src/actions.ts#notExported']) {
+    const res = await fetch(`${base}/dashboard`, {
+      method: 'POST',
+      headers: { Origin: base, RSC: '1', 'x-rsc-action': id, 'content-type': 'text/plain;charset=UTF-8' },
+      body: '[]',
+    });
+    await res.text();
+    assert.equal(res.status, 400, id);
+  }
 });
 
 /*
@@ -255,5 +197,5 @@ test('dev says a change to a file it compiled in needs a restart', async () => {
   const logged = getOutput().slice(logsBefore);
   assert.match(logged, /rshono\.config\.js changed/, 'the file has to be named');
   assert.match(logged, /restart `rshono dev`/, 'and what to do about it');
-  assert.match(logged, /compiled into the build, not read per request/, 'and why a rebuild did not do it');
+  assert.match(logged, /read once, when the dev server starts/, 'and why an edit did not do it');
 });

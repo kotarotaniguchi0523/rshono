@@ -122,7 +122,7 @@ describe('vercel', () => {
   });
 
   test('splits the build the way the platform routes it', () => {
-    assert.ok(existsSync(join(output, 'static', '_static', 'chunks')), 'hashed bundle is CDN-served');
+    assert.ok(existsSync(join(output, 'static', '_static', 'assets')), 'hashed bundle is CDN-served');
     assert.ok(existsSync(join(output, 'static', 'robots.txt')), 'public/ is CDN-served at the web root');
     // Not in static output on purpose: one URL answers with a document or a flight payload depending on
     // the `RSC` request header, which a path-keyed CDN cannot choose between.
@@ -185,10 +185,6 @@ describe('aws-lambda', () => {
     assert.equal(typeof bundle.default, 'function', 'streamifyResponse-wrapped, so SSR still streams');
   });
 
-  test('ships a bundle the function can resolve, since the package is dist/ and nothing else', async () => {
-    await assertSelfContained();
-  });
-
   /*
    * `app.fetch(request, env)` is how every adapter hands the app its second argument, and only on Workers is
    * that argument the app's bindings. Here it is the whole invocation — `{ event, requestContext, context }` —
@@ -211,5 +207,12 @@ describe('aws-lambda', () => {
     assert.match(body, /env PUBLIC_API_ENDPOINT/, 'the page under test must still be the one that reads ctx.env');
     assert.doesNotMatch(body, /INJECTED-VIA-THE-ENV-ARGUMENT/, 'the fetch env argument must not outrank process.env');
     assert.doesNotMatch(body, /SECRET-TOKEN/, 'and nothing else it carries may be reachable through ctx.env either');
+  });
+
+  // Last in this file, and after everything that drives `bundle`: it imports a *second* copy of the build
+  // into this process, and the RSC plugin's runtime keeps its module loaders on `globalThis` — one built app
+  // per process, which is every real deployment and not this test.
+  test('ships a bundle the function can resolve, since the package is dist/ and nothing else', async () => {
+    await assertSelfContained();
   });
 });

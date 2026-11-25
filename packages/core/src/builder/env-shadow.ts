@@ -1,4 +1,11 @@
-'use strict';
+/**
+ * Shadows `process.env` with the `PUBLIC_`-only view inside the modules of the SSR environment, so a secret
+ * read from a `'use client'` component renders empty on the server rather than leaking into the HTML stream
+ * — and SSR keeps agreeing with hydration, which sees the same view through the client build's `define`.
+ *
+ * A `define` on `process.env` alone is not enough for this: it replaces that exact expression and nothing
+ * else, and there are five other ways to write the same read — see {@link MENTIONS_PROCESS}.
+ */
 
 /** Whitespace and comments — what may sit before or between directives without ending the prologue. */
 const TRIVIA = '(?:\\s|//[^\\n]*(?:\\n|$)|/\\*[\\s\\S]*?\\*/)*';
@@ -14,7 +21,7 @@ const DIRECTIVE = '([\'"])use [a-z -]+\\1\\s*;?';
  * *between* them, and a directive preceded by a statement is just an expression: whichever came second would
  * silently stop being a directive. That was survivable while this loader only saw the app's own hand-written
  * source, where `'use client'` comes first and alone; it stopped being survivable when the rule widened to
- * cover `node_modules` (see the SSR-layer rule in `rspack-config.ts`).
+ * cover `node_modules` (the SSR environment compiles them too).
  *
  * Each repetition has to consume a whole directive, so the nested quantifiers cannot loop on an empty match.
  */
@@ -67,11 +74,9 @@ const GLOBAL_PROCESS = /\b(?:globalThis|global|self)\s*(?:\?\.|\.)?\s*(?:process
  *
  * The last alternative is the target. The lookbehind rejects a member read off something else
  * (`this.process.env.NODE_ENV`, `foo.process…`) and a longer identifier (`myprocess`); the trailing `\b`
- * rejects `NODE_ENVIRONMENT`. That is the shape DefinePlugin substitutes, minus the ones it also declines —
- * an optional chain and a computed key are left alone here exactly as they are left alone there.
+ * rejects `NODE_ENVIRONMENT`. An optional chain and a computed key are left alone, as a `define` leaves them.
  *
- * The alternatives ahead of it are what keeps this a substitution of *code*. DefinePlugin works on the parsed
- * module and so cannot rewrite a string; this loader is text, and without them
+ * The alternatives ahead of it are what keeps this a substitution of *code*: this is text, and without them
  * `throw new Error('set process.env.NODE_ENV')` would come out as `throw new Error('set "production"')`.
  * Comments come first so an apostrophe in one (`// don't`) cannot open a string that swallows the code after
  * it, then strings, then templates.
@@ -84,58 +89,38 @@ const GLOBAL_PROCESS = /\b(?:globalThis|global|self)\s*(?:\?\.|\.)?\s*(?:process
  */
 const NODE_ENV_SCAN = /\/\/[^\n]*|\/\*[\s\S]*?\*\/|(['"])(?:\\[\s\S]|(?!\1)[^\\\n])*\1|`(?:\\[\s\S]|[^\\`])*`|(?<![.$\w])process\.env\.NODE_ENV\b/g;
 
+export interface EnvShadowOptions {
+  /** The public view of the environment — what the browser bundle's `process.env` is defined as. */
+  env: Record<string, string>;
+  /** This build's mode, substituted for `process.env.NODE_ENV` so dead branches can still be erased. */
+  nodeEnv: string;
+}
+
+/** Whether `source` reaches `process` through the global object, where no module-scope binding can shadow it. */
+export function readsGlobalProcess(source: string): boolean {
+  return GLOBAL_PROCESS.test(source);
+}
+
 /**
- * Shadows `process.env` with the PUBLIC_-only view inside SSR-layer modules, so a secret read from a
- * `'use client'` component renders empty on the server rather than leaking into the HTML stream — and SSR
- * keeps agreeing with hydration, which sees the same view via DefinePlugin.
+ * `source` with a module-scope `process` whose `env` is the public view, or `null` when it never mentions
+ * `process`.
  *
- * A security control, so it fails the build rather than passing source through when it cannot confirm a
- * module's layer: `_module` is a private Rspack field, and a silent no-op if it were renamed would drop the
- * guarantee with nothing to notice.
+ * `Object.create` over the real `process`, not a bare `{ env }`: the binding shadows the whole object, and
+ * isomorphic code reads `process.version`, `process.nextTick` and the rest.
  */
-module.exports = function envShadowLoader(source) {
-  // Two steps rather than the regex alone: this loader sees every module in the bundle, and most of them do
-  // not contain the substring at all, which `includes` settles far more cheaply than a scan for word breaks.
-  if (!source.includes('process') || !MENTIONS_PROCESS.test(source)) return source;
-  const { prelude, layer, appSrcPrefix, nodeEnv } = this.getOptions();
-  if (!this._module) {
-    throw new Error(
-      "[rshono] env-shadow-loader could not read the module's layer (Rspack's `this._module` is unavailable). " +
-        'That check is what keeps server secrets out of SSR-rendered client components, so the build is failed ' +
-        'instead of shipping without it. This is a framework/Rspack incompatibility — please report it.',
-    );
-  }
-  if (this._module.layer !== layer) return source;
+export function shadowProcessEnv(source: string, { env, nodeEnv }: EnvShadowOptions): string | null {
+  // Two steps rather than the regex alone: most modules do not contain the substring at all, which `includes`
+  // settles far more cheaply than a scan for word breaks.
+  if (!source.includes('process') || !MENTIONS_PROCESS.test(source)) return null;
 
-  if (appSrcPrefix && this.resourcePath?.startsWith(appSrcPrefix) && GLOBAL_PROCESS.test(source)) {
-    // Rspack prints the module path ahead of this, so the message is only the part it does not know.
-    this.emitWarning(
-      new Error(
-        '[rshono] This module reads `process` through the global object. It is rendered on the server as part ' +
-          'of a client component, where `process.env` is shadowed with the `PUBLIC_`-only view — and that ' +
-          'shadow is a binding, so it cannot cover `globalThis.process`. A variable read that way is the real ' +
-          'one, and it ends up in the HTML. Read `process.env` directly instead.',
-      ),
-    );
-  }
+  // Hand `process.env.NODE_ENV` back to the optimiser before the binding takes it away: a `define` respects
+  // lexical scope, so without this every `if (process.env.NODE_ENV === 'production')` in this environment
+  // stays a runtime branch and both halves of React are bundled. Not a behaviour change — `NODE_ENV` is the
+  // one key of `env` that is this build's mode rather than something read from the host.
+  const literal = JSON.stringify(nodeEnv);
+  const body = source.replace(NODE_ENV_SCAN, (match) => (match.startsWith('process') ? literal : match));
 
-  // Hand `process.env.NODE_ENV` back to the optimiser before the prelude takes it away. DefinePlugin — the
-  // pass that erases `if (process.env.NODE_ENV === 'production')` and everything on the dead side of it —
-  // respects lexical scope, and the prelude below declares a module-scope `process`. So without this, every
-  // React entry wrapper in this layer stays a runtime branch and *both* halves are bundled: six development
-  // builds of react / react-dom / react-server-dom-rspack, about half of `dist/server/main.mjs`.
-  //
-  // Substituting is not a behaviour change. `NODE_ENV` is the one key of the prelude's own `env` literal that
-  // is not read from the host environment — it is this build's mode — so the value written here is the value
-  // the shadow would have returned anyway, and the shadow's security property is untouched.
-  //
-  // Textual, like the prelude insertion beside it, but not blindly so: {@link NODE_ENV_SCAN} walks the
-  // comments, strings and templates as well, and hands back everything that is not code untouched.
-  if (nodeEnv) {
-    const literal = JSON.stringify(nodeEnv);
-    source = source.replace(NODE_ENV_SCAN, (match) => (match.startsWith('process') ? literal : match));
-  }
-
-  const prologue = source.match(DIRECTIVE_PROLOGUE)[0];
-  return prologue + prelude + source.slice(prologue.length);
-};
+  const prelude = `const process = Object.assign(Object.create(globalThis.process ?? Object.prototype), { env: ${JSON.stringify(env)} }); `;
+  const prologue = DIRECTIVE_PROLOGUE.exec(body)![0];
+  return prologue + prelude + body.slice(prologue.length);
+}

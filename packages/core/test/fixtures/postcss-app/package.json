@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Test fixture: an app whose CSS needs a PostCSS pass — Tailwind, wired up through the rspack hook.",
+  "description": "Test fixture: an app whose CSS needs a PostCSS pass \u2014 Tailwind.",
   "scripts": {
     "build": "rshono build",
     "start": "rshono start"
@@ -17,7 +17,6 @@
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.5",
     "postcss": "^8.5.33",
-    "postcss-loader": "^8.2.1",
     "tailwindcss": "^4.3.5"
   }
 }

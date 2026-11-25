@@ -92,8 +92,8 @@ test('home page renders a full SSR document with flight payload and hashed asset
   assert.match(html, /^<!DOCTYPE html>/);
   assert.match(html, /rshono/);
   assert.match(html, /__FLIGHT_DATA/);
-  assert.match(html, /\/_static\/chunks\/main\.[0-9a-f]+\.js/);
-  assert.match(html, /<link rel="stylesheet" href="\/_static\/chunks\/[^"]+\.css"/);
+  assert.match(html, /\/_static\/assets\/index-[\w-]+\.js/);
+  assert.match(html, /<link rel="stylesheet"[^>]*href="\/_static\/assets\/[^"]+\.css"/);
 });
 
 test('async server components read the database directly, on a plain and a parameterised route', async () => {
@@ -452,7 +452,7 @@ test('progressive-enhancement form action works without JavaScript', async () =>
 // no form state to decode at all.
 test('a form a server component wired straight to an action posts as a bare $ACTION_ID', async () => {
   const html = await (await fetch(`${base}/subscribe`)).text();
-  assert.match(html, /name="\$ACTION_ID_[0-9a-f]+"/, 'this shape is what the test is about — without it, it proves nothing');
+  assert.match(html, /name="\$ACTION_ID_[0-9a-f]+#\w+"/, 'this shape is what the test is about — without it, it proves nothing');
   assert.doesNotMatch(html, /\$ACTION_KEY/, 'and it carries no useActionState metadata');
 
   const res = await fetch(`${base}/subscribe`, {
@@ -477,7 +477,7 @@ test('a form a server component wired straight to an action posts as a bare $ACT
 // and an `[error-reporter] request` line, mintable by anyone, since action ids are public.
 test('a form post carrying form-state fields React never wrote renders the page instead of 500ing', async () => {
   const html = await (await fetch(`${base}/subscribe`)).text();
-  const actionField = html.match(/name="(\$ACTION_ID_[0-9a-f]+)"/)[1];
+  const actionField = html.match(/name="(\$ACTION_ID_[0-9a-f]+#\w+)"/)[1];
 
   const body = new FormData();
   // Order matters: `decodeAction` takes the *last* `$ACTION_` key it sees, `decodeFormState` only ever looks
@@ -616,7 +616,7 @@ test("a HEAD on a method: 'get' endpoint is answered by that handler, bodiless",
 
   // The framework's own mounts have to hold the same way, now that they register `GET` alone.
   const html = await (await fetch(`${base}/`)).text();
-  const chunk = html.match(/src="(\/_static\/chunks\/main\.[0-9a-f]+\.js)"/)[1];
+  const chunk = html.match(/src="(\/_static\/assets\/index-[\w-]+\.js)"/)[1];
   for (const path of ['/robots.txt', chunk]) {
     const asset = await fetch(`${base}${path}`, { method: 'HEAD' });
     assert.equal(asset.status, 200, `${path} must answer a HEAD`);
@@ -812,8 +812,9 @@ test('an action whose module cannot be loaded is a reported 500, not a silent 40
     const mainFile = join(sandbox, 'dist', 'server', 'main.mjs');
     const actionId = serverActionId('Logging out');
     const original = readFileSync(mainFile, 'utf8');
-    // `"<id>":{"id":"3860","name":…}` — the module the manifest sends `loadServerAction` to.
-    const patched = original.replaceAll(new RegExp(`("${actionId}":\\{"id":")[^"]+"`, 'g'), '$1chunk-that-went-missing"');
+    // `"<key>":async()=>{let{…}=await import(`./assets/actions-….js`)` — the module `loadServerAction` imports.
+    const moduleKey = actionId.split('#')[0];
+    const patched = original.replace(new RegExp(`("${moduleKey}":async\\(\\)=>\\{[\\s\\S]*?await import\\(\`)[^\`]+`), '$1./assets/chunk-that-went-missing.js');
     assert.notEqual(patched, original, 'the server manifest is not in the shape this test breaks — update the patch');
     writeFileSync(mainFile, patched);
 
@@ -1159,7 +1160,7 @@ test('unknown root paths fall through to a 404 — the public fallback never sha
 
 test('hashed static assets are served immutable, and a miss under /_static is not cacheable at all', async () => {
   const html = await (await fetch(`${base}/`)).text();
-  const src = html.match(/src="(\/_static\/chunks\/main\.[0-9a-f]+\.js)"/)[1];
+  const src = html.match(/src="(\/_static\/assets\/index-[\w-]+\.js)"/)[1];
   const res = await fetch(base + src);
   assert.equal(res.status, 200);
   assert.equal(res.headers.get('cache-control'), 'public, max-age=31536000, immutable');
@@ -1168,7 +1169,7 @@ test('hashed static assets are served immutable, and a miss under /_static is no
   // the new one has. A 404 is heuristically cacheable under RFC 9111, so with no header of its own a shared
   // cache may store that answer against a content-hashed URL that is about to become valid — and then serve
   // it to everyone. The same reasoning is why the framework's own plain 404 carries one.
-  const miss = await fetch(`${base}/_static/chunks/main.deadbeefdeadbeef.js`);
+  const miss = await fetch(`${base}/_static/assets/index-deadbeef.js`);
   assert.equal(miss.status, 404);
   assert.equal(miss.headers.get('cache-control'), 'private, no-cache', 'a 404 for a hashed URL must not be stored');
 });
@@ -1256,11 +1257,14 @@ test('no development build of React reaches the server bundle', () => {
   // own source — `require('./cjs/…development.js')` inside a dead `else` — is in `sourcesContent` either way.
   // It was size and cold start rather than behaviour: the prelude's env says `production`, so the right build
   // always ran. On `cloudflare` it was half the Worker size budget.
-  const map = JSON.parse(readFileSync(join(TESTBED_DIST, 'server', 'main.mjs.map'), 'utf8'));
-  const development = map.sources.filter((source) => /\/cjs\/.*\.development\.js$/.test(source));
+  const serverDir = join(TESTBED_DIST, 'server');
+  const sources = readdirSync(serverDir, { recursive: true })
+    .filter((file) => file.endsWith('.map'))
+    .flatMap((file) => JSON.parse(readFileSync(join(serverDir, file), 'utf8')).sources);
+  const development = sources.filter((source) => /\/cjs\/.*\.development\.js$/.test(source));
   assert.deepEqual(development, [], 'a development React build cannot run in a production bundle — it is dead weight');
   assert.ok(
-    map.sources.some((source) => /\/cjs\/react-dom-server\.node\.production\.js$/.test(source)),
+    sources.some((source) => /\/cjs\/react-dom-server\.\w+\.production\.js$/.test(source)),
     'the production renderer still has to be there — an empty match would pass the assertion above for the wrong reason',
   );
 });
@@ -1274,7 +1278,7 @@ test('the server bundle ships a source map and the client bundle does not', () =
   assert.match(bundle, /\/\/# sourceMappingURL=main\.mjs\.map\s*$/, 'the minified bundle has to point at its map');
   assert.ok(readFileSync(join(TESTBED_DIST, 'server', 'main.mjs.map'), 'utf8').length > 0, 'and the map has to be emitted beside it');
 
-  const clientMaps = readdirSync(join(TESTBED_DIST, 'static', 'chunks')).filter((file) => file.endsWith('.map'));
+  const clientMaps = readdirSync(join(TESTBED_DIST, 'static', 'assets')).filter((file) => file.endsWith('.map'));
   assert.deepEqual(clientMaps, [], 'a client source map would publish the app’s own source');
 });
 

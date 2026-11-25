@@ -85,7 +85,7 @@ describe('a hardened server.ts', () => {
     // downgrade lands. CSP and COOP are moot for a .js file, but their absence is not what an operator
     // reading their own `secureHeaders()` call expects.
     const html = await (await fetch(`${app.base}/`)).text();
-    const asset = html.match(/src="(\/_static\/chunks\/main\.[0-9a-f]+\.js)"/)[1];
+    const asset = html.match(/src="(\/_static\/assets\/index-[\w-]+\.js)"/)[1];
     const res = await fetch(app.base + asset);
     await res.text();
     assert.equal(res.status, 200);

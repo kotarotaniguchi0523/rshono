@@ -1,10 +1,10 @@
-import { rspack, type MultiStats } from '@rspack/core';
 import type { Hono } from 'hono';
 import { cpSync, existsSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { BUILD_OUT_DIR, createConfigs } from '../builder/rspack-config.js';
+import { createBuilder } from 'vite';
+import { BUILD_OUT_DIR, createViteConfig } from '../builder/vite-config.js';
 import type { RshonoConfig } from '../config.js';
 import { writeBuildMarker } from '../deploy/build-marker.js';
 import type { DeployPreset } from '../deploy/presets.js';
@@ -36,26 +36,18 @@ export async function buildCommand(options: BuildOptions): Promise<void> {
   const distDir = join(rootDir, BUILD_OUT_DIR);
 
   console.log('  • building client + server bundles…');
-  const configs = createConfigs({ rootDir, isDev: false, config, preset });
-  const compiler = rspack(configs);
-
-  const stats = await new Promise<MultiStats>((resolve, reject) => {
-    compiler.run((err, result) => {
-      compiler.close(() => {
-        if (err) reject(err);
-        else resolve(result!);
-      });
-    });
-  });
-
-  if (stats.hasErrors()) {
-    console.error(stats.toString({ preset: 'errors-warnings', colors: true }));
+  // Emptied here rather than by Vite: the SSR environment's output sits inside the RSC environment's.
+  await rm(join(distDir, 'server'), { recursive: true, force: true });
+  await rm(join(distDir, 'static'), { recursive: true, force: true });
+  // Outside the `try`: what this throws is a one-line `[rshono]` message about the app, for the CLI to print.
+  const viteConfig = createViteConfig({ rootDir, isDev: false, config, preset });
+  try {
+    const builder = await createBuilder(viteConfig);
+    await builder.buildApp();
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : error);
     return exit(1);
   }
-  // Printed rather than left to the summary below, which counts warnings without saying what they are —
-  // and one of them is the env shadow reporting a read it cannot cover. See `env-shadow-loader.cjs`.
-  if (stats.hasWarnings()) console.warn(stats.toString({ preset: 'errors-warnings', colors: true }));
-  console.log(stats.toString({ preset: 'summary', colors: true }));
 
   const publicDir = join(rootDir, 'public');
   // From scratch, and unconditionally, like every other directory this build assembles. `cpSync` only

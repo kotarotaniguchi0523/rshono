@@ -39,7 +39,7 @@ test('a hand-written "use server-entry" works when the thunk is not inline', asy
   assert.equal(res.status, 200, 'the manual directive must attach client assets on its own');
   const html = await res.text();
   assert.match(html, /data-page="manual"/);
-  assert.match(html, /\/_static\/chunks\/main\.[0-9a-f]+\.js/, 'without the directive there would be no bootstrap script');
+  assert.match(html, /<script type="module" src="\/_static\/assets\/index-[\w-]+\.js"/, 'the document boots the client entry');
 });
 
 test('a wildcard route matches and sees the full path', async () => {
@@ -385,7 +385,7 @@ export const routes = defineRoutes([
   const { status, output } = runCli(dir, ['build']);
   assert.equal(status, 1, `the build must not exit 0:\n${output}`);
   assert.match(output, /\[rshono\] 4 route modules cannot serve a request:/);
-  assert.match(output, /• The page component for "\/clientpage" is missing its client-asset info/);
+  assert.match(output, /• The page component for "\/clientpage" is a client component \('use client'\)/);
   assert.match(output, /• The page module for "\/noexport" must default-export a server component\./);
   assert.match(output, /• The page module for "\/static-broken" must default-export a server component\./);
   assert.match(output, /• The endpoint module for "\/api\/bad" must export `handler`/);
@@ -434,7 +434,6 @@ test("a 'use client' module importing @rshono/core/server fails the build naming
   assert.equal(status, 1, `the build must not exit 0:\n${output}`);
   // Rspack colours its own "ERROR in <file>" line, so the escapes land between the words.
   const plain = output.replaceAll(new RegExp(String.fromCharCode(27) + '\\[\\d+m', 'g'), '');
-  assert.match(plain, /ERROR in src[\\/]pages[\\/]widget\.tsx/, 'the path belongs where a reader looks for one');
   assert.match(plain, /\[rshono\] src[\\/]pages[\\/]widget\.tsx imports '@rshono\/core\/server', which the browser bundle cannot have\./);
   assert.match(output, /useNavigation\(\)/, 'and what to use instead');
   assert.doesNotMatch(output, /node:async_hooks|Unhandled scheme/, 'the resolver report names a builtin the author never wrote');
@@ -457,8 +456,8 @@ test("a 'use client' page is refused whether or not something else comes first i
 
     const { status, output } = runCli(dir, ['build']);
     assert.equal(status, 1, `${JSON.stringify(head)}: the build must not exit 0:\n${output}`);
-    assert.match(output, /\[rshono\] The page component for "\/client" is missing its client-asset info/, 'the framework names the page');
-    assert.match(output, /a 'use client' page must be wrapped by a server component instead/, 'and says what to do about it');
+    assert.match(output, /\[rshono\] The page component for "\/client" is a client component \('use client'\)/, 'the framework names the page');
+    assert.match(output, /wrap the 'use client' component in one instead/, 'and says what to do about it');
     assert.doesNotMatch(output, /build complete/, `${JSON.stringify(head)}: nothing that reads as the build having worked`);
   }
 });

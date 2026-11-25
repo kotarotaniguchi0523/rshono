@@ -13,7 +13,7 @@ import { buildApp, POSTCSS_APP_DIR, startApp, stopServer } from './helpers.mjs';
 
 buildApp(POSTCSS_APP_DIR);
 
-const chunksDir = join(POSTCSS_APP_DIR, 'dist', 'static', 'chunks');
+const chunksDir = join(POSTCSS_APP_DIR, 'dist', 'static', 'assets');
 const cssFiles = readdirSync(chunksDir).filter((file) => file.endsWith('.css'));
 const css = cssFiles.map((file) => readFileSync(join(chunksDir, file), 'utf8')).join('\n');
 
@@ -39,9 +39,9 @@ test('class detection is scoped to the fixture rather than dumping every utility
 
 test('the compiled stylesheet is the one the page links', async () => {
   const html = await (await fetch(`${base}/`)).text();
-  const href = html.match(/<link rel="stylesheet" href="([^"]+)"/)?.[1];
+  const href = html.match(/<link rel="stylesheet"[^>]*? href="([^"]+)"/)?.[1];
   assert.ok(href, 'the page should link a stylesheet');
-  assert.equal(href, `/_static/chunks/${cssFiles[0]}`, 'and it should be the file PostCSS produced');
+  assert.equal(href, `/_static/assets/${cssFiles[0]}`, 'and it should be the file PostCSS produced');
 
   const served = await fetch(`${base}${href}`);
   assert.equal(served.status, 200);

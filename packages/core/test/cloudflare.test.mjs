@@ -4,7 +4,7 @@
 // reads through a binding, and compression being the edge's job — without needing wrangler installed.
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { APP_ENV, buildApp, MINIMAL_APP_DIR, TESTBED_DIR, TESTBED_DIST, importAppBundle, importServerBundle } from './helpers.mjs';
@@ -71,8 +71,15 @@ after(() => {
 });
 
 describe('the Workers build output', () => {
-  test('is a single module — Wrangler cannot follow the computed specifier a split bundle imports by', () => {
-    assert.equal(existsSync(join(TESTBED_DIST, 'server', 'chunks')), false, 'async chunks must be inlined for this target');
+  test('has no lazily loaded chunk — a Worker is a fixed set of modules', () => {
+    const scripts = readdirSync(join(TESTBED_DIST, 'server'), { recursive: true }).filter((file) => /\.m?js$/.test(file));
+    // Each environment's entry and the asset manifest it imports statically — and no lazily loaded chunk.
+    assert.deepEqual(scripts.map((file) => file.replaceAll('\\', '/')).sort(), [
+      '__vite_rsc_assets_manifest.js',
+      'main.mjs',
+      'ssr/__vite_rsc_assets_manifest.js',
+      'ssr/index.js',
+    ]);
   });
 
   test('leaves nothing external that workerd does not provide', () => {
@@ -90,7 +97,7 @@ describe('the Workers build output', () => {
   });
 
   test('assembles one assets directory: the hashed bundle, public/ at the root, and the prerender tree', () => {
-    assert.ok(existsSync(join(ASSETS_ROOT, '_static', 'chunks')), '/_static/* is served straight from the CDN');
+    assert.ok(existsSync(join(ASSETS_ROOT, '_static', 'assets')), '/_static/* is served straight from the CDN');
     assert.ok(existsSync(join(ASSETS_ROOT, 'robots.txt')), 'public/ files keep their web-root paths');
     assert.ok(existsSync(join(ASSETS_ROOT, '__ssg', 'docs', 'getting-started', 'index.html')), 'prerendered document');
     assert.ok(existsSync(join(ASSETS_ROOT, '__ssg', 'docs', 'getting-started', 'index.rsc')), 'prerendered flight payload');
@@ -247,7 +254,7 @@ describe('serving from a Worker', () => {
     ]) {
       // The testbed, because it *has* a `notFound` page: an app without one answers the plain 404 either
       // way, so it could not tell the fix from the bug.
-      const res = await fetchWorker('/_static/chunks/main.deadbeefdeadbeef.js', { headers });
+      const res = await fetchWorker('/_static/assets/index-deadbeef.js', { headers });
       const body = await res.text();
       assert.equal(res.status, 404, `${name}: a missing chunk is a 404`);
       assert.match(res.headers.get('content-type') ?? '', /text\/plain/, `${name}: and a plain one — no route below the mount runs`);

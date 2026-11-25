@@ -1,6 +1,6 @@
 import type { Hono } from 'hono';
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { loadEnvFiles } from '../server/load-env.js';
 import { readPrerendered } from '../server/ssg.js';
 import { createPublicFallback, createStaticAssetsApp } from '../server/static.js';
@@ -18,14 +18,19 @@ if (typeof process !== 'undefined' && typeof process.setSourceMapsEnabled === 'f
 }
 
 /**
- * The project root, derived from where the bundle ended up: this module is compiled into
- * `<root>/<outDir>/server/main.mjs`, which is why every output directory sits one level under the root.
- *
- * Derived rather than baked in, because an absolute build-time path would tie the output to the machine that
- * produced it — building in CI to run elsewhere is the normal case. A preset that relocates the bundle keeps
- * `dist/server/main.mjs` intact inside its own layout for this reason.
+ * The app's root. The dev server is told (this module is then the framework's own file, nowhere near the
+ * app). A build works it out from where its bundle sits: every file the server build writes is somewhere
+ * under `<root>/<outDir>/server/`, entry or chunk, and that stays true on a platform that copies the output
+ * elsewhere — so walk up to that `server` directory rather than count levels.
  */
-const rootDir = join(import.meta.dirname, '..', '..');
+function findRootDir(): string {
+  if (__RSHONO_CONFIG__.rootDir) return __RSHONO_CONFIG__.rootDir;
+  let dir = import.meta.dirname;
+  while (basename(dir) !== 'server' && dirname(dir) !== dir) dir = dirname(dir);
+  return join(dir, '..', '..');
+}
+
+const rootDir = findRootDir();
 
 const staticDir = join(rootDir, outDir, 'static');
 const ssgDir = join(rootDir, outDir, 'ssg');

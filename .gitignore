@@ -19,3 +19,6 @@ packages/core/test/fixtures/minimal-app/throwaway-*/
 # The same, for the copy of the server bundle prod.test.mjs breaks to imitate a partial deploy. Inside the
 # testbed because the bundle leaves one dependency external, so it has to resolve `node_modules` from here.
 apps/testbed/drift-*/
+
+# Private copies of a build the test suites import in-process (test/helpers.mjs).
+.bundle-*/

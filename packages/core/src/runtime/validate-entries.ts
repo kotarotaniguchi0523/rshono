@@ -18,7 +18,6 @@
  */
 
 import type { Handler, Hono } from 'hono';
-import type { ServerEntry } from 'react-server-dom-rspack/server';
 import { isPageRoute, type PageComponent, type Route, type RouteConfig } from '../router.js';
 
 /** Every method an endpoint route can name, `'all'` aside — which is also what `'all'` is expanded to below. */
@@ -319,43 +318,42 @@ export function validateServerApp(exported: unknown): Hono | null {
   return app as Hono;
 }
 
-/** Set by the Vite build (`vite/index.ts`). Read defensively: the unit suite imports this module bare. */
-const viteRsc = typeof __RSHONO_CONFIG__ !== 'undefined' && __RSHONO_CONFIG__.bundler === 'vite';
 const CLIENT_REFERENCE = Symbol.for('react.client.reference');
+
+/**
+ * The property the build puts on a page's default export — see `rshonoPages` in `vite/index.ts`, which wraps
+ * every page module so its stylesheets render with it and its props arrive untouched.
+ */
+export const PAGE_MARK = '$$rshonoPage';
 
 /**
  * The server component a page module must default-export, checked rather than cast.
  *
- * Two structural mistakes land here, and neither can serve *any* request, which is why they are also checked
+ * Three structural mistakes land here, and none can serve *any* request, which is why they are also checked
  * at build time by {@link assertRouteModules}:
  *
  * - no default export at all — a named `export function Page`, or a file that exports its layout instead;
- * - a `'use client'` page. That module's default export is a client reference, so it carries no
- *   `entryJsFiles` — the list of scripts the document has to boot, recorded only for a *server* entry.
- *   Rendering it anyway would produce a page with no client runtime, which is worse than a message.
+ * - a `'use client'` page. That module's default export is a client reference, not something to render on
+ *   the server with `ctx`;
+ * - a page the build did not recognise as one, so it was never wrapped. Left alone, the RSC plugin's own
+ *   stylesheet wrapper could re-create its element from the enumerable props and silently drop `ctx`.
  */
-export function assertPageModule(mod: { default?: unknown }, label: string): ServerEntry<PageComponent> {
-  const Page = mod.default as ServerEntry<PageComponent> | undefined;
+export function assertPageModule(mod: { default?: unknown }, label: string): PageComponent {
+  const Page = mod.default as (PageComponent & { $$typeof?: symbol; [PAGE_MARK]?: true }) | undefined;
   if (typeof Page !== 'function') {
     fail(`The page module for ${label} must default-export a server component.`);
   }
-  if (viteRsc) {
-    // No per-page asset list to look for under Vite — the plugin injects those itself — so the one mistake
-    // this check exists for is recognised directly: a `'use client'` page default-exports a client reference.
-    if ((Page as { $$typeof?: symbol }).$$typeof === CLIENT_REFERENCE) {
-      fail(
-        `The page component for ${label} is a client component ('use client'). ` +
-          "A page must be a server component — wrap the 'use client' component in one instead.",
-      );
-    }
-    return Page;
-  }
-  if (!Page.entryJsFiles) {
+  if (Page.$$typeof === CLIENT_REFERENCE) {
     fail(
-      `The page component for ${label} is missing its client-asset info ('use server-entry'). ` +
-        "The directive is added automatically for inline `component: () => import('…')` thunks in routes.ts. " +
-        "If this page is wired up another way, put 'use server-entry' on the first line of the page module yourself — " +
-        "and make sure the page is a server component (a 'use client' page must be wrapped by a server component instead).",
+      `The page component for ${label} is a client component ('use client'). ` +
+        "A page must be a server component — wrap the 'use client' component in one instead.",
+    );
+  }
+  if (!Page[PAGE_MARK]) {
+    fail(
+      `The page component for ${label} was not built as a page ('use server-entry'). ` +
+        "That happens automatically for inline `component: () => import('…')` thunks in routes.ts. " +
+        "If this page is wired up another way, put 'use server-entry' on the first line of the page module yourself.",
     );
   }
   return Page;

@@ -25,8 +25,8 @@ export interface ServerConfig {
    * `getRequestContext().env` has to know: see `DeployPreset.envBindings`, which decides it.
    */
   envBindings: boolean;
-  /** Set when the Vite build compiled the bundle; absent under Rspack. See `bundler/contract.ts`. */
-  bundler?: 'vite';
+  /** Dev server only: the app's root. A build finds it from where its own bundle sits — see `deploy/filesystem.ts`. */
+  rootDir?: string;
 }
 
 /**

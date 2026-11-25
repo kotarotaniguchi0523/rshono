@@ -11,8 +11,6 @@ export default defineConfig({
   // Security
   trustProxy: false, // honour X-Forwarded-Host/-Proto — only behind a proxy you control
 
-  // Build — mutate the generated Rspack config just before it compiles
-  rspack(config) {
-    return config;
-  },
+  // Escape hatch: Vite config merged over the generated one — plugins, aliases, CSS options.
+  vite: {},
 });

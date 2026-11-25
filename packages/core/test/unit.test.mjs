@@ -12,7 +12,8 @@ import { fileURLToPath } from 'node:url';
 
 import { scanPageFiles } from '../dist/builder/page-files.js';
 import { checkReactVersions } from '../dist/builder/react-versions.js';
-import { createConfigs } from '../dist/builder/rspack-config.js';
+import { readsGlobalProcess, shadowProcessEnv } from '../dist/builder/env-shadow.js';
+import { createViteConfig } from '../dist/builder/vite-config.js';
 import { DEPLOY_TARGETS, deployHintFor, NODE_PRESET, resolveDeployPreset } from '../dist/deploy/presets.js';
 import { publicRouteCollisions } from '../dist/deploy/public-paths.js';
 import { appendVary, etagMatches, varyWith } from '../dist/server/headers.js';
@@ -32,7 +33,6 @@ import {
   RequestContext,
   runWithContext,
 } from '../dist/runtime/context.js';
-import { walkHotUpdates } from '../dist/runtime/hot-update.js';
 import { assertRouteModules, validateRoutesModule, validateServerApp } from '../dist/runtime/validate-entries.js';
 import { MINIMAL_APP_DIR, TESTBED_DIR } from './helpers.mjs';
 
@@ -1683,32 +1683,53 @@ describe('publicRouteCollisions', () => {
   });
 });
 
-describe('the deploy seam', () => {
-  test('the server bundle resolves @rshono/deploy to the selected platform, and nothing else', () => {
-    const [clientConfig, serverConfig] = createConfigs({ rootDir: MINIMAL_APP_DIR, isDev: false, config: {}, preset: NODE_PRESET });
-    assert.match(serverConfig.resolve.alias['@rshono/deploy$'], /dist[\\/]deploy[\\/]node[\\/]runtime\.js$/);
-    assert.equal('@rshono/deploy$' in clientConfig.resolve.alias, false, 'the browser bundle has no platform to speak of');
+describe('the generated Vite config', () => {
+  const options = { rootDir: MINIMAL_APP_DIR, isDev: false, preset: NODE_PRESET };
+
+  test('lays the three environments out where every platform expects them', () => {
+    const config = createViteConfig({ ...options, config: {} });
+    assert.equal(config.base, '/_static/');
+    assert.match(config.environments.rsc.build.outDir, /^dist[\\/]server$/);
+    assert.match(config.environments.ssr.build.outDir, /^dist[\\/]server[\\/]ssr$/);
+    assert.match(config.environments.client.build.outDir, /^dist[\\/]static$/);
   });
 
-  test('a preset can adjust the server compiler, and the user hook still gets the last word', () => {
-    const preset = {
-      ...NODE_PRESET,
-      configureServer(config) {
-        config.target = 'webworker';
-      },
-    };
-    const [, serverConfig] = createConfigs({
-      rootDir: MINIMAL_APP_DIR,
-      isDev: false,
-      preset,
-      config: {
-        rspack(config, { isServer }) {
-          if (isServer) config.devtool = 'source-map';
-        },
-      },
+  test("the app's vite option is merged over it, and cannot move what the framework owns", () => {
+    const appPlugin = { name: 'app-plugin' };
+    const config = createViteConfig({
+      ...options,
+      config: { vite: { base: '/elsewhere/', root: '/nowhere', define: { __APP__: '1' }, plugins: [appPlugin] } },
     });
-    assert.equal(serverConfig.target, 'webworker', 'the preset reached the generated config');
-    assert.equal(serverConfig.devtool, 'source-map', "the app's own hook ran after it");
+    assert.equal(config.define.__APP__, '1', 'app settings are kept');
+    assert.ok('__RSHONO_CONFIG__' in config.define, 'next to the generated ones');
+    assert.equal(config.base, '/_static/');
+    assert.equal(config.root, MINIMAL_APP_DIR);
+    const names = config.plugins.flat(Infinity).map((plugin) => plugin?.name);
+    assert.ok(names.indexOf('app-plugin') < names.indexOf('rshono:pages'), "the app's plugins run ahead of the framework's");
+  });
+
+  test('a serverless target bundles its dependencies; node leaves them in node_modules', () => {
+    const node = createViteConfig({ ...options, config: {} });
+    assert.deepEqual(node.environments.rsc.resolve.noExternal, ['@rshono/core']);
+    const lambda = createViteConfig({ ...options, config: {}, preset: resolveDeployPreset({ flag: 'aws-lambda' }) });
+    assert.equal(lambda.environments.rsc.resolve.noExternal, true);
+    assert.equal(lambda.environments.ssr.resolve.noExternal, true);
+  });
+
+  test('the client environment is compiled against the public environment only', () => {
+    process.env.PUBLIC_UNIT_PROBE = 'visible';
+    process.env.UNIT_PROBE_SECRET = 'hidden';
+    try {
+      const config = createViteConfig({ ...options, config: {} });
+      const env = JSON.parse(config.environments.client.define['process.env']);
+      assert.equal(env.PUBLIC_UNIT_PROBE, 'visible');
+      assert.equal('UNIT_PROBE_SECRET' in env, false);
+      assert.equal(env.NODE_ENV, 'production');
+      assert.equal('process.env' in (config.environments.rsc.define ?? {}), false, 'server code reads the real process.env');
+    } finally {
+      delete process.env.PUBLIC_UNIT_PROBE;
+      delete process.env.UNIT_PROBE_SECRET;
+    }
   });
 });
 
@@ -1794,103 +1815,6 @@ describe('checkReactVersions', () => {
   test('does not fire on a real app', () => {
     // The check runs on every dev and build, so a false positive here would break every one of them.
     checkReactVersions(MINIMAL_APP_DIR);
-  });
-});
-
-describe('module resolution', () => {
-  /** The `node_modules` a package was resolved out of, symlinks already followed by `require.resolve`. */
-  const installedIn = (name) => {
-    let dir = dirname(createRequire(import.meta.url).resolve(name));
-    while (basename(dir) !== 'node_modules') dir = dirname(dir);
-    return dir;
-  };
-
-  test('app source can resolve the RSC runtime the transform injects into it', () => {
-    // Nothing in an app imports react-server-dom-rspack by hand — the RSC transform rewrites pages,
-    // client components and server actions into imports of it, resolved from the app's own src/. Only
-    // a hoisting package manager puts it within reach from there; pnpm installs the framework's
-    // dependencies beside the framework instead, so the directory it really lives in has to be on the
-    // search path or every pnpm install fails to build.
-    const configs = createConfigs({ rootDir: MINIMAL_APP_DIR, isDev: false, config: {}, preset: NODE_PRESET });
-    for (const config of configs) {
-      const dirs = config.resolve.modules;
-      assert.equal(dirs[0], 'node_modules', "an app's own dependencies still win");
-      assert.ok(
-        dirs.includes(installedIn('react-server-dom-rspack')),
-        `${config.name}: react-server-dom-rspack is not reachable from app source — searched ${dirs.join(', ')}`,
-      );
-    }
-  });
-});
-
-describe('server bundle externals', () => {
-  const [, serverConfig] = createConfigs({ rootDir: MINIMAL_APP_DIR, isDev: false, config: {}, preset: NODE_PRESET });
-
-  /** The hook's verdict for one request: `undefined` means "bundle it", a string means "leave it external". */
-  const verdict = (request, contextInfo) => {
-    let result;
-    serverConfig.externals[0]({ request, contextInfo }, (error, value) => {
-      if (error) throw error;
-      result = value;
-    });
-    return result;
-  };
-
-  test('leaves third-party packages and node builtins to the runtime', () => {
-    assert.equal(verdict('some-npm-package'), 'module-import some-npm-package');
-    assert.equal(verdict('@scope/pkg/sub'), 'module-import @scope/pkg/sub');
-    assert.equal(verdict('node:fs'), 'module-import node:fs');
-  });
-
-  test('bundles a third-party package reached from the SSR layer, whatever the target', () => {
-    // The SSR layer is where `'use client'` components render on the server, and `env-shadow-loader` is what
-    // keeps a secret out of that HTML. A loader cannot run on a module the bundle merely names, so an
-    // externalized third-party client component was loaded raw at request time and read the real
-    // `process.env` — a secret in the SSR stream on the one target that externalizes anything, `node`.
-    //
-    // Nothing is given up by bundling it: the same module is in the browser bundle too, so it was always
-    // required to be bundleable.
-    const ssr = { issuerLayer: 'server-side-rendering' };
-    assert.equal(verdict('some-ui-library', ssr), undefined, 'a client component from node_modules must be compiled');
-    assert.equal(verdict('@scope/ui/button', ssr), undefined);
-    // The RSC layer is server-only code, and keeps the policy — that is what makes `node` builds fast and
-    // lets a server component use a native addon.
-    assert.equal(verdict('some-ui-library', { issuerLayer: 'react-server-components' }), 'module-import some-ui-library');
-
-    // A builtin reached from the SSR layer is *deferred* by this hook rather than externalized by it, and
-    // `target: 'node'` externalizes it through Rspack's `node` externals preset instead — the same division of
-    // labour the serverless presets rely on when they drop this function altogether. `node:` imports surviving
-    // into the emitted bundle is asserted end to end by the deploy-targets suite.
-    assert.equal(verdict('node:fs', ssr), undefined, 'deferred here, and the node preset is what keeps it external');
-    assert.equal(verdict('node:fs', { issuerLayer: 'react-server-components' }), 'module-import node:fs');
-  });
-
-  test('bundles the framework, React and Hono, which the server cannot resolve at runtime', () => {
-    for (const request of [
-      '@rshono/core',
-      'react',
-      'react-dom/server.edge',
-      'hono/cookie',
-      '@rshono/routes',
-      '@/components/home',
-      './entry.ssr.js',
-    ]) {
-      assert.equal(verdict(request), undefined, `${request} must be bundled`);
-    }
-  });
-
-  test('bundles path requests on every platform, Windows drive letters included', () => {
-    // Rspack asks for the RSC client and server-entry proxies by absolute path. Externalizing one
-    // emits an `import()` of a raw filesystem path — harmless-looking on POSIX, where that parses as
-    // a URL path, and fatal on Windows, where `D:\…` is read as an unsupported `d:` URL scheme.
-    assert.equal(verdict('/app/src/components/home.tsx?rsc-server-entry-proxy=true'), undefined);
-    assert.equal(
-      verdict('D:\\app\\src\\components\\home.tsx?rsc-server-entry-proxy=true'),
-      undefined,
-      'a Windows path must never become import("D:\\…")',
-    );
-    assert.equal(verdict('D:/app/src/components/home.tsx'), undefined, 'forward-slash drive paths too');
-    assert.equal(verdict('\\\\server\\share\\home.tsx'), undefined, 'and UNC paths');
   });
 });
 
@@ -2021,7 +1945,7 @@ describe('the security-middleware build warning', () => {
   /**
    * The minimal app somewhere disposable, plus whatever `src/server.ts` the case wants.
    *
-   * No `node_modules`: `createConfigs` builds config objects and scans `src/`, and resolves packages from
+   * No `node_modules`: `createViteConfig` builds config objects and scans `src/`, and resolves packages from
    * the *framework's* tree rather than the app's, so nothing here reads one. It used to borrow the
    * fixture's through a junction, which was both unnecessary and a Windows reparse point for no reason.
    */
@@ -2034,13 +1958,13 @@ describe('the security-middleware build warning', () => {
     return dir;
   }
 
-  /** What `createConfigs` warns about for `rootDir`, as one string. Builds only — `dev` says nothing. */
+  /** What `createViteConfig` warns about for `rootDir`, as one string. Builds only — `dev` says nothing. */
   function warningsFor(rootDir, { isDev = false } = {}) {
     const warn = console.warn;
     const lines = [];
     console.warn = (...args) => lines.push(args.join(' '));
     try {
-      createConfigs({ rootDir, isDev, config: {}, preset: NODE_PRESET });
+      createViteConfig({ rootDir, isDev, config: {}, preset: NODE_PRESET });
     } finally {
       console.warn = warn;
     }
@@ -2076,382 +2000,6 @@ describe('the security-middleware build warning', () => {
   test('the testbed, which registers both, is warned about nothing — and dev is never warned at all', () => {
     assert.equal(warningsFor(TESTBED_DIR), '');
     assert.equal(warningsFor(MINIMAL_APP_DIR, { isDev: true }), '', 'a rebuild would print it every time');
-  });
-});
-
-describe('the env-shadow prelude', () => {
-  /** The loader options the builder actually generates, read off the rule that carries them. */
-  function generatedOptions({ isDev = false } = {}) {
-    const [, serverConfig] = createConfigs({ rootDir: MINIMAL_APP_DIR, isDev, config: {}, preset: NODE_PRESET });
-    const rule = serverConfig.module.rules.find((entry) => entry.use?.[0]?.loader?.includes('env-shadow-loader'));
-    assert.ok(rule, 'the SSR env-shadow rule has to be in the server config');
-    return rule.use[0].options;
-  }
-
-  const generatedPrelude = () => generatedOptions().prelude;
-
-  test('tells the loader the mode it is building for, so the prelude does not cost dead-code elimination', () => {
-    // Without this the SSR layer bundles React's development builds beside the production ones — the prelude
-    // shadows `process`, and DefinePlugin will not substitute through a local binding. The two have to agree:
-    // the value the loader writes is the value the prelude's own `env` carries.
-    assert.equal(generatedOptions({ isDev: false }).nodeEnv, 'production');
-    assert.equal(generatedOptions({ isDev: true }).nodeEnv, 'development');
-    assert.match(generatedOptions({ isDev: false }).prelude, /"NODE_ENV":"production"/);
-  });
-
-  test('shadows env while leaving the rest of process reachable', () => {
-    // The prelude replaces the whole `process` binding for the module it rewrites, and `react-dom/server` is in
-    // that same layer — so anything reading `process.nextTick`, `process.version` or `process.platform` has to
-    // still find it. That is why it is `Object.assign(Object.create(real process), { env })` and not a bare
-    // `{ env }`. Evaluated rather than pattern-matched, because the property under test is what the code *does*.
-    const read = new Function(
-      'globalThis',
-      `${generatedPrelude()} return { env: process.env, platform: process.platform, hasNextTick: typeof process.nextTick };`,
-    );
-    const result = read(globalThis);
-
-    assert.equal(result.env.DATABASE_URL, undefined, 'a secret must not be readable through the shadowed env');
-    assert.equal(result.env.NODE_ENV, 'production');
-    assert.equal(result.platform, process.platform, 'every other member still resolves through the prototype chain');
-    assert.equal(result.hasNextTick, 'function');
-  });
-
-  test('does not fall over where there is no process to inherit from', () => {
-    // A deploy target need not have one — the same server config is what `workerd` compiles from.
-    const read = new Function('globalThis', `${generatedPrelude()} return process.env.NODE_ENV;`);
-    assert.equal(read({}), 'production');
-  });
-});
-
-describe('page-entry-loader', () => {
-  const pageEntryLoader = createRequire(import.meta.url)('../dist/builder/page-entry-loader.cjs');
-  const BODY = '\nexport default function Page() {\n  return null;\n}\n';
-  /** Whether the loader left the module alone, which it must whenever the module declares a directive itself. */
-  const untouched = (head) => pageEntryLoader(head + BODY) === head + BODY;
-
-  test('leaves a module that already declares one of the three directives alone, wherever in the prologue it is', () => {
-    // The whole prologue, not only its first entry. A page opening `'use strict';` above its `'use client';`
-    // used to get `'use server-entry';` prepended — and the injected directive is the one the compiler acts
-    // on, so the page built clean and shipped instead of being refused by `assertPageModule`.
-    for (const head of [
-      "'use client';",
-      "'use server-entry';",
-      '"use server"',
-      "'use strict';\n'use client';",
-      '"use strict";\n"use client";',
-      "'use strict'\n'use client'",
-      "// banner\n/* block */\n'use strict';\n// why\n'use client';",
-      // Not one of the three, and not a list this has to be taught: `'use cache'` is React's, and the check
-      // is written as "any directive that is not those three".
-      "'use cache';\n'use server-entry';",
-      // A trailing comment used to end the match, because the old pattern required `;`, a newline or the end
-      // of the source right after the closing quote.
-      "'use client' // still a client page",
-    ]) {
-      assert.equal(untouched(head), true, `${JSON.stringify(head)} declares its own directive`);
-    }
-  });
-
-  test('prepends the directive to a page that declares none', () => {
-    for (const head of ['', "'use strict';", '// a plain page']) {
-      assert.equal(pageEntryLoader(head + BODY), `'use server-entry';${head}${BODY}`, `${JSON.stringify(head)} needs the directive`);
-    }
-  });
-
-  test('reads directives structurally, so a comment that mentions one is not one', () => {
-    // The regression the wider match must not buy: a page that says in a comment what it used to be, or a
-    // module-level string, would otherwise be left without the directive it needs — and fail the build.
-    for (const head of [
-      "// this page used to be 'use client';",
-      "/* 'use client' lived here */",
-      "const label = 'use client';",
-      "'use clientish';",
-    ]) {
-      assert.equal(untouched(head), false, `${JSON.stringify(head)} is not a directive`);
-    }
-  });
-});
-
-describe('env-shadow-loader', () => {
-  const envShadowLoader = createRequire(import.meta.url)('../dist/builder/env-shadow-loader.cjs');
-  const PRELUDE = 'const process = { env: {} }; ';
-  const APP_SRC = join(tmpdir(), 'rshono-app', 'src');
-
-  /**
-   * The slice of Rspack's loader context this loader reads. `layer` is the layer the *module* is in, and
-   * `resourcePath` decides whether a module counts as the app's own source for the warning below.
-   */
-  const run = (source, { layer = 'ssr', resourcePath = join(APP_SRC, 'component.tsx'), warnings, nodeEnv } = {}) =>
-    envShadowLoader.call(
-      {
-        getOptions: () => ({ prelude: PRELUDE, layer: 'ssr', appSrcPrefix: APP_SRC + sep, nodeEnv }),
-        _module: { layer },
-        resourcePath,
-        emitWarning: (warning) => warnings?.push(warning.message),
-      },
-      source,
-    );
-
-  test('shadows env only in the layer it was configured for', () => {
-    const source = 'export const x = process.env.SECRET;';
-    assert.equal(run(source, { layer: 'ssr' }), `${PRELUDE}${source}`, 'the SSR layer is the one that must be shadowed');
-    assert.equal(run(source, { layer: 'rsc' }), source, 'a server component reads the real env');
-    assert.equal(run(source, { layer: null }), source);
-  });
-
-  test('leaves a module that never mentions process untouched', () => {
-    // The fast path: every module in the bundle now reaches this loader, so the common case has to be one
-    // string scan and out.
-    assert.equal(run('export const x = 1;'), 'export const x = 1;');
-    // And a word that merely contains it is not a mention. Being wrong here only costs bytes, but
-    // `child_process` and `preprocess` are common enough to be worth not paying for.
-    for (const source of ['export const x = preprocess(1);', 'export const x = processEnv;', "import cp from 'node:child_process';"]) {
-      assert.equal(run(source), source, `"${source}" must not drag the prelude in`);
-    }
-  });
-
-  test('shadows every shape that reads the env through the process binding, not just the literal process.env', () => {
-    // A gate on the substring `process.env` saw one shape out of six. The prelude replaces the whole
-    // binding, so all of them are covered once it is emitted — `process?.env` above all, which is how env
-    // access is written in code meant to run in a browser *and* on a server, i.e. in a `'use client'`
-    // component. Every miss rendered the real value into the SSR'd HTML while the browser bundle saw the
-    // `PUBLIC_`-only view: a leaked secret, and a hydration mismatch besides.
-    for (const source of [
-      'export const x = process.env.DATABASE_URL;',
-      'const { DATABASE_URL } = process.env;',
-      'export const x = process?.env.DATABASE_URL;',
-      "export const x = process['env'].DATABASE_URL;",
-      'const { env } = process;',
-      'const p = process; export const x = p.env.DATABASE_URL;',
-      "export const x = typeof process !== 'undefined' ? process.env.DATABASE_URL : '';",
-    ]) {
-      assert.equal(run(source), PRELUDE + source, `"${source}" must be shadowed`);
-    }
-  });
-
-  test('warns when the app reads process through the global object, which no binding can shadow', () => {
-    // `globalThis.process` is the real `process` however the module names it, so the prelude cannot reach
-    // it — the read has to be found by a person. Only the app's own source is worth saying it about: a
-    // library feature-detecting `globalThis.process?.env?.NODE_ENV` is doing nothing wrong and has no app
-    // secret to read.
-    for (const source of [
-      'export const x = globalThis.process.env.DATABASE_URL;',
-      'export const x = globalThis?.process?.env?.DATABASE_URL;',
-      "export const x = global['process'].env.DATABASE_URL;",
-      "export const x = globalThis?.['process']?.env?.DATABASE_URL;",
-      'export const x = self.process.env.DATABASE_URL;',
-    ]) {
-      const warnings = [];
-      assert.equal(run(source, { warnings }), PRELUDE + source, 'the prelude is still emitted');
-      assert.equal(warnings.length, 1, `"${source}" must be reported`);
-      assert.match(warnings[0], /reads `process` through the global object/);
-    }
-
-    const fromLibrary = [];
-    run('export const x = globalThis.process.env.NODE_ENV;', {
-      resourcePath: join(tmpdir(), 'rshono-app', 'node_modules', 'ui', 'index.js'),
-      warnings: fromLibrary,
-    });
-    assert.deepEqual(fromLibrary, [], 'a dependency is not the app author to tell');
-
-    const rsc = [];
-    run('export const x = globalThis.process.env.DATABASE_URL;', { layer: 'rsc', warnings: rsc });
-    assert.deepEqual(rsc, [], 'a server component is meant to read the real env');
-
-    const shadowed = [];
-    run('export const x = process.env.DATABASE_URL;', { warnings: shadowed });
-    assert.deepEqual(shadowed, [], 'the shape the shadow does cover says nothing');
-  });
-
-  test('inserts the prelude after the whole directive prologue, not after the first directive', () => {
-    // Two directives is ordinary output from a published component library, and this loader now sees
-    // `node_modules`. Splitting the pair would leave the second one preceded by a statement — an ordinary
-    // expression rather than a directive — silently dropping either strict mode or `'use client'`.
-    for (const [first, second] of [
-      ["'use client';", "'use strict';"],
-      ['"use strict";', '"use client";'],
-    ]) {
-      const source = `${first}\n${second}\nexport const x = process.env.SECRET;`;
-      assert.equal(run(source), `${first}\n${second}\n${PRELUDE}export const x = process.env.SECRET;`, `${first} ${second} must stay adjacent`);
-    }
-  });
-
-  test('carries comments, blank lines, semicolon-less directives and a three-directive run', () => {
-    const prologue = "// banner\n/* block */\n'use strict'\n'use client'\n'use server'\n";
-    const body = 'export const x = process.env.SECRET;';
-    assert.equal(run(prologue + body), prologue + PRELUDE + body);
-  });
-
-  test('prepends to a module with no prologue at all', () => {
-    const source = 'export const x = process.env.SECRET;';
-    assert.equal(run(source), PRELUDE + source);
-  });
-
-  test('substitutes NODE_ENV before the prelude hides it from DefinePlugin', () => {
-    // The prelude declares a module-scope `process`, and DefinePlugin respects lexical scope — so every
-    // `if (process.env.NODE_ENV === 'production')` in this layer stayed a runtime branch and React's
-    // development builds were bundled beside the production ones. Substituting first hands the optimiser the
-    // one expression it needs back. Not a behaviour change: `NODE_ENV` is the build's mode, so the literal
-    // written here is the value the shadow would have returned anyway.
-    assert.equal(
-      run("if (process.env.NODE_ENV === 'production') { a(); } else { b(); }", { nodeEnv: 'production' }),
-      `${PRELUDE}if ("production" === 'production') { a(); } else { b(); }`,
-    );
-    assert.equal(run('export const x = process.env.NODE_ENV;', { nodeEnv: 'development' }), `${PRELUDE}export const x = "development";`);
-  });
-
-  test('substitutes code, and leaves the same text alone in a comment, a string or a template', () => {
-    // The substitution is textual where DefinePlugin's is not: DefinePlugin works on the parsed module and so
-    // cannot reach inside a string, and without a scan that walks the same tokens an SSR-layer module saying
-    // `throw new Error('set process.env.NODE_ENV')` would ship with its message rewritten.
-    const cases = [
-      ["throw new Error('set process.env.NODE_ENV first');", "throw new Error('set process.env.NODE_ENV first');"],
-      ['const s = "process.env.NODE_ENV";', 'const s = "process.env.NODE_ENV";'],
-      ['const t = `read process.env.NODE_ENV`;', 'const t = `read process.env.NODE_ENV`;'],
-      ['const x = 1; // process.env.NODE_ENV', 'const x = 1; // process.env.NODE_ENV'],
-      ['const x = 1; /* process.env.NODE_ENV */', 'const x = 1; /* process.env.NODE_ENV */'],
-      // An apostrophe in a comment must not open a string that swallows the code after it — the trap this
-      // kind of scan falls into, and why comments are matched ahead of strings.
-      ["const a = 1; // don't\nconst x = process.env.NODE_ENV;", 'const a = 1; // don\'t\nconst x = "production";'],
-      // …and an escaped quote must not close a string early, for the same reason.
-      ["const s = 'a\\'b'; const x = process.env.NODE_ENV;", "const s = 'a\\'b'; const x = \"production\";"],
-    ];
-    for (const [source, expected] of cases) {
-      assert.equal(run(source, { nodeEnv: 'production' }), PRELUDE + expected, source);
-    }
-  });
-
-  test('substitutes NODE_ENV only in the layer it shadows, and only when asked', () => {
-    const source = 'export const x = process.env.NODE_ENV;';
-    // The RSC layer gets no prelude, so DefinePlugin still reaches it there and this loader must not touch it.
-    assert.equal(run(source, { layer: 'rsc', nodeEnv: 'production' }), source);
-    // And with no `nodeEnv` configured the loader is the shadow and nothing more.
-    assert.equal(run(source), PRELUDE + source);
-  });
-
-  test('leaves NODE_ENV read off something other than the free process binding alone', () => {
-    // The same shapes DefinePlugin itself declines. Substituting a member read off another object would be
-    // rewriting an unrelated expression, and the shadow still answers all of these correctly at runtime.
-    // Asserted on the value not appearing rather than on the exact output, because `myprocess` never gets a
-    // prelude either — `\bprocess\b` turns it away one gate earlier.
-    for (const source of [
-      'export const x = this.process.env.NODE_ENV;',
-      'export const x = config.process.env.NODE_ENV;',
-      'export const x = myprocess.env.NODE_ENV;',
-      'export const x = process.env.NODE_ENVIRONMENT;',
-    ]) {
-      assert.ok(run(source, { nodeEnv: 'production' }).includes(source), `"${source}" must survive unrewritten`);
-    }
-  });
-
-  test('fails the build rather than shipping unshadowed when it cannot read the layer', () => {
-    // `_module` is a private Rspack field. A silent no-op if it were ever renamed would drop the guarantee
-    // that keeps server secrets out of SSR-rendered client components, with nothing to notice.
-    assert.throws(
-      () => envShadowLoader.call({ getOptions: () => ({ prelude: PRELUDE, layer: 'ssr' }) }, 'process.env.SECRET'),
-      /could not read the module's layer/,
-    );
-  });
-});
-
-describe('walkHotUpdates', () => {
-  // A fake of the bundler's hot runtime. `chain` maps the hash the page is on to the hash the next
-  // `*.hot-update.json` moves it to — exactly the file-per-build chain the real one walks; a hash
-  // missing from it is a 404, which the real runtime reports as "no update", not as an error.
-  function fakeHot({ from, chain, status = () => 'idle' }) {
-    const state = { hash: from, checks: 0 };
-    return [
-      state,
-      {
-        status,
-        async check() {
-          state.checks++;
-          const next = chain.get(state.hash);
-          if (next === undefined) return null;
-          if (next instanceof Error) throw next;
-          state.hash = next;
-          return ['some/module.js'];
-        },
-      },
-    ];
-  }
-
-  const walk = (state, hot, target) =>
-    walkHotUpdates(
-      hot,
-      () => state.hash,
-      () => target,
-    );
-
-  test('walks one build at a time until the page is on the target', async () => {
-    const [state, hot] = fakeHot({
-      from: 'a',
-      chain: new Map([
-        ['a', 'b'],
-        ['b', 'c'],
-      ]),
-    });
-    assert.equal(await walk(state, hot, 'c'), null);
-    assert.equal(state.hash, 'c');
-    assert.equal(state.checks, 2, 'each round should advance exactly one build');
-  });
-
-  test('does nothing when the page is already on the target', async () => {
-    const [state, hot] = fakeHot({ from: 'a', chain: new Map() });
-    assert.equal(await walk(state, hot, 'a'), null);
-    assert.equal(state.checks, 0);
-  });
-
-  test('gives up instead of spinning when the update chain is broken', async () => {
-    // The regression this exists for. A missing manifest 404s, and the runtime resolves `check` with
-    // null rather than rejecting — so a walk that only stops on "reached the target" or "threw" keeps
-    // re-requesting that same 404 forever, and the page never picks up another change. Restarting the
-    // dev server puts every open tab in exactly this state: starting up wipes `dist`.
-    const [state, hot] = fakeHot({ from: 'gone', chain: new Map() });
-    const giveUp = await walk(state, hot, 'latest');
-    assert.match(giveUp?.reason ?? '', /cannot be applied/);
-    assert.equal(state.checks, 1, 'the unreachable target must be given up on after a single round');
-  });
-
-  test('gives up when an update applies without moving the page forward', async () => {
-    const [state, hot] = fakeHot({ from: 'a', chain: new Map([['a', 'a']]) });
-    const giveUp = await walk(state, hot, 'z');
-    assert.match(giveUp?.reason ?? '', /cannot be applied/);
-    assert.equal(state.checks, 1);
-  });
-
-  test('gives up, carrying the error, when an update cannot be applied', async () => {
-    const failure = new Error('module declined the update');
-    const [state, hot] = fakeHot({ from: 'a', chain: new Map([['a', failure]]) });
-    const giveUp = await walk(state, hot, 'b');
-    assert.equal(giveUp?.error, failure);
-  });
-
-  test('gives up when another update is already in flight', async () => {
-    const [state, hot] = fakeHot({ from: 'a', chain: new Map([['a', 'b']]), status: () => 'apply' });
-    assert.match((await walk(state, hot, 'b'))?.reason ?? '', /already in flight/);
-    assert.equal(state.checks, 0, 'check() may only be called from idle');
-  });
-
-  test('absorbs builds that land mid-walk rather than finishing against a stale target', async () => {
-    // Both hashes are read fresh each round precisely so a save during a walk extends it: the page
-    // ends up on the newest build instead of stopping at the one the walk started for.
-    const [state, hot] = fakeHot({
-      from: 'a',
-      chain: new Map([
-        ['a', 'b'],
-        ['b', 'c'],
-      ]),
-    });
-    let target = 'b';
-    const done = walkHotUpdates(
-      hot,
-      () => state.hash,
-      () => target,
-    );
-    target = 'c';
-    assert.equal(await done, null);
-    assert.equal(state.hash, 'c');
   });
 });
 
@@ -2671,10 +2219,10 @@ describe('validateServerApp', () => {
  * turns a method-named export into `TypeError: r is not a function` from a minified frame.
  */
 describe('assertRouteModules', () => {
-  /** What a `'use server-entry'` page module's default export looks like: the client-asset list is on it. */
-  const serverPage = Object.assign(() => null, { entryJsFiles: ['/_static/chunks/main.js'] });
-  /** And what a `'use client'` one looks like — a reference with no assets recorded against it. */
-  const clientPage = () => null;
+  /** What a page module's default export looks like once the build has wrapped it. */
+  const serverPage = Object.assign(() => null, { $$rshonoPage: true });
+  /** And what a `'use client'` one looks like — a client reference. */
+  const clientPage = Object.assign(() => null, { $$typeof: Symbol.for('react.client.reference') });
 
   const page = (path, mod) => ({ path, component: () => Promise.resolve(mod) });
   const endpoint = (path, mod) => ({ path, type: 'endpoint', server: () => Promise.resolve(mod) });
@@ -2694,10 +2242,10 @@ describe('assertRouteModules', () => {
     );
   });
 
-  test("refuses a 'use client' page, which has no client assets recorded against it", async () => {
+  test("refuses a 'use client' page", async () => {
     await assert.rejects(
       assertRouteModules({ routes: [page('/clientpage', { default: clientPage })] }),
-      /\[rshono\] The page component for "\/clientpage" is missing its client-asset info/,
+      /\[rshono\] The page component for "\/clientpage" is a client component/,
     );
   });
 
@@ -2712,7 +2260,7 @@ describe('assertRouteModules', () => {
   test('checks the notFound and error pages too, which the request path only reaches once something failed', async () => {
     await assert.rejects(
       assertRouteModules({ routes: [], notFound: { component: () => Promise.resolve({ default: clientPage }) } }),
-      /The page component for the notFound page is missing/,
+      /The page component for the notFound page is a client component/,
     );
     await assert.rejects(
       assertRouteModules({ routes: [], error: { component: () => Promise.resolve({}) } }),
@@ -2754,7 +2302,7 @@ describe('assertRouteModules', () => {
         assertRouteModules({
           routes: [{ path: '/side-effect', component: () => Promise.reject(new Error('nope')) }, page('/clientpage', { default: clientPage })],
         }),
-        /The page component for "\/clientpage" is missing/,
+        /The page component for "\/clientpage" is a client component/,
         'a route it could not load must not stop it checking the rest',
       );
     } finally {
@@ -2807,5 +2355,65 @@ describe('exit', () => {
       .filter((name) => name.endsWith('.js') && name !== 'exit.js')
       .filter((name) => /\bprocess\.exit\s*\(/.test(readFileSync(join(cliDir, name), 'utf8')));
     assert.deepEqual(offenders, [], 'these must `return exit(code)` instead — a piped stderr drops what a bare exit leaves behind');
+  });
+});
+
+describe('shadowProcessEnv', () => {
+  const options = { env: { NODE_ENV: 'production', PUBLIC_URL: 'https://example.test' }, nodeEnv: 'production' };
+  const PRELUDE = `const process = Object.assign(Object.create(globalThis.process ?? Object.prototype), { env: ${JSON.stringify(options.env)} }); `;
+  const run = (source) => shadowProcessEnv(source, options);
+
+  test('leaves a module that never mentions process untouched', () => {
+    assert.equal(run('export const x = 1;'), null);
+    // A word that merely contains it is not a mention.
+    for (const source of ['export const x = preprocess(1);', 'export const x = processEnv;', "import cp from 'node:child_process';"]) {
+      assert.equal(run(source), null, `"${source}" must not drag the prelude in`);
+    }
+  });
+
+  test('shadows every shape that reads the env through the process binding, not just the literal process.env', () => {
+    // A `define` on `process.env` sees the first two of these. The prelude replaces the whole binding.
+    for (const source of [
+      'export const x = process.env.DATABASE_URL;',
+      'const { DATABASE_URL } = process.env;',
+      'export const x = process?.env.DATABASE_URL;',
+      "export const x = process['env'].DATABASE_URL;",
+      'const { env } = process;',
+      'const p = process; export const x = p.env.DATABASE_URL;',
+      "export const x = typeof process !== 'undefined' ? process.env.DATABASE_URL : '';",
+    ]) {
+      assert.equal(run(source), PRELUDE + source, `"${source}" must be shadowed`);
+    }
+  });
+
+  test('the shadow really hides a secret, and keeps the rest of process', () => {
+    process.env.SHADOW_UNIT_SECRET = 'hunter2';
+    try {
+      const read = new Function(`${run('return [process?.env.SHADOW_UNIT_SECRET, process.env.PUBLIC_URL, typeof process.version];')}`);
+      assert.deepEqual(read(), [undefined, 'https://example.test', 'string']);
+    } finally {
+      delete process.env.SHADOW_UNIT_SECRET;
+    }
+  });
+
+  test('goes after the whole directive prologue, so no directive stops being one', () => {
+    for (const prologue of ["'use client';\n", '"use strict";\n\'use client\';\n', "// a comment\n'use client';\n"]) {
+      const out = run(`${prologue}export const x = process.env.A;`);
+      assert.equal(out, `${prologue}${PRELUDE}export const x = process.env.A;`);
+    }
+  });
+
+  test('hands process.env.NODE_ENV back as a literal, in code and nowhere else', () => {
+    assert.equal(run("if (process.env.NODE_ENV === 'production') a();"), `${PRELUDE}if ("production" === 'production') a();`);
+    const untouched = ["throw new Error('set process.env.NODE_ENV');", 'x(`process.env.NODE_ENV`, process);', 'this.process.env.NODE_ENV; process;'];
+    for (const source of untouched) assert.equal(run(source), PRELUDE + source, source);
+    assert.match(run('process; // process.env.NODE_ENV'), /\/\/ process\.env\.NODE_ENV$/, 'a comment is prose');
+  });
+
+  test('a read through the global object is recognised, since no binding can shadow it', () => {
+    for (const source of ['globalThis.process.env.X', 'globalThis?.process', "global['process'].env", 'self.process']) {
+      assert.equal(readsGlobalProcess(source), true, source);
+    }
+    assert.equal(readsGlobalProcess('process.env.X'), false);
   });
 });

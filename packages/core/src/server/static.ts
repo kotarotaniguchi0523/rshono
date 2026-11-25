@@ -3,7 +3,8 @@ import type { MiddlewareHandler } from 'hono';
 import { Hono } from 'hono';
 import { ASSET_MISS_CACHE_CONTROL } from './headers.js';
 
-const CONTENT_HASHED = /\.[0-9a-f]{8,}\./;
+// Vite's own naming for everything it emits: `assets/<name>-<8-character content hash>.<ext>`.
+const CONTENT_HASHED = /\/assets\/[^/]+-[\w-]{8}\.\w+$/;
 
 function cacheControl(isDev: boolean): MiddlewareHandler {
   return async (c, next) => {

@@ -37,7 +37,7 @@ export {
   type RouteConfig,
 } from './router.js';
 
-export { defineConfig, type RshonoConfig, type RspackHookContext } from './config.js';
+export { defineConfig, type RshonoConfig } from './config.js';
 
 export type { DeployTarget } from './deploy/contract.js';
 

@@ -21,27 +21,16 @@ export default defineConfig({
 
   // trustProxy: false,   // honour X-Forwarded-Host/-Proto — only behind a proxy you control
 
-  rspack(config) {
-    /**
-     * Tailwind, and the only thing the build needs to know about it.
-     *
-     * Rspack compiles CSS natively, which is fast and is all a plain stylesheet needs — but that parser
-     * reads *finished* CSS, and `@import 'tailwindcss'`, `@theme` and `@apply` are not that. Tailwind is
-     * a PostCSS plugin, so it has to run in front of the parser, which is what this rule does. The
-     * plugin list itself is in `postcss.config.mjs`, where postcss-loader looks for it.
-     *
-     * Keep `type: 'css/auto'` rather than `'css'`, or `*.module.css` stops being a CSS module.
-     */
-    config.module!.rules!.push({ test: /\.css$/i, use: ['postcss-loader'], type: 'css/auto' });
-
-    /**
-     * Documentation pages are markdown files imported as strings, so the content is *in* the server
-     * bundle rather than read off disk at request time.
-     *
-     * That is what lets `/docs/:slug.md` — a dynamic endpoint route — answer on a target with no
-     * filesystem (`cloudflare`), and it keeps the prerender honest: the same bytes the build parsed into
-     * HTML are the bytes the markdown endpoint serves.
-     */
-    config.module!.rules!.push({ test: /\.md$/i, type: 'asset/source' });
+  vite: {
+    // The docs pages import their Markdown as text. (Tailwind needs nothing here: Vite runs PostCSS itself,
+    // from `postcss.config.mjs`.)
+    plugins: [
+      {
+        name: 'markdown-source',
+        transform(code, id) {
+          if (id.endsWith('.md')) return { code: `export default ${JSON.stringify(code)};`, map: null };
+        },
+      },
+    ],
   },
 });

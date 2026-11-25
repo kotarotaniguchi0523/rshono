@@ -1,13 +1,5 @@
-import type { RspackOptions } from '@rspack/core';
+import type { UserConfig } from 'vite';
 import type { DeployTarget } from './deploy/contract.js';
-
-/** Which of the two Rspack compilers the {@link RshonoConfig.rspack} hook is being called for. */
-export interface RspackHookContext {
-  /** `true` for the server (`target: node`) bundle, `false` for the client (`target: web`) bundle. */
-  isServer: boolean;
-  /** `true` under `rshono dev`, `false` under `rshono build`. */
-  isDev: boolean;
-}
 
 /**
  * Project configuration, default-exported from `rshono.config.ts` at the project root (`.js` / `.mjs`
@@ -81,21 +73,16 @@ export interface RshonoConfig {
    */
   trustProxy?: boolean;
   /**
-   * Escape hatch: mutate the generated Rspack config just before it's compiled. Called once per
-   * compiler — inspect {@link RspackHookContext.isServer} to tell them apart. Mutate `config` in
-   * place and return nothing, or return a replacement.
+   * Escape hatch: Vite config merged over the generated one (`mergeConfig`) — plugins, aliases, CSS options,
+   * per-environment settings under `environments.{rsc,ssr,client}`. The framework's own plugins are always
+   * registered; `root`, `base` and the output directories are its to set.
    *
    * @example
-   * ```ts
-   * rspack(config, { isServer }) {
-   *   config.module?.rules?.push({ test: /\.svg$/, type: 'asset/source' });
-   * }
-   * ```
+   * vite: { plugins: [tailwindcss()] }
    *
-   * @see {@link https://rspack.rs/config/ | Rspack — configuration reference}
-   * @see {@link https://www.rshono.com/docs/configuration#the-rspack-hook | Docs — the rspack hook}
+   * @see {@link https://vite.dev/config/ | Vite — configuration reference}
    */
-  rspack?: (config: RspackOptions, ctx: RspackHookContext) => RspackOptions | void;
+  vite?: UserConfig;
 }
 
 /**

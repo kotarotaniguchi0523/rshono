@@ -10,7 +10,7 @@ import { exit } from './exit.js';
 // would load it for `start` too — ~30 MB of RSS and ~70ms of startup that would then sit in the server's own
 // process for its whole life, since `start` imports the bundle rather than spawning it.
 
-const HELP = `rshono — Hono + Rspack + React Server Components
+const HELP = `rshono — Hono + Vite + React Server Components
 
 Usage:
   rshono dev     [--port 3000]   start the dev server
