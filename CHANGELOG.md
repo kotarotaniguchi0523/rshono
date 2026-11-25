@@ -86,6 +86,13 @@ those.
   another origin: name it with `trustServerFunctionOrigins([...])`. A client that sends no `Origin` is
   unaffected.
 
+- **`rsvhono build` records which server functions each route reaches**, in
+  `dist/server/route-functions.json`, and reports on it: how many functions, which routes it could not
+  trace, and which functions no route reaches. Worked out from Vite's module graph in both bundles, the way
+  `@vitejs/plugin-rsc`'s `action-reachability` example does, so a re-export, a lazy client component and a
+  dynamically imported server component are all followed. **Not enforced**: a request is not checked against
+  it. It is per module — a page that reaches one export of a `'use server'` file reaches them all.
+
 - **`beforeServerFunction(guard)`** runs before every server function — called from client code, posted by
   a form without JavaScript, or called from the `notFound` page — with the function's id and the Hono
   context. An `HTTPException` it throws is answered with its own status.

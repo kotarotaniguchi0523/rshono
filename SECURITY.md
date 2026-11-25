@@ -62,7 +62,9 @@ The framework owns four boundaries, and a defect in any of them is a vulnerabili
   thing holding — a `cors()` middleware permissive enough to answer that preflight does not open the
   functions up. A bypass of the origin rule is in scope.
 
-  What is **not** enforced: _which_ function a caller may run. Every `'use server'` export in the build can
+  What is **not** enforced: _which_ function a caller may run. (`rsvhono build` writes
+  `dist/server/route-functions.json`, saying which functions each route's page reaches, and nothing checks a
+  request against it. It is a report.) Every `'use server'` export in the build can
   be called from any page URL by anyone the origin rule lets through. Authorization is the app's —
   `beforeServerFunction()` is the one place that sees every call, and each function still has to check what
   it is asked to do.

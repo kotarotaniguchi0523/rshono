@@ -2472,3 +2472,45 @@ describe('shadowProcessEnv', () => {
     assert.equal(readsGlobalProcess('process.env.X'), false);
   });
 });
+
+describe('route-functions: reading the manifest', async () => {
+  const { createReferenceValidation, joinRouteFunctions, reachableFunctions, UnreachableServerReferenceError } =
+    await import('../dist/runtime/route-functions.js');
+
+  const manifest = joinRouteFunctions(
+    { 'pages/a.tsx': ['m1#save'], 'pages/b.tsx': ['m2#remove', 'm2#rename'], 'pages/plain.tsx': [] },
+    { '/a': 'pages/a.tsx', '/b/:id': 'pages/b.tsx', '/plain': 'pages/plain.tsx', '/no-key': undefined, '/not-walked': 'pages/gone.tsx' },
+    ['m1#save', 'm2#remove', 'm2#rename', 'm3#orphan'],
+  );
+
+  test('a route is joined to its page’s functions, and a function no route reaches is named', () => {
+    assert.deepEqual(manifest.routes, { '/a': ['m1#save'], '/b/:id': ['m2#remove', 'm2#rename'], '/plain': [] });
+    assert.deepEqual(manifest.unreachable, ['m3#orphan']);
+  });
+
+  test('a route that could not be traced is unresolved, never empty and never everything', () => {
+    // No key on the page module, and a key the graph walk never recorded.
+    assert.deepEqual(manifest.unresolved, ['/no-key', '/not-walked']);
+    assert.equal(reachableFunctions(manifest, '/no-key'), undefined);
+    assert.equal(reachableFunctions(manifest, '/never-heard-of'), undefined);
+    // As distinct from a page that was traced and reaches nothing.
+    assert.deepEqual([...reachableFunctions(manifest, '/plain')], []);
+    assert.equal(reachableFunctions(manifest, '__proto__'), undefined);
+  });
+
+  test('a function another route reaches is refused as the call and as a reference inside it', () => {
+    const fromA = createReferenceValidation(reachableFunctions(manifest, '/a'));
+    fromA.assertReachable('m1#save');
+    fromA.onServerReference({ id: 'm1', name: 'save' });
+    // The function the request names…
+    assert.throws(() => fromA.assertReachable('m2#remove'), UnreachableServerReferenceError);
+    // …and one that only turns up while decoding: an argument, or something bound to the action.
+    assert.throws(() => fromA.onServerReference({ id: 'm2', name: 'remove' }), /m2#remove is not reachable/);
+  });
+
+  test('not knowing what a route reaches refuses every reference', () => {
+    const unknown = createReferenceValidation(reachableFunctions(manifest, '/no-key'));
+    assert.throws(() => unknown.assertReachable('m1#save'), UnreachableServerReferenceError);
+    assert.throws(() => unknown.onServerReference({ id: 'm1', name: 'save' }), UnreachableServerReferenceError);
+  });
+});

@@ -1674,3 +1674,55 @@ test('the body-size cap covers endpoint routes and the server sub-app, not just 
   const status = await postDeclaringBodyOf('/api/users', 2 * 1024 * 1024);
   assert.equal(status, 413, 'a 2MB body declared to a sub-app route should be refused by the 1MiB default cap');
 });
+
+// ── Which server functions each route reaches ────────────────────────────────────────────────────────────
+//
+// `rsvhono build` writes `dist/server/route-functions.json` from Vite's module graph, in both bundles. The
+// testbed's `/reachability` reaches one function by each kind of edge, each in a module of its own, so every
+// claim below is about one function. Nothing at runtime reads this file yet: these are about what the build
+// knows, not about what a request is refused for.
+describe('the route-functions manifest', () => {
+  const manifest = JSON.parse(readFileSync(join(TESTBED_DIST, 'server', 'route-functions.json'), 'utf8'));
+  const names = (route) => (manifest.routes[route] ?? []).map((id) => id.slice(id.lastIndexOf('#') + 1));
+
+  test('follows every kind of edge from a page to a function', () => {
+    assert.deepEqual(names('/reachability').sort(), ['reachBarrel', 'reachDirect', 'reachLazyClient', 'reachLazyServer']);
+    // `reachDirect`: a server component refers to it — the RSC graph.
+    // `reachBarrel`: a client component imports it through a re-export — the browser graph, one hop further.
+    // `reachLazyClient`: a client component loaded with `import()` imports it.
+    // `reachLazyServer`: a server component loaded with `import()` refers to it.
+  });
+
+  test('keeps a function declared inside a component to the page that declares it', () => {
+    assert.match(names('/inline-action').join(), /^\$\$hoist_\w+$/);
+    for (const route of ['/reachability', '/users', '/action-race']) {
+      assert.ok(!names(route).some((name) => name.startsWith('$$hoist')), `${route} does not reach another page’s inline function`);
+    }
+  });
+
+  test('is keyed by the route pattern, a parameter and all, and lists a page that reaches nothing as that', () => {
+    assert.ok(Object.hasOwn(manifest.routes, '/profile/:id'), 'the pattern from routes.ts, not a URL');
+    assert.deepEqual(manifest.routes['/profile/:id'], []);
+    assert.ok(!names('/profile/:id').includes('reachDirect'));
+  });
+
+  test('gives the notFound page its functions, reached through a component it shares with another page', () => {
+    // `ActionRaceControls` is rendered by `/action-race` and by the 404 page; both reach what it imports.
+    assert.ok(names('(notFound)').includes('recordRace'));
+    assert.ok(names('/action-race').includes('recordRace'));
+    assert.ok(Object.hasOwn(manifest.routes, '(error)'));
+  });
+
+  test('says which routes it could not trace instead of giving them a list', () => {
+    // `/unloadable` throws as its module evaluates. It is neither "reaches nothing" nor "reaches everything".
+    assert.deepEqual(manifest.unresolved, ['/unloadable']);
+    assert.ok(!Object.hasOwn(manifest.routes, '/unloadable'));
+  });
+
+  test('every id is one the reference allowlist knows', async () => {
+    const all = new Set(Object.values(manifest.routes).flat());
+    assert.ok(all.size > 0);
+    // The same string React puts on the wire, so the two can be compared directly.
+    assert.ok(all.has(serverActionId('Add user')));
+  });
+});

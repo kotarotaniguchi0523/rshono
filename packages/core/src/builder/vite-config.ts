@@ -11,6 +11,7 @@ import react from '@vitejs/plugin-react';
 import rsc, { getPluginApi } from '@vitejs/plugin-rsc';
 import { hasDirective, transformWrapExport } from '@vitejs/plugin-rsc/transforms';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { writeFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import {
   createIdResolver,
@@ -106,13 +107,13 @@ function firstExisting(dir: string, names: string[]): string | undefined {
 /** Appended to a page module by {@link rsvhonoPages}. `jsx(value, props)`, never `createElement` — see there. */
 const WRAP_PAGE = `
 import { jsx as __rsvhono_jsx, jsxs as __rsvhono_jsxs, Fragment as __rsvhono_Fragment } from "react/jsx-runtime";
-function __rsvhono_wrap_page__(value, name) {
+function __rsvhono_wrap_page__(value, name, key) {
   if (typeof value !== "function") return value;
   function __wrapper(props) {
     return __rsvhono_jsxs(__rsvhono_Fragment, { children: [import.meta.viteRsc.loadCss(), __rsvhono_jsx(value, props)] });
   }
   Object.defineProperty(__wrapper, "name", { value: name });
-  Object.defineProperty(__wrapper, ${JSON.stringify(PAGE_MARK)}, { value: true });
+  Object.defineProperty(__wrapper, ${JSON.stringify(PAGE_MARK)}, { value: key });
   return __wrapper;
 }
 `;
@@ -128,7 +129,91 @@ function __rsvhono_wrap_page__(value, name) {
  * transform (`rscCssTransform.filter` in {@link createViteConfig}) and wrapped here instead, passing the props object
  * through untouched. Registered ahead of the plugin so a hand-written directive is seen before its filter runs.
  */
-function rsvhonoPages(pageFiles: Set<string>): Plugin {
+/** A page module's key: its path under `src/`, as Vite spells paths. */
+const pageKey = (srcDir: string, file: string): string => normalizePath(relative(srcDir, file));
+
+/** Where the build leaves what each page module reaches, for `rsvhono build` to join with the route table. */
+export const PAGE_FUNCTIONS_FILE = '__rsvhono_page_functions.json';
+
+/**
+ * Records which server functions each page module can reach, from the module graph Vite built — the method
+ * of `@vitejs/plugin-rsc`'s `action-reachability` example, with the roots taken from the pages the build
+ * wrapped rather than listed by hand.
+ *
+ * A page reaches a function two ways, and they are in different bundles. A server component refers to it
+ * directly: that edge is in the RSC graph. A client component imports it: the RSC graph ends at the client
+ * component's proxy, and the edge exists only in the browser bundle's graph. So the RSC build records, per
+ * page, the functions it reaches and the client components it reaches; the client build then walks on from
+ * those client components; and the two are joined once both have run.
+ *
+ * `getModuleInfo` is the graph: `importedIds` and `dynamicallyImportedIds`, so a re-export and a lazy
+ * `import()` are followed like any other edge, and nothing here parses a source file. The scan build is
+ * skipped — its graph is the plugin's first pass, before client references are final.
+ */
+function rsvhonoRouteFunctions(pageFiles: Set<string>, srcDir: string): Plugin {
+  let manager: NonNullable<ReturnType<typeof getPluginApi>>['manager'] | undefined;
+  const clientRoots = new Map<string, Set<string>>();
+  const reached = new Map<string, Set<string>>();
+
+  /** Everything reachable from `roots` in the graph of the environment `context` belongs to. */
+  const walk = (
+    context: { getModuleInfo(id: string): { importedIds: readonly string[]; dynamicallyImportedIds: readonly string[] } | null },
+    roots: Iterable<string>,
+  ) => {
+    const clientReferences = new Set<string>();
+    const functions = new Set<string>();
+    const seen = new Set<string>();
+    const queue = [...roots];
+    for (let index = 0; index < queue.length; index++) {
+      const id = queue[index];
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const client = manager!.clientReferenceMetaMap[id];
+      if (client) clientReferences.add(client.importId);
+      const server = manager!.serverReferences.metaMap.get(id);
+      if (server) for (const name of server.exportNames) functions.add(`${server.referenceKey}#${name}`);
+      const info = context.getModuleInfo(id);
+      if (info) queue.push(...info.importedIds, ...info.dynamicallyImportedIds);
+    }
+    return { clientReferences, functions };
+  };
+
+  return {
+    name: 'rsvhono:route-functions',
+    configResolved(config) {
+      manager = getPluginApi(config)?.manager;
+    },
+    generateBundle() {
+      if (!manager || manager.isScanBuild) return;
+      if (this.environment.name === 'rsc') {
+        for (const file of pageFiles) {
+          const { clientReferences, functions } = walk(this, [file]);
+          clientRoots.set(file, clientReferences);
+          reached.set(file, functions);
+        }
+      }
+      if (this.environment.name === 'client') {
+        for (const [file, roots] of clientRoots) {
+          for (const id of walk(this, roots).functions) reached.get(file)!.add(id);
+        }
+      }
+    },
+    buildApp: {
+      order: 'post',
+      async handler(builder) {
+        if (!manager) return;
+        const pages: Record<string, string[]> = {};
+        for (const [file, functions] of reached) pages[pageKey(srcDir, file)] = [...functions].sort();
+        const all: string[] = [];
+        for (const meta of manager.serverReferences.metaMap.values()) for (const name of meta.exportNames) all.push(`${meta.referenceKey}#${name}`);
+        // Only now: the browser bundle's graph does not exist until after the RSC output has been written.
+        await writeFile(join(builder.config.environments.rsc.build.outDir, PAGE_FUNCTIONS_FILE), JSON.stringify({ pages, all: all.sort() }, null, 2));
+      },
+    },
+  };
+}
+
+function rsvhonoPages(pageFiles: Set<string>, srcDir: string): Plugin {
   return {
     name: 'rsvhono:pages',
     async transform(code, id) {
@@ -143,7 +228,10 @@ function rsvhonoPages(pageFiles: Set<string>): Plugin {
         pageFiles.add(file);
       }
       const { output } = transformWrapExport(code, ast, {
-        runtime: (value, name, meta) => `__rsvhono_wrap_page__(${value}, ${JSON.stringify(meta.defaultExportIdentifierName ?? name)})`,
+        // The key is the page's path under `src/`: stable across builds, and what the route-function manifest
+        // is recorded under. See `rsvhonoRouteFunctions`.
+        runtime: (value, name, meta) =>
+          `__rsvhono_wrap_page__(${value}, ${JSON.stringify(meta.defaultExportIdentifierName ?? name)}, ${JSON.stringify(pageKey(srcDir, file))})`,
         filter: (name) => name === 'default',
         ignoreExportAllDeclaration: true,
       });
@@ -441,7 +529,8 @@ export function createViteConfig({ rootDir, isDev, config, preset }: ViteConfigO
     plugins: [
       ...(merged.plugins ?? []),
       react(),
-      rsvhonoPages(pageFiles),
+      rsvhonoPages(pageFiles, srcDir),
+      ...(isDev ? [] : [rsvhonoRouteFunctions(pageFiles, srcDir)]),
       rsc({
         entries: {
           rsc: frameworkFile('runtime', 'entry.rsc.js'),

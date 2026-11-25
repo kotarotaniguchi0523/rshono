@@ -1,14 +1,15 @@
 import type { Hono } from 'hono';
-import { cpSync, existsSync } from 'node:fs';
+import { cpSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createBuilder } from 'vite';
-import { BUILD_OUT_DIR, createViteConfig } from '../builder/vite-config.js';
+import { BUILD_OUT_DIR, createViteConfig, PAGE_FUNCTIONS_FILE } from '../builder/vite-config.js';
 import type { RsvhonoConfig } from '../config.js';
 import { writeBuildMarker } from '../deploy/build-marker.js';
 import type { DeployPreset } from '../deploy/presets.js';
 import type { Route } from '../router.js';
+import { joinRouteFunctions, type RouteFunctionManifest } from '../runtime/route-functions.js';
 import { prerenderStaticRoutes } from '../server/ssg.js';
 import { exit } from './exit.js';
 
@@ -25,6 +26,42 @@ interface ServerBundle {
   routes: readonly Route[];
   /** Resolves every route's own module, and the app's server actions, and checks them — see `checkAppModules`. */
   checkAppModules: () => Promise<void>;
+  /** Route pattern → the key of the page module it renders — see `routePages` in `entry.rsc.tsx`. */
+  routePages: () => Promise<Record<string, string | undefined>>;
+}
+
+/** Where the route → server functions manifest is written, beside the server bundle. */
+const ROUTE_FUNCTIONS_FILE = 'route-functions.json';
+
+/**
+ * Joins the build's per-page record with the route table and writes the manifest, then says what it found.
+ * A report and a file: nothing at runtime reads it yet — see `runtime/route-functions.ts`.
+ */
+async function writeRouteFunctions(distDir: string, bundle: ServerBundle): Promise<void> {
+  const serverDir = join(distDir, 'server');
+  let built: { pages: Record<string, string[]>; all: string[] };
+  try {
+    built = JSON.parse(readFileSync(join(serverDir, PAGE_FUNCTIONS_FILE), 'utf8')) as typeof built;
+  } catch {
+    console.warn('  ⚠ the build left no record of which server functions each page reaches, so no route-functions manifest was written.');
+    return;
+  }
+  const manifest: RouteFunctionManifest = joinRouteFunctions(built.pages, await bundle.routePages(), built.all);
+  writeFileSync(join(serverDir, ROUTE_FUNCTIONS_FILE), JSON.stringify(manifest, null, 2));
+
+  if (built.all.length === 0) return;
+  const routes = Object.keys(manifest.routes).length;
+  console.log(`  • ${built.all.length} server function(s), traced across ${routes} route(s) → dist/server/${ROUTE_FUNCTIONS_FILE}`);
+  // Said out loud, because the two silent readings of a route missing from the list are both wrong: that it
+  // reaches no function, and that it reaches all of them.
+  if (manifest.unresolved.length > 0) {
+    console.warn(`  ⚠ could not trace which server functions these routes reach: ${manifest.unresolved.join(', ')}`);
+  }
+  if (manifest.unreachable.length > 0) {
+    console.warn(
+      `  ⚠ ${manifest.unreachable.length} server function(s) are in the build but no route reaches them — unused, or reached in a way the module graph does not show: ${manifest.unreachable.join(', ')}`,
+    );
+  }
 }
 
 function importServerBundle(distDir: string): Promise<ServerBundle> {
@@ -82,6 +119,7 @@ export async function buildCommand(options: BuildOptions): Promise<void> {
   // that skipped them would spend the prerender pass on a route it is about to refuse anyway. Without this
   // they ran on first request instead, which meant a page that could never work shipped behind a green build.
   await bundle.checkAppModules();
+  await writeRouteFunctions(distDir, bundle);
 
   const { written, skipped, flightOnly } = await prerenderStaticRoutes({
     routes: bundle.routes,

@@ -144,6 +144,11 @@ export const routes = defineRoutes({
       component: () => import('./components/unloadable'),
     },
     {
+      // Reaches server functions through a re-export and two kinds of `import()`. See the route-functions manifest.
+      path: '/reachability',
+      component: () => import('./components/reachability'),
+    },
+    {
       // Redirects to its own path with a different query. See navigation-redirects.spec.mjs.
       path: '/canonical',
       component: () => import('./components/canonical'),

@@ -321,10 +321,19 @@ export function validateServerApp(exported: unknown): Hono | null {
 const CLIENT_REFERENCE = Symbol.for('react.client.reference');
 
 /**
- * The property the build puts on a page's default export — see `rsvhonoPages` in `vite/index.ts`, which wraps
- * every page module so its stylesheets render with it and its props arrive untouched.
+ * The property the build puts on a page's default export — see `rsvhonoPages` in `builder/vite-config.ts`,
+ * which wraps every page module so its stylesheets render with it and its props arrive untouched.
+ *
+ * Its value is the page's key: the module's path under `src/`. That is what ties a route to the build's
+ * record of what its page reaches (`route-functions.ts`) without anyone parsing `routes.ts` for it.
  */
 export const PAGE_MARK = '$$rsvhonoPage';
+
+/** The key of a page module the build wrapped, or `undefined` for anything else. */
+export function pageKeyOf(mod: { default?: unknown } | null | undefined): string | undefined {
+  const key = (mod?.default as { [PAGE_MARK]?: unknown } | undefined)?.[PAGE_MARK];
+  return typeof key === 'string' ? key : undefined;
+}
 
 /**
  * The server component a page module must default-export, checked rather than cast.
@@ -339,7 +348,7 @@ export const PAGE_MARK = '$$rsvhonoPage';
  *   stylesheet wrapper could re-create its element from the enumerable props and silently drop `ctx`.
  */
 export function assertPageModule(mod: { default?: unknown }, label: string): PageComponent {
-  const Page = mod.default as (PageComponent & { $$typeof?: symbol; [PAGE_MARK]?: true }) | undefined;
+  const Page = mod.default as (PageComponent & { $$typeof?: symbol; [PAGE_MARK]?: string }) | undefined;
   if (typeof Page !== 'function') {
     fail(`The page module for ${label} must default-export a server component.`);
   }

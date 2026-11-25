@@ -47,7 +47,15 @@ import { failureDocument } from './failure-document.js';
 import type { CancellableTransformer } from './flight-inject.js';
 import { RouterProvider } from './navigation.js';
 import { asksForRsc, isBrowserFormPost, parseRenderRequest, requestWantsRsc, RSC_VARY_HEADER, wantsRsc, type RenderRequest } from './request.js';
-import { assertEndpointModule, assertPageModule, assertRouteModules, validateRoutesModule, validateServerApp } from './validate-entries.js';
+import { ERROR_ROUTE, NOT_FOUND_ROUTE } from './route-functions.js';
+import {
+  assertEndpointModule,
+  assertPageModule,
+  assertRouteModules,
+  pageKeyOf,
+  validateRoutesModule,
+  validateServerApp,
+} from './validate-entries.js';
 
 /** Opaque: only ever handed back to the runtime that made it — which types it `unknown`, so `undefined` is "none". */
 type TemporaryReferenceSet = ReturnType<typeof createTemporaryReferenceSet>;
@@ -1267,6 +1275,21 @@ async function checkServerActions(): Promise<void> {
 export const checkAppModules = async (): Promise<void> => {
   await assertRouteModules(routeConfig);
   await checkServerActions();
+};
+
+/**
+ * Which page module each page route renders, by the key the build stamped on it — for `rsvhono build` to
+ * join with the build's record of what each page reaches. Driven from the CLI, like the check above, because
+ * the route table does not leave this bundle. A page that cannot be loaded, or carries no key, is
+ * `undefined`: reported as unresolved rather than guessed at.
+ */
+export const routePages = async (): Promise<Record<string, string | undefined>> => {
+  const keyOf = async (component: () => Promise<{ default?: unknown }>) => pageKeyOf(await component().catch(() => undefined));
+  const pages: Record<string, string | undefined> = {};
+  for (const route of routeConfig.routes) if (isPageRoute(route)) pages[route.path] = await keyOf(route.component);
+  if (routeConfig.notFound) pages[NOT_FOUND_ROUTE] = await keyOf(routeConfig.notFound.component);
+  if (routeConfig.error) pages[ERROR_ROUTE] = await keyOf(routeConfig.error.component);
+  return pages;
 };
 
 export const app = buildApp();

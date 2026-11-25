@@ -101,6 +101,11 @@ const META: Record<RoutePath, RouteMeta> = {
     title: 'Inline action',
     description: "A `'use server'` function declared inside a server component, carrying an encrypted closure in the form.",
   },
+  '/reachability': {
+    group: 'Pages & forms',
+    title: 'Reachability',
+    description: 'Reaches server functions through a re-export, a lazy client component and a dynamically imported server component.',
+  },
   '/canonical': {
     group: 'Pages & forms',
     title: 'Canonical',
