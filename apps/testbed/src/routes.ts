@@ -144,6 +144,11 @@ export const routes = defineRoutes({
       component: () => import('./components/unloadable'),
     },
     {
+      // Redirects to its own path with a different query. See navigation-redirects.spec.mjs.
+      path: '/canonical',
+      component: () => import('./components/canonical'),
+    },
+    {
       // A late `redirect()` or `notFound()` the test triggers, from a page that may no longer be the one the
       // visitor is going to. See navigation-intent.spec.mjs.
       path: '/gated-intent',

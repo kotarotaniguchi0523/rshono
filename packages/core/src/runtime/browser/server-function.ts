@@ -64,9 +64,12 @@ export function installServerFunctions(): void {
         void schedule(createAttempt(resource, payload, calledFrom, { recoversByLoad: false }));
       }
 
-      // A redirect or `notFound()` has no value to hand back, wherever the screen went.
-      if (payload.redirect || payload.notFound) return undefined;
+      // A redirect has no value to hand back, wherever the screen went.
+      if (payload.redirect) return undefined;
       const result = payload.returnValue;
+      // Nor has an action that raised `notFound()`. `notFound` alone does not say that: it marks what the
+      // *page* is, and an action called from the 404 page re-renders the 404 page and still has its result.
+      if (!result && payload.notFound) return undefined;
       if (!result) {
         throw new Error(
           '[rsvhono] the server action produced no result — the request failed around it and the server answered with a page instead. Its log has the error.',

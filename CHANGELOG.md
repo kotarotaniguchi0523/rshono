@@ -52,6 +52,11 @@ those.
   asked for the payload rather than from whatever was pending. A page that asks for two different redirects
   is sent to the first.
 
+- **A server action called from the `notFound` page runs.** Its POST goes to a URL no route matches, and
+  that was answered with the 404 page and nothing else: the action never ran, and its caller got `undefined`
+  back as if it had. It now runs like an action posted to any page — same origin check, same id check — and
+  the page it re-renders is the 404 page, with the action's result in the payload.
+
 - **`navigation.finished` rejects for a navigation whose destination did not commit** — superseded, or failed
   to render — instead of resolving once something else had.
 

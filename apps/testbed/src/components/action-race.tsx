@@ -1,4 +1,5 @@
 import type { PageProps } from '@rsvhono/core';
+import { raiseSignal } from '../actions';
 import { raceLog } from '../race-log';
 import { ActionRaceControls } from './action-race-controls';
 import { Layout } from './layout';
@@ -21,6 +22,12 @@ export default function ActionRace(_props: PageProps) {
             </li>
           ))}
         </ul>
+        {/* A server-rendered form, so it posts without JavaScript too: `to` empty asks for `notFound()`. */}
+        <form action={raiseSignal} data-raise-signal>
+          <input name="to" placeholder="redirect to — empty for notFound()" />
+          <button type="submit">Raise</button>
+        </form>
+        <h2 id="details">Details</h2>
       </div>
     </Layout>
   );

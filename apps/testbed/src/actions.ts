@@ -1,6 +1,6 @@
 'use server';
 
-import { getRequestContext, redirect } from '@rsvhono/core/server';
+import { getRequestContext, notFound, redirect } from '@rsvhono/core/server';
 import { fakeDB, type User } from './db';
 import { raceLog } from './race-log';
 
@@ -103,4 +103,14 @@ export async function recordRace(label: string, delayMs: number): Promise<string
 export async function probeEcho(previous: number, formData: FormData): Promise<number> {
   await new Promise((resolve) => setTimeout(resolve, Math.min(Number(formData.get('ms')) || 0, 5000)));
   return previous + 1;
+}
+
+/**
+ * An action that ends in a route intent instead of a value: `notFound()`, or a `redirect()` to wherever the
+ * form says — another origin included. Posted by the form on `/action-race`, with or without JavaScript.
+ */
+export async function raiseSignal(formData: FormData): Promise<void> {
+  const to = formData.get('to');
+  if (typeof to === 'string' && to !== '') redirect(to);
+  notFound();
 }

@@ -36,25 +36,34 @@ Two questions, both ways round:
 
 React 19.3.1, Chrome, a production build. Times are from the click to the commit.
 
-| Question                                          | rsvhono                 | Waku 1.0.0-rc.5         |
-| ------------------------------------------------- | ----------------------- | ----------------------- |
-| navigation pending → `sync` commits first         | yes, 23 ms              | yes, 22 ms              |
-| navigation pending → `async` commits first        | yes, 306 ms             | yes, 308 ms             |
-| navigation pending → `suspense` commits first     | yes, 328 ms             | yes, 327 ms             |
-| navigation pending → `action` commits first       | yes, 327 ms             | yes, 328 ms             |
-| `async` pending 2.5 s → navigation commits first  | **no** — waits, 2274 ms | **no** — waits, 2276 ms |
-| `action` pending 2.5 s → navigation commits first | **no** — waits, 2296 ms | **no** — waits, 2295 ms |
+| Question                                          | rsvhono         | Waku 1.0.0-rc.5 router | waku-navigation 0.0.8 |
+| ------------------------------------------------- | --------------- | ---------------------- | --------------------- |
+| navigation pending → `sync` commits first         | 23 ms           | 22 ms                  | 23 ms                 |
+| navigation pending → `async` commits first        | 306 ms          | 308 ms                 | 308 ms                |
+| navigation pending → `suspense` commits first     | 328 ms          | 327 ms                 | 332 ms                |
+| navigation pending → `action` commits first       | 327 ms          | 328 ms                 | 311 ms                |
+| `async` pending 2.5 s → navigation commits first  | **no**, 2274 ms | **no**, 2276 ms        | **no**, 2269 ms       |
+| `action` pending 2.5 s → navigation commits first | **no**, 2296 ms | **no**, 2295 ms        | **no**, 2258 ms       |
+
+Every probe in the first four rows committed before the navigation did. In the last two the navigation
+waited for the probe: the time is how long after the click it committed.
 
 The Waku app was the same panel file, byte for byte, the same server function, and a page with the same
-markup using Waku's `<Link>`; it is not part of this repository.
+markup; it is not part of this repository. It was run twice: with Waku's own router and `<Link>`, and with
+[`waku-navigation`](https://www.npmjs.com/package/waku-navigation) — the router built on the Navigation API,
+which is the closer comparison — and plain anchors. Under rsvhono and under `waku-navigation` the URL had
+already committed when the probe was clicked, which is what shows the navigation was pending in React and
+not on the wire.
 
 ## What follows
 
 - **An independent transition does not wait for a navigation.** A slow navigation does not freeze a
   component's own updates, its async transitions, a suspending transition or a `useActionState` action. This
-  is case 16 of the client runtime's regression list; it holds, and it holds the same way under Waku.
+  is case 16 of the client runtime's regression list; it holds, and it holds the same way under both Waku
+  routers.
 - **A navigation waits for an async transition or action that was already pending.** Its payload is fetched
-  meanwhile, and it commits when the earlier one finishes. The timings match Waku's to within 2 ms, so this
+  meanwhile, and it commits when the earlier one finishes. All three routers show it, within 40 ms of each
+  other, so this
   is React — transitions started while an async action is in flight are entangled with it — and not
   something the navigation code here does.
 - **Nothing was added to work around it.** No `flushSync`, no external store, no state kept beside React's

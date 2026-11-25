@@ -101,6 +101,11 @@ const META: Record<RoutePath, RouteMeta> = {
     title: 'Inline action',
     description: "A `'use server'` function declared inside a server component, carrying an encrypted closure in the form.",
   },
+  '/canonical': {
+    group: 'Pages & forms',
+    title: 'Canonical',
+    description: 'Redirects to its own path with `?v=new`: a redirect that changes only the query.',
+  },
   '/gated-intent': {
     group: 'Streaming & suspense',
     title: 'Gated intent',

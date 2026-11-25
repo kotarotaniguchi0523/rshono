@@ -596,7 +596,11 @@ async function cannotLoadServerActions(formData: FormData): Promise<boolean> {
   }
 }
 
-async function renderPage(c: Context, loadPage: () => Promise<PageComponent>): Promise<Response> {
+/**
+ * `as` is for the `notFound` page answering a URL no route matches: the same request handling — an action
+ * posted from that page runs, and the page it re-renders is that page — with the 404's status and marker.
+ */
+async function renderPage(c: Context, loadPage: () => Promise<PageComponent>, as?: { status: 404; notFound: true }): Promise<Response> {
   const request = c.req.raw;
 
   // Ahead of the classification below, and keyed on the request's *shape* rather than on it: every `enctype`
@@ -733,11 +737,12 @@ async function renderPage(c: Context, loadPage: () => Promise<PageComponent>): P
 
   const Page = await loadPage();
   return renderComponent(c, Page, {
-    status: actionStatus,
+    status: actionStatus ?? as?.status,
     isRsc: wantsRsc(renderRequest),
     formState,
     returnValue,
     temporaryReferences,
+    notFound: as?.notFound,
   });
 }
 
@@ -1018,6 +1023,19 @@ function buildApp(): Hono {
 
   app.notFound(async (c) => {
     const isRsc = requestWantsRsc(c.req.raw);
+    // A POST to a URL nothing matches is, for a page, a server action called from the `notFound` page — the
+    // page a visitor to that URL is looking at. It runs like an action posted to any other page, behind the
+    // same checks, and the page it re-renders is the 404 page. Answering it with a bare 404 dropped the call
+    // without a word: the caller got `undefined` back for an action that never ran.
+    if (loadNotFoundPage && c.req.method === 'POST' && (isRsc || acceptsHtml(c))) {
+      const loadPage = loadNotFoundPage;
+      try {
+        return await runWithContext(c, () => renderPage(c, loadPage, { status: 404, notFound: true }));
+      } catch (error) {
+        if (isControlSignal(error)) return runWithContext(c, () => respondToControlSignal(c, error));
+        throw asError(error);
+      }
+    }
     if (loadNotFoundPage && (isRsc || acceptsHtml(c))) {
       // `notFound: true` here as well as on the signal path: the two produce the same page for the same
       // status, and a payload that says so from one route and not the other is a wire contract with a hole

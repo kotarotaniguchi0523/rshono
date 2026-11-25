@@ -489,6 +489,73 @@ test('a prerendered payload carries no render token', async () => {
   assert.doesNotMatch(await res.text(), /renderToken/);
 });
 
+// An action called from the `notFound` page is posted to a URL no route matches. It is still an action call:
+// it runs behind the same checks as one posted to a page, and the page it re-renders is the 404 page.
+describe('a server action posted to a URL that only the notFound page answers', () => {
+  const recordRace = () => {
+    const sibling = serverActionId('Add user');
+    return `${sibling.slice(0, sibling.lastIndexOf('#'))}#recordRace`;
+  };
+  const call = (label, headers = {}) =>
+    fetch(`${base}/no-such-page`, {
+      method: 'POST',
+      headers: { Origin: base, rsc: '1', 'x-rsc-action': recordRace(), 'content-type': 'text/plain;charset=UTF-8', ...headers },
+      body: JSON.stringify([label, 0]),
+    });
+
+  test('runs, and answers with its return value and the 404 page', async () => {
+    const label = `from-404-${crypto.randomUUID()}`;
+    const res = await call(label);
+    const payload = await res.text();
+    assert.equal(res.status, 404, 'the page that answered is still the 404');
+    assert.match(payload, /"notFound":true/);
+    assert.match(payload, new RegExp(`"returnValue":\\{"ok":true,"value":"${label}"\\}`), 'and the action’s result rides it like any other');
+    // It ran: the list the action appends to has the label.
+    assert.match(await (await fetch(`${base}/action-race`)).text(), new RegExp(label));
+  });
+
+  test('is refused like any other action call when the id is unknown or the origin is not this one', async () => {
+    const unknown = await call('x', { 'x-rsc-action': 'no-such-action' });
+    assert.equal(unknown.status, 400);
+    await unknown.text();
+
+    const label = `cross-site-${crypto.randomUUID()}`;
+    const crossSite = await call(label, { Origin: 'https://evil.example' });
+    assert.equal(crossSite.status, 403);
+    await crossSite.text();
+    assert.doesNotMatch(await (await fetch(`${base}/action-race`)).text(), new RegExp(label), 'and it did not run');
+  });
+});
+
+// A form's action that ends in a route intent rather than a value, posted with no JavaScript. Nothing is on
+// the wire when the action throws, so both intents can still be the response itself — a real status, and for
+// the redirect a 303, which is what stops the browser replaying the POST at the target.
+describe('a no-JavaScript form whose action raises a route intent', () => {
+  const submit = async (to) => {
+    const html = await (await fetch(`${base}/action-race`)).text();
+    const form = /<form[^>]*data-raise-signal[^>]*>(.*?)<\/form>/s.exec(html)?.[1] ?? '';
+    const body = new FormData();
+    for (const [name, value] of Object.entries(hiddenFields(form))) body.set(name, value);
+    body.set('to', to);
+    return fetch(`${base}/action-race`, { method: 'POST', headers: { Origin: base }, body, redirect: 'manual' });
+  };
+
+  test('notFound() answers 404 with the app’s page, at the URL that was posted to', async () => {
+    const res = await submit('');
+    assert.equal(res.status, 404);
+    assert.match(await res.text(), /404 — nothing here/);
+  });
+
+  test('redirect() answers 303, to another origin as readily as to this one', async () => {
+    for (const to of ['/users', 'https://example.test/elsewhere']) {
+      const res = await submit(to);
+      assert.equal(res.status, 303, `${to}: a 303, so the browser fetches the target with GET and the POST is not replayed`);
+      assert.equal(res.headers.get('location'), to);
+      await res.body?.cancel();
+    }
+  });
+});
+
 // A server function declared inside a component: the bundler hoists it, and what it closed over rides the
 // form as an *encrypted* bound argument. Three things meet in that one POST and none of the forms above
 // exercises them together — the closure's encryption, the no-JavaScript submission, and the server-reference

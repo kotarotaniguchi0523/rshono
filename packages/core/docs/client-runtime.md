@@ -107,7 +107,11 @@ result; the table is.
 
 ## The design's regression list, honestly
 
-The design named 22 cases. Browser suite: 112 pass.
+The design named 22 cases. Browser suite: 122 pass. `navigation-redirects.spec.mjs` holds the cases taken from
+Waku's router suites (`waku-navigation-integration`, `ssr-redirect`, `use-router`, `ssr-catch-error`) that had
+no counterpart here — and one deliberate difference: a late redirect is still followed after a fragment-only
+navigation, where Waku drops it, because here dropping it costs the page its root and the reload that
+repairs it redirects anyway.
 
 | #      | Case                                                             | Status                                                                                                              |
 | ------ | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
