@@ -51,7 +51,6 @@ See [Routing](/docs/routing) and [Configuration](/docs/configuration).
 | `ErrorPageInfo`        | `{ message, stack? }`. Redacted in production: a generic message, and `stack` is `undefined`.                   |
 | `HTTPMethod`           | `'get'` \| `'post'` \| `'put'` \| `'patch'` \| `'delete'` \| `'options'` \| `'all'`. A `HEAD` reaches `'get'`.  |
 | `RshonoConfig`         | Every field of `rshono.config.ts`. All optional.                                                                |
-| `RspackHookContext`    | `{ isServer, isDev }`, handed to the `rspack` config hook.                                                      |
 | `DeployTarget`         | `'node'` \| `'cloudflare'` \| `'vercel'` \| `'aws-lambda'`.                                                     |
 
 ## `@rshono/core/server`

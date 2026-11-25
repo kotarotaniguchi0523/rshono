@@ -1,7 +1,7 @@
 /**
  * The one dependency check the framework makes on an app: that `react` and `react-dom` are the same build.
  *
- * React Server Components couple the two across bundles — `react-server-dom-rspack` reaches into
+ * React Server Components couple the two across bundles — `react-server-dom-webpack` reaches into
  * `ReactSharedInternals` and emits a flight payload the *matching* `react-dom` has to parse — so a split
  * resolution is not version skew to be tolerated. It is a crash inside minified React at render time, with
  * nothing in the message pointing at the cause.

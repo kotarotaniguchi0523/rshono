@@ -18,7 +18,7 @@ advisory and the changelog unless you would rather not be.
 ## Supported versions
 
 The latest published release of `@rshono/core` gets security fixes. There are no long-term support
-branches: rshono pins `@rspack/core` and `react-server-dom-rspack` to exact versions and a release is what
+branches: rshono pins `vite`, `@vitejs/plugin-rsc` and `react-server-dom-webpack` to exact versions and a release is what
 moves them, so a fix backported onto an older pin has not been tested against anything.
 
 ## What is in scope
@@ -62,5 +62,5 @@ The framework owns four boundaries, and a defect in any of them is a vulnerabili
   documented as "only behind a proxy you control".
 - **Dev-server behaviour.** `rshono dev` binds `127.0.0.1`, serves unminified source and widens `script-src`
   with `'unsafe-eval'` for React Refresh. It is not a production server and is not hardened as one.
-- **Upstream defects in React, Rspack, Hono or `react-server-dom-rspack`.** Report those to their projects;
+- **Upstream defects in React, Vite, `@vitejs/plugin-rsc`, Hono or `react-server-dom-webpack`.** Report those to their projects;
   tell us too, and the pin will move once a fix is out.

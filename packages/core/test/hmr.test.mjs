@@ -83,36 +83,40 @@ describe('rshono dev', async () => {
   const browser = await launchBrowser();
   after(() => browser?.close());
 
-  test('a server edit re-renders and a client edit hot-swaps, both keeping state', { skip: browser ? false : 'no browser could be launched here' }, async () => {
-    const homeFile = join(APP_DIR, 'src', 'pages', 'home.tsx');
-    const counterFile = join(APP_DIR, 'src', 'components', 'counter.tsx');
-    const homeSource = readFileSync(homeFile, 'utf8');
-    const counterSource = readFileSync(counterFile, 'utf8');
-    const page = await browser.newPage();
-    const errors = [];
-    page.on('pageerror', (error) => errors.push(error.message));
-    try {
-      await page.goto(`${base}/`);
-      await waitForHydration(page);
-      const clicks = (await page.textContent('[data-testid=count]')).replace('count: ', '');
-      assert.equal(await page.$eval('h1', (el) => getComputedStyle(el).color), 'rgb(0, 128, 0)', 'the page stylesheet applies');
-      await page.evaluate(() => {
-        window.__sameDocument = true;
-      });
+  test(
+    'a server edit re-renders and a client edit hot-swaps, both keeping state',
+    { skip: browser ? false : 'no browser could be launched here' },
+    async () => {
+      const homeFile = join(APP_DIR, 'src', 'pages', 'home.tsx');
+      const counterFile = join(APP_DIR, 'src', 'components', 'counter.tsx');
+      const homeSource = readFileSync(homeFile, 'utf8');
+      const counterSource = readFileSync(counterFile, 'utf8');
+      const page = await browser.newPage();
+      const errors = [];
+      page.on('pageerror', (error) => errors.push(error.message));
+      try {
+        await page.goto(`${base}/`);
+        await waitForHydration(page);
+        const clicks = (await page.textContent('[data-testid=count]')).replace('count: ', '');
+        assert.equal(await page.$eval('h1', (el) => getComputedStyle(el).color), 'rgb(0, 128, 0)', 'the page stylesheet applies');
+        await page.evaluate(() => {
+          window.__sameDocument = true;
+        });
 
-      writeFileSync(homeFile, homeSource.replace('Vite app\n', 'Vite app, edited\n'));
-      await page.waitForFunction(() => document.querySelector('h1').textContent.includes('edited'), null, { timeout: 20_000 });
-      assert.equal(await page.textContent('[data-testid=count]'), `count: ${clicks}`, 'a server component edit keeps client state');
+        writeFileSync(homeFile, homeSource.replace('Vite app\n', 'Vite app, edited\n'));
+        await page.waitForFunction(() => document.querySelector('h1').textContent.includes('edited'), null, { timeout: 20_000 });
+        assert.equal(await page.textContent('[data-testid=count]'), `count: ${clicks}`, 'a server component edit keeps client state');
 
-      writeFileSync(counterFile, counterSource.replace('count: {count}', 'clicks: {count}'));
-      await page.waitForFunction(() => document.querySelector('[data-testid=count]').textContent.startsWith('clicks'), null, { timeout: 20_000 });
-      assert.equal(await page.textContent('[data-testid=count]'), `clicks: ${clicks}`, 'Fast Refresh keeps it too');
-      assert.equal(await page.evaluate(() => window.__sameDocument), true, 'neither edit reloaded the document');
-      assert.deepEqual(errors, []);
-    } finally {
-      writeFileSync(homeFile, homeSource);
-      writeFileSync(counterFile, counterSource);
-      await page.close();
-    }
-  });
+        writeFileSync(counterFile, counterSource.replace('count: {count}', 'clicks: {count}'));
+        await page.waitForFunction(() => document.querySelector('[data-testid=count]').textContent.startsWith('clicks'), null, { timeout: 20_000 });
+        assert.equal(await page.textContent('[data-testid=count]'), `clicks: ${clicks}`, 'Fast Refresh keeps it too');
+        assert.equal(await page.evaluate(() => window.__sameDocument), true, 'neither edit reloaded the document');
+        assert.deepEqual(errors, []);
+      } finally {
+        writeFileSync(homeFile, homeSource);
+        writeFileSync(counterFile, counterSource);
+        await page.close();
+      }
+    },
+  );
 });

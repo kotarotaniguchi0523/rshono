@@ -10,7 +10,7 @@ const COMPONENT_THUNK = /component:\s*(?:async\s*)?\(\s*\)\s*=>\s*import\(\s*(['
 
 const EXTENSIONS = ['.tsx', '.ts', '.jsx', '.js'];
 
-// `join` rather than `base + '/index…'`: these are compared against Rspack's own resource paths, which on
+// `join` rather than `base + '/index…'`: these are compared against the bundler's own module ids, which on
 // Windows carry backslashes.
 function resolveCandidates(base: string): string[] {
   return [...EXTENSIONS.map((ext) => base + ext), ...EXTENSIONS.map((ext) => join(base, `index${ext}`)), base];

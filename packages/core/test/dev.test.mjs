@@ -164,7 +164,13 @@ test('on the dev server an action id is only ever an export of a "use server" mo
   // There is no list of server references to check against here — a `'use server'` module is discovered when
   // it is transformed — so an id is a path the client chose. A page module, an endpoint, a file outside the
   // app and a module that does not exist must all be refused before anything is called.
-  for (const id of ['/src/components/whoami.tsx#default', '/src/server.ts#default', '/etc/passwd#x', '/src/missing.ts#x', '/src/actions.ts#notExported']) {
+  for (const id of [
+    '/src/components/whoami.tsx#default',
+    '/src/server.ts#default',
+    '/etc/passwd#x',
+    '/src/missing.ts#x',
+    '/src/actions.ts#notExported',
+  ]) {
     const res = await fetch(`${base}/dashboard`, {
       method: 'POST',
       headers: { Origin: base, RSC: '1', 'x-rsc-action': id, 'content-type': 'text/plain;charset=UTF-8' },

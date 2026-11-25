@@ -76,9 +76,9 @@ const FEATURES = [
     href: '/docs/hono',
   },
   {
-    title: 'The Rspack config too',
-    body: 'One hook, called once per compiler, hands you the generated config before it compiles. That is how Tailwind is wired up, and any other loader.',
-    href: '/docs/configuration#the-rspack-hook',
+    title: 'The Vite config too',
+    body: 'One option merges your Vite config over the generated one — plugins, aliases, CSS options. PostCSS needs nothing: add a config file and it runs.',
+    href: '/docs/configuration#the-vite-option',
   },
 ];
 
@@ -102,7 +102,7 @@ export default async function Home({ url }: PageProps<'/'>) {
   ]);
 
   return (
-    <Layout description="Minimal web framework — Hono + Rspack + React Server Components." canonical={url.href} wide>
+    <Layout description="Minimal web framework — Hono + Vite + React Server Components." canonical={url.href} wide>
       <Hero />
       <Samples routesHtml={routesHtml} pageHtml={pageHtml} clientHtml={clientHtml} />
       <Features />
@@ -125,8 +125,8 @@ function Hero() {
           Hono
         </a>{' '}
         for the server,{' '}
-        <a href="https://rspack.rs" data-native>
-          Rspack
+        <a href="https://vite.dev" data-native>
+          Vite
         </a>{' '}
         for the build,{' '}
         <a href="https://react.dev/reference/rsc/server-components" data-native>
@@ -213,7 +213,7 @@ function Features() {
     <section className="mx-auto w-full max-w-7xl px-6 py-12">
       <SectionHeading title="Why choose rshono?">
         Because there is so little of it. Nine exported values across three import paths, five direct dependencies, and no framework-owned replacement
-        for an HTML element you already know. Hono and Rspack stay reachable underneath, unrenamed.
+        for an HTML element you already know. Hono and Vite stay reachable underneath, unrenamed.
       </SectionHeading>
 
       <ul className="grid gap-px overflow-hidden rounded-xl border border-zinc-200 bg-zinc-200 sm:grid-cols-2 lg:grid-cols-3 dark:border-zinc-800 dark:bg-zinc-800">
@@ -240,8 +240,7 @@ function Toolchain() {
         <div>
           <h2 className="mb-3 text-2xl font-semibold tracking-tight text-zinc-900 dark:text-white">One toolchain, three commands</h2>
           <p className="mb-4 text-zinc-600 dark:text-zinc-400">
-            The same pair of Rspack configs builds dev and production. <code>dev</code> runs the real production server bundle in a worker thread,
-            with HMR that keeps browser state.
+            One Vite config builds dev and production. <code>dev</code> is a single dev server on one port, with HMR that keeps browser state.
           </p>
           <pre className="overflow-x-auto rounded-lg border border-zinc-200 bg-zinc-50 p-4 text-sm dark:border-zinc-800 dark:bg-zinc-900">
             <code>{'rshono dev\nrshono build\nrshono start'}</code>

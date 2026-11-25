@@ -220,11 +220,10 @@ See [Environment & secrets](/docs/configuration#environment-and-secrets).
 ## The `'use server-entry'` directive
 
 A technical note, not a step: none of the pages above write this directive, and neither does an app. It
-shows up in Rspack's output and in one error message, which is the only reason it is documented here.
+shows up in one error message, which is the only reason it is documented here.
 
-Compiled pages carry Rspack's `'use server-entry'`, which hangs the page's own client JS and CSS off its
-default export. The framework reads them back as the document's bootstrap scripts and stylesheet links —
-per-page code splitting with no asset manifest. The build finds the pages to mark by reading `routes.ts` for
+A module marked `'use server-entry'` is built as a page: its default export is wrapped so the page's
+stylesheets render with it and its props — `ctx` included — arrive untouched. The build finds the pages to mark by reading `routes.ts` for
 inline `component: () => import('…')` thunks and prepending the directive to exactly the modules they name.
 It re-scans on every rebuild, so a route added while the dev server is running needs no restart.
 

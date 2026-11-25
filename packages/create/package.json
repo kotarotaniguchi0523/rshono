@@ -1,7 +1,7 @@
 {
   "name": "@rshono/create",
   "version": "1.0.0-rc.29",
-  "description": "Scaffold a new rshono app — Hono + Rspack + React Server Components",
+  "description": "Scaffold a new rshono app — Hono + Vite + React Server Components",
   "author": "Lasse <lasse@lassetange.com> (https://www.lassetange.com)",
   "license": "MIT",
   "keywords": [
@@ -11,7 +11,7 @@
     "rshono",
     "react-server-components",
     "hono",
-    "rspack"
+    "vite"
   ],
   "repository": {
     "type": "git",
@@ -51,9 +51,9 @@
   },
   "devDependencies": {
     "@clack/prompts": "^1.9.0",
-    "@rspack/core": "2.2.8",
-    "@types/node": "^26.6.6",
     "@rshono/core": "workspace:*",
-    "typescript": "^7.0.2"
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2",
+    "vite": "8.3.8"
   }
 }

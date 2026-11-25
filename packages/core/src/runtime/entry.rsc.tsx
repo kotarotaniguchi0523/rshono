@@ -9,7 +9,14 @@ import type { ReactFormState } from 'react-dom/client';
 // Called directly rather than as `<Page {...props} />`: a spread would drop the non-enumerable `ctx`
 // prop. See `pageProps`.
 import { jsx } from 'react/jsx-runtime';
-import { createTemporaryReferenceSet, decodeAction, decodeFormState, decodeReply, loadServerAction, renderToReadableStream } from '@vitejs/plugin-rsc/rsc/server';
+import {
+  createTemporaryReferenceSet,
+  decodeAction,
+  decodeFormState,
+  decodeReply,
+  loadServerAction,
+  renderToReadableStream,
+} from '@vitejs/plugin-rsc/rsc/server';
 // Aliased at build time to the selected preset's runtime — the one place this file knows where it runs.
 import { runtime } from '@rshono/deploy';
 // @ts-expect-error — resolved by the '@rshono/routes' alias to the app's routes.ts
@@ -31,7 +38,7 @@ import { RouterProvider } from './navigation.js';
 import { asksForRsc, isActionRequest, isBrowserFormPost, parseRenderRequest, requestWantsRsc, RSC_VARY_HEADER, wantsRsc } from './request.js';
 import { assertEndpointModule, assertPageModule, assertRouteModules, validateRoutesModule, validateServerApp } from './validate-entries.js';
 
-/** Opaque: only ever handed back to the runtime that made it. */
+/** Opaque: only ever handed back to the runtime that made it — which types it `unknown`, so `undefined` is "none". */
 type TemporaryReferenceSet = ReturnType<typeof createTemporaryReferenceSet>;
 
 const serverApp = validateServerApp(serverAppModule);
@@ -405,7 +412,7 @@ async function renderComponent(c: Context, Page: PageComponent, opts: ComponentR
           // One macrotask later rather than from inside `onError`, where React is still handling the error
           // that produced the digest — the row carrying it is the only recovery the client has, and an abort
           // that re-entered React there could cut the render off before it is written. Measured to survive
-          // either way on react-server-dom-rspack 0.1.0; deferred anyway, because that ordering is an
+          // either way; deferred anyway, because that ordering is an
           // internal the `^19.1.0` peer range does not promise, and the cost is one macrotask on a render
           // that is already doomed. The reason is the signal itself, so every boundary the abort errors
           // carries the digest rather than a bare AbortError the client would paint as a fault.
@@ -533,13 +540,13 @@ const probeActionId: string | undefined = knownServerActions()[0]?.[0];
  *
  * Asked by loading an action for real, because nothing on the error says which of the two it was: React
  * reports a missing module and an undecodable field through the same channel, and the message is its own
- * internal shape either way. `loadServerAction` is `__webpack_require__` plus a `typeof === 'function'`
- * check, so a second call after the first succeeded is a cache hit.
+ * internal shape either way. `loadServerAction` is an `import()` of the action's module, so a second call
+ * after the first succeeded is a cache hit.
  *
  * The id it asks about is the one the body names where the body names one, and otherwise any of the app's —
- * which is the same question, because Rspack concatenates the whole `'use server'` graph into a single
- * server module (see {@link checkServerActions} and the G1 note): if one action cannot be loaded at run
- * time, none of them can.
+ * which is an approximation: each `'use server'` module is its own chunk, so one that loads says nothing
+ * certain about another. It is the best available answer for a body that does not say which action it
+ * wanted, and it does catch the common cause — a deploy that left the server's chunks incomplete.
  *
  * **Both ways of being wrong land on the old behaviour, deliberately.** No manifest to probe, or a probe
  * that succeeds while the id the caller actually named is broken — which needs `useActionState`'s shape
@@ -584,7 +591,7 @@ async function renderPage(c: Context, loadPage: () => Promise<PageComponent>): P
 
   let returnValue: ActionResult | undefined;
   let formState: ReactFormState | undefined;
-  let temporaryReferences: TemporaryReferenceSet | undefined;
+  let temporaryReferences: TemporaryReferenceSet;
   let actionStatus: number | undefined;
   if (isActionRequest(renderRequest)) {
     if (renderRequest.kind === 'rsc-action') {
@@ -598,7 +605,7 @@ async function renderPage(c: Context, loadPage: () => Promise<PageComponent>): P
         const contentType = request.headers.get('content-type');
         const body = contentType?.startsWith('multipart/form-data') ? await request.formData() : await request.text();
         temporaryReferences = createTemporaryReferenceSet();
-        args = (await decodeReply(body, { temporaryReferences })) as unknown[];
+        args = await decodeReply(body, { temporaryReferences });
       } catch {
         return malformedAction(c);
       }
@@ -1074,8 +1081,7 @@ function buildApp(): Hono {
  * Nothing on the server imports these modules until an action is called: a `'use client'` component that
  * calls one gets a `createServerReference` stub, so the only thing holding them is the manifest. That makes
  * an action module the one part of an app a build never touched — and the failure it hides is not one route,
- * it is every action that module holds, which in practice is all of them (Rspack compiles the app's whole
- * `'use server'` graph into a single server module).
+ * it is every action that module holds.
  *
  * One id per *module*, because that is the granularity of the failure that matters — and evaluating a module
  * that throws once per action id would repeat whatever it did before throwing. The rest of that module's ids

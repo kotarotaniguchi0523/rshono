@@ -114,7 +114,16 @@ export function startApp(dir, command, { env = {}, timeoutMs = 60_000 } = {}) {
   if (!ready) throw new Error(`no ready pattern for \`rshono ${command}\` — it would resolve on any output`);
   const child = spawn(process.execPath, [CLI, command], {
     cwd: dir,
-    env: { ...process.env, PORT: '0', ...APP_ENV, ...env },
+    env: {
+      ...process.env,
+      PORT: '0',
+      ...APP_ENV,
+      ...env,
+      // The dev server runs the framework's own `dist/runtime/*.js` through Vite's module runner — the same
+      // file URLs, but transformed code — so its V8 coverage maps to those files as noise. Set empty rather
+      // than left out: Node hands the variable down to a child that does not name it.
+      ...(command === 'dev' ? { NODE_V8_COVERAGE: '' } : null),
+    },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let output = '';

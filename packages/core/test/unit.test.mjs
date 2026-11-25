@@ -4,9 +4,8 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { basename, dirname, join, sep } from 'node:path';
+import { dirname, join } from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
@@ -2233,6 +2232,15 @@ describe('assertRouteModules', () => {
       notFound: { component: () => Promise.resolve({ default: serverPage }) },
       error: { component: () => Promise.resolve({ default: serverPage }) },
     });
+  });
+
+  test('refuses a page the build did not wrap, since it would render without ctx', async () => {
+    // A server component that reaches the route table some way the build does not recognise — not an inline
+    // thunk, no `'use server-entry'`. Unwrapped, the RSC plugin's stylesheet wrapper could drop its `ctx`.
+    await assert.rejects(
+      assertRouteModules({ routes: [page('/unmarked', { default: () => null })] }),
+      /\[rshono\] The page component for "\/unmarked" was not built as a page \('use server-entry'\)/,
+    );
   });
 
   test('refuses a page module with no default export', async () => {

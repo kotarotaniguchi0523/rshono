@@ -19,7 +19,6 @@ export const TOOL_VERSIONS = {
   '@tailwindcss/postcss': '^4.3.3',
   // The pass Tailwind runs in, installed with it rather than with the framework.
   postcss: '^8.5.23',
-  'postcss-loader': '^8.2.1',
   prettier: '^3.9.6',
   '@biomejs/biome': '^2.5.6',
   oxlint: '^1.76.0',

@@ -13,9 +13,7 @@ export default defineConfig({
   deploy: 'node', // hosting platform to build for (--deploy or RSHONO_DEPLOY override)
   siteUrl: 'https://example.com', // public origin, baked into prerendered pages' absolute URLs
   trustProxy: false, // honour X-Forwarded-Host/-Proto — only behind a proxy you control
-  rspack(config, { isServer, isDev }) {
-    return config; // escape hatch: mutate the generated Rspack config
-  },
+  vite: { plugins: [] }, // escape hatch: Vite config merged over the generated one
 });
 ```
 
@@ -36,19 +34,27 @@ The public origin the site is served from. Used only when prerendering
 from. The origin is what's used; a path is **rejected** rather than silently dropped, because a base
 path is not supported.
 
-## The `rspack` hook
+## The `vite` option
 
-Mutate the generated Rspack config just before it is compiled:
+A [Vite config](https://vite.dev/config/) merged over the generated one — plugins, aliases, CSS options:
 
 ```ts
-rspack(config, { isServer, isDev }) {
-  config.module!.rules!.push({ test: /\.md$/i, type: 'asset/source' });
+vite: {
+  plugins: [
+    {
+      name: 'markdown-source',
+      transform(code, id) {
+        if (id.endsWith('.md')) return { code: `export default ${JSON.stringify(code)};`, map: null };
+      },
+    },
+  ],
 }
 ```
 
-Called **once per compiler** — `isServer` tells the `target: node` bundle from the `target: web` one,
-`isDev` tells `rshono dev` from `rshono build`. Mutate in place and return nothing, or return a
-replacement. This is how [Tailwind](/docs/styling#tailwind) is wired up.
+The build has three [environments](https://vite.dev/guide/api-environment) — `rsc`, `ssr` and `client` — so
+a setting for one of them goes under `environments.<name>`. Your plugins run ahead of the framework's.
+`root`, `base` (`/_static/`) and the output directories are the framework's to set, and a `vite.config.*`
+file is not read: this option is the one place the build is configured.
 
 ## Environment and secrets
 

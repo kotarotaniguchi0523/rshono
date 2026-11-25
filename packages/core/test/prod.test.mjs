@@ -814,7 +814,10 @@ test('an action whose module cannot be loaded is a reported 500, not a silent 40
     const original = readFileSync(mainFile, 'utf8');
     // `"<key>":async()=>{let{…}=await import(`./assets/actions-….js`)` — the module `loadServerAction` imports.
     const moduleKey = actionId.split('#')[0];
-    const patched = original.replace(new RegExp(`("${moduleKey}":async\\(\\)=>\\{[\\s\\S]*?await import\\(\`)[^\`]+`), '$1./assets/chunk-that-went-missing.js');
+    const patched = original.replace(
+      new RegExp(`("${moduleKey}":async\\(\\)=>\\{[\\s\\S]*?await import\\(\`)[^\`]+`),
+      '$1./assets/chunk-that-went-missing.js',
+    );
     assert.notEqual(patched, original, 'the server manifest is not in the shape this test breaks — update the patch');
     writeFileSync(mainFile, patched);
 

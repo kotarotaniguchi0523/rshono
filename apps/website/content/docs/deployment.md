@@ -137,12 +137,13 @@ emulation of the Lambda handler.
 
 ### How the build works
 
-Two coordinated Rspack compilers, using native RSC support (`rspack.experiments.rsc`):
+One Vite build with three environments, compiled by `@vitejs/plugin-rsc`:
 
-- **client** (`target: web`) → `dist/static`: hydration runtime, `'use client'` chunks, CSS.
-- **server** (`target: node`) → `dist/server/main.mjs`: a Hono app assembled from your routes, rendered
-  through two layers — the RSC layer, with the `react-server` condition, produces the flight payload;
-  the SSR layer turns it into an HTML stream with the payload inlined for hydration.
+- **client** → `dist/static`, served at `/_static/`: hydration runtime, `'use client'` chunks, CSS.
+- **rsc** → `dist/server/main.mjs`: a Hono app assembled from your routes. Built with the `react-server`
+  condition, it produces the flight payload.
+- **ssr** → `dist/server/ssr/`: turns that payload into an HTML stream with the payload inlined for
+  hydration.
 
 Everything in that bundle that depends on _where_ it runs — binding a port, serving `/_static` and
 `public/`, reading a prerendered page, loading `.env` — sits behind a single interface the build resolves
@@ -175,8 +176,8 @@ In production `dist/server/main.mjs` always has React, Hono and the framework bu
   the same module ships in the browser bundle, so it was always required to be bundleable.
 
 The cost on those three: a dependency that cannot be bundled — a native addon, or one that reads its own
-files off disk relative to `__dirname` — fails the **build** rather than the deploy. Reach for the `rspack`
-hook in `rshono.config.ts` to keep such a package external, or deploy it to `node`.
+files off disk relative to `__dirname` — fails the **build** rather than the deploy. Reach for the `vite`
+option in `rshono.config.ts` to keep such a package external, or deploy it to `node`.
 
 A Worker has a further constraint: it resolves no `node_modules` at runtime either way, and a dependency
 needing a real `node:` API beyond `nodejs_compat` will not work there at all.

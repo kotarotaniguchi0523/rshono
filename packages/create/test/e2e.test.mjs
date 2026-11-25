@@ -112,7 +112,7 @@ test('a scaffolded app installs, typechecks and builds', { skip: enabled ? false
  * directory with its dependencies *beside* it. Anything the framework relies on being resolvable from
  * app source — the RSC runtime the transform injects into pages, client components and actions — is
  * reachable by accident under the first layout and only on purpose under the second, so a build that
- * passes above can still fail here with `Can't resolve 'react-server-dom-rspack/client'`.
+ * passes above can still fail here with a failure to resolve `@vitejs/plugin-rsc` or `react-server-dom-webpack`.
  */
 test(
   "and installs and builds on pnpm, whose layout hides the framework's own dependencies",
@@ -199,7 +199,7 @@ test('Tailwind compiles through its own PostCSS pass, on a real install', { skip
   run('npm', ['run', 'typecheck'], dir, 'typecheck');
   assert.match(run('npm', ['run', 'build'], dir, 'build'), /build complete/);
 
-  const chunks = join(dir, 'dist', 'static', 'chunks');
+  const chunks = join(dir, 'dist', 'static', 'assets');
   const css = readdirSync(chunks)
     .filter((file) => file.endsWith('.css'))
     .map((file) => readFileSync(join(chunks, file), 'utf8'))

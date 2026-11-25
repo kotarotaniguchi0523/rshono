@@ -115,7 +115,7 @@ export async function buildCommand(options: BuildOptions): Promise<void> {
 
   console.log(`  ✓ build complete — ${preset.deployHint}`);
 
-  // Rspack's worker pool can keep the loop alive after `close()`, so the exit is explicit. {@link exit}
+  // The bundler's worker pool can keep the loop alive after the build, so the exit is explicit. {@link exit}
   // drains first: in CI the tail is the lines saying what was built and where it went.
   await exit(0);
 }

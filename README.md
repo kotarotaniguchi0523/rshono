@@ -7,7 +7,7 @@
 <p align="center">
   Minimalist web framework —
   <a href="https://hono.dev">Hono</a> +
-  <a href="https://rspack.rs">Rspack</a> +
+  <a href="https://vite.dev">Vite</a> +
   <a href="https://react.dev/reference/rsc/server-components">React Server Components</a>.
 </p>
 

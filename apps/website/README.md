@@ -27,7 +27,7 @@ delete.
 ```
 content/docs/       the documentation, one markdown file per page
 eslint.config.mjs   flat config, type-aware — see the TypeScript pin above
-rshono.config.ts    deploy target, siteUrl, and the two Rspack rules this app needs
+rshono.config.ts    deploy target, siteUrl, and the one Vite plugin this app needs
 src/
   routes.ts         the route table — the one file rshono requires
   server.ts         trailing-slash redirects and the error funnel

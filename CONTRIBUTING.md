@@ -32,8 +32,9 @@ there to check.
   `typescript-eslint` accepts nothing above `<6.1.0`. So **ESLint lints with TS 6 and the build compiles with
   TS 7**, and `eslint --fix` can produce code the build then rejects. Always run `pnpm --filter @rshono/core
 typecheck` after `pnpm lint:fix`.
-- **`@rspack/core` and `react-server-dom-rspack` are pinned exactly, in `pnpm-workspace.yaml` overrides as
-  well as in the manifests.** RSC internals are coupled across the two compilers and the two React builds; a
+- **`react`, `react-dom` and `react-server-dom-webpack` are pinned exactly and to the same version, in
+  `pnpm-workspace.yaml` overrides as well as in the manifests; `vite` and `@vitejs/plugin-rsc` are pinned
+  exactly in `@rshono/core`.** RSC internals are coupled across the three React packages; a
   split resolution fails inside minified React at render time. Don't bump them casually — a bump is a
   release, and the whole suite is the check. Move the manifests, the overrides and the lockfile in one commit:
   a manifest pin is what a consumer resolves and an override is what this repo resolves, so drifting them

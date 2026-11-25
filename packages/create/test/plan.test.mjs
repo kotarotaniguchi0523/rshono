@@ -250,29 +250,15 @@ test('Tailwind brings its own PostCSS pass — the framework has none', () => {
   assert.ok(tailwind.files.has('postcss.config.mjs'));
   assert.match(tailwind.files.get('src/styles.css'), /@import 'tailwindcss'/);
 
-  // The rule in the `rspack` hook is what puts postcss-loader in front of Rspack's native CSS parser.
-  assert.doesNotMatch(plain.files.get('rshono.config.ts'), /postcss-loader/);
-  assert.match(tailwind.files.get('rshono.config.ts'), /rules!\.push\(\{ test: \/\\\.css\$\/i, use: \['postcss-loader'\], type: 'css\/auto' \}\)/);
+  // Nothing in the build config: Vite picks `postcss.config.mjs` up by itself, so both apps share one.
+  assert.equal(tailwind.files.get('rshono.config.ts'), plain.files.get('rshono.config.ts'));
 
-  // Including the loader itself: rshono does not depend on postcss, so the app has to.
+  // rshono does not depend on postcss, so the app has to.
   const dev = JSON.parse(tailwind.files.get('package.json')).devDependencies;
-  for (const name of ['tailwindcss', '@tailwindcss/postcss', 'postcss', 'postcss-loader']) {
+  for (const name of ['tailwindcss', '@tailwindcss/postcss', 'postcss']) {
     assert.ok(dev[name], `Tailwind needs ${name}`);
   }
   assert.ok(!JSON.parse(plain.files.get('package.json')).devDependencies.postcss, 'a plain-CSS app should install none of it');
-});
-
-test('the Tailwind rshono.config.ts is the base config plus the PostCSS hook', () => {
-  // The Tailwind variant is a copy of the base config with an `rspack` hook added, so what can drift is a
-  // setting written into one of them and not the other.
-  const base = plan(answers({ styling: 'css' }), pm).files.get('rshono.config.ts');
-  const tailwind = plan(answers({ styling: 'tailwind' }), pm).files.get('rshono.config.ts');
-
-  const lines = base.split('\n').filter((line) => line.trim() && line.trim() !== '});');
-  assert.ok(lines.length >= 3, 'the base config should still be an import and a `defineConfig` call');
-  for (const line of lines) {
-    assert.ok(tailwind.includes(line), `the Tailwind config has drifted — it is missing ${line.trim()}`);
-  }
 });
 
 test('Biome answers both slots once, and steps around Tailwind CSS when both are chosen', () => {

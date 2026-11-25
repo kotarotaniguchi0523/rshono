@@ -282,9 +282,8 @@ export function Board({ notes, onCreate, onToggle }: BoardProps) {
 without knowing that the real ones are server references at all.
 
 > **An inline action cannot close over its component's scope.** `'use server'` in a function body compiles
-> to a module-level function plus _encrypted bound arguments_, and that encryption is not wired up in the
-> Rspack / `react-server-dom-rspack` pair rshono currently pins — capturing anything from the enclosing
-> scope fails the build with `export 'encryptActionBoundArgs' … was not found`. The functions above are
+> to a module-level function plus _encrypted bound arguments_, and rshono does not support that yet — do not capture anything from
+> the enclosing scope. The functions above are
 > fine because they close over nothing; `db` is a module import.
 
 To attach per-item data, bind it to a module-scope action explicitly. `bind` is the supported spelling of

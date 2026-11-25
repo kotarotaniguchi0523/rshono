@@ -53,9 +53,9 @@ definition, not at runtime.
 | `render`      | `'static'` prerenders at build time; `'dynamic'` (the default) renders per request. |
 | `staticPaths` | For a parameterised static route: the param sets to prerender, one file each.       |
 
-Write `component` inline as `() => import('…')`. The framework detects that exact form and injects
-Rspack's `'use server-entry'` directive for you, which is what attaches each page's client JS and CSS to
-its component — per-route code splitting with no asset manifest. Wire a component up some other way
+Write `component` inline as `() => import('…')`. The framework detects that exact form and builds
+the module as a page for you, which is what attaches each page's CSS to its component and hands it its
+props untouched. Wire a component up some other way
 (variable indirection, barrel re-exports, computed specifiers) and the build throws a descriptive error
 telling you to write the directive at the top of the page module yourself.
 

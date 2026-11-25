@@ -8,7 +8,7 @@ import { publicUrl } from '@rshono/core/server';
 import type { Context } from 'hono';
 
 export const SUMMARY =
-  'rshono is a minimalist web framework built on Hono, Rspack and React Server Components. ' +
+  'rshono is a minimalist web framework built on Hono, Vite and React Server Components. ' +
   'One required file (src/routes.ts), one optional file (src/server.ts), and you get a dev server with HMR, ' +
   'streaming SSR with RSC hydration, server actions with progressive enhancement, soft navigation, ' +
   'build-time prerendering, and hard env/secret safety.';
@@ -34,7 +34,7 @@ export function origin(c: Context): string {
  * The projects an rshono app is written *against*, each of which publishes an `llms.txt` of its own.
  *
  * rshono's documentation stops at its seams: `src/server.ts` is a Hono app, a page is a React server
- * component, and the build is Rspack's. A reader that needs the far side of one of those seams is better
+ * component, and the build is Vite's. A reader that needs the far side of one of those seams is better
  * served by the upstream file than by anything this site could restate about it.
  */
 const UPSTREAM = [
@@ -44,9 +44,9 @@ const UPSTREAM = [
     description: 'The server rshono runs on — `src/server.ts` is a Hono app, and an endpoint handler is a Hono handler.',
   },
   {
-    title: 'Rspack',
-    url: 'https://rspack.rs/llms.txt',
-    description: 'The bundler behind `rshono dev` and `rshono build`. rshono writes the config; the `rspack` hook extends it.',
+    title: 'Vite',
+    url: 'https://vite.dev/llms.txt',
+    description: 'The bundler behind `rshono dev` and `rshono build`. rshono writes the config; the `vite` option extends it.',
   },
   {
     title: 'React',

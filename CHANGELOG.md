@@ -11,22 +11,31 @@ those.
 
 ## Unreleased
 
-### Added
-
-- **`@rshono/core/vite` — an experimental Vite build, beside the Rspack one.** `rshono()` in a `vite.config.ts`
-  compiles the same runtime with [`@vitejs/plugin-rsc`](https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-rsc)
-  and the official `react-server-dom-webpack`, served by `vite dev` and `vite preview`. Pages, the `RSC: 1`
-  flight variant, the Hono sub-app, endpoints, server functions (called and posted), streaming, `notFound()` /
-  `redirect()` and HMR work; prerendering and the deploy targets do not exist on this path yet, so
-  `render: 'static'` pages are rendered per request. **`rshono build` and `rshono dev` are unchanged and still
-  use Rspack.** This is the first step of moving the framework to Vite — what is done, what is not, and what
-  comes next is in [`packages/core/docs/vite-migration.md`](packages/core/docs/vite-migration.md).
-
 ### Changed
 
-- **The runtime reaches its bundler through `@rshono/bundler/*`.** Internal: the three runtime entries no
-  longer import `react-server-dom-rspack` or read Rspack's manifest directly, so the same code can be compiled
-  by either bundler. No behaviour change under Rspack — the Node and browser suites pass unmodified.
+- **The bundler is Vite.** `rshono build` and `rshono dev` now run on Vite with
+  [`@vitejs/plugin-rsc`](https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-rsc) and React's
+  own `react-server-dom-webpack`, in place of Rspack and `react-server-dom-rspack`. Routes, pages, server
+  functions, the Hono sub-app, prerendering and the four deploy targets behave as before, and the output
+  keeps its layout (`dist/server/main.mjs`, `dist/static`, `dist/public`, `dist/ssg`).
+  [`packages/core/docs/vite-migration.md`](packages/core/docs/vite-migration.md) is the full record,
+  including what is known to be weaker.
+
+- **`rshono dev` is one Vite dev server.** No worker thread, proxy or `.rshono/` output directory: client
+  modules and HMR are served under `/_static/`, and every other request is handled by the app in-process. A
+  client edit is Fast Refresh; a server-component edit re-renders the page in place, client state kept.
+
+### Breaking
+
+- **`rspack` in `rshono.config.ts` is replaced by `vite`** — a Vite config merged over the generated one.
+  `RspackHookContext` is no longer exported. A `vite.config.*` file is not read.
+- **Tailwind needs no build config.** Remove the `postcss-loader` rule and the `postcss-loader` package; Vite
+  runs `postcss.config.mjs` itself.
+- **Client asset URLs** are `/_static/assets/<name>-<hash>.<ext>` (were `/_static/chunks/…`), and the document
+  boots one `<script type="module">`.
+- **Server action ids** are `<module key>#<export name>`.
+- **A page that is neither an inline `component: () => import('…')` thunk nor marked `'use server-entry'`**
+  now fails with a message naming it, where it used to fail for missing client assets.
 
 ## 1.0.0-rc.29
 

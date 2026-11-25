@@ -7,7 +7,7 @@
 <p align="center">
   Minimalist web framework —
   <a href="https://hono.dev">Hono</a> +
-  <a href="https://rspack.rs">Rspack</a> +
+  <a href="https://vite.dev">Vite</a> +
   <a href="https://react.dev/reference/rsc/server-components">React Server Components</a>.
 </p>
 
@@ -16,9 +16,9 @@ streaming SSR with RSC hydration, server actions with progressive enhancement, s
 prerendering, and hard env/secret safety.
 
 > **Release candidate.** The framework itself is covered end to end (see [Testing](#testing)) and its API is
-> settled. What is not settled underneath it: Rspack's RSC support is an experimental API
-> (`rspack.experiments.rsc`) and `react-server-dom-rspack` has not reached 1.0, so its own minor bumps are
-> breaking by convention. Both are pinned to exact versions — in the manifests and in workspace overrides —
+> settled. What is not settled underneath it: the RSC build is `@vitejs/plugin-rsc`, which has not reached 1.0,
+> so its own minor bumps are breaking by convention, and the React RSC runtime (`react-server-dom-webpack`)
+> has to match `react` to the patch. All of them are pinned to exact versions — in the manifests and in workspace overrides —
 > and a release of rshono is what moves them, so an upstream change reaches you as a tested release rather
 > than as a broken install. That is the whole of the caveat, and it is the reason to read the
 > [changelog](../../CHANGELOG.md) before upgrading.
@@ -114,9 +114,9 @@ export default async function Profile({ params, ctx }: PageProps<'/profile/:id'>
   response head is already committed; set them from a `'use server'` action or from middleware instead.
 - Page props are server-only and never serialized, and `ctx` cannot cross into a client component. Read what
   you need on the server and pass plain values down (`url.href`, not `url`).
-- The framework injects Rspack's `'use server-entry'` directive for every component referenced with the
-  inline `component: () => import('…')` thunk — that is what attaches the page's JS and CSS to it, so code
-  splitting needs no asset manifest. Wire a component up some other way and you write the directive
+- The framework treats every component referenced with the inline `component: () => import('…')` thunk as
+  a page — that is what attaches the page's CSS to it and hands it its props untouched. Wire a component up
+  some other way and you write the `'use server-entry'` directive
   yourself; the framework throws a descriptive error when neither happened.
 
 [Pages docs](https://www.rshono.com/docs/pages).
@@ -137,9 +137,8 @@ carries a fresh page payload, so server-rendered UI updates after a mutation.
 action. [Server actions docs](https://www.rshono.com/docs/pages#server-actions), and
 [how to use them](https://www.rshono.com/docs/usage).
 
-Rspack compiles an app's whole `'use server'` graph into **one** server module, and calling any action loads
-it — so a module that throws while it evaluates takes every action in the app with it, not just its own.
-Nothing on the server imports these modules until an action is called, which used to make that a green build
+Calling an action loads the `'use server'` module it lives in — so a module that throws while it evaluates
+takes every action it exports with it. Nothing on the server imports these modules until an action is called, which used to make that a green build
 followed by a 500 on the first click. `rshono build` now loads them and warns if one will not, and at run
 time a failure to load is reported as an action fault, not answered as a bad request.
 
@@ -155,13 +154,13 @@ time a failure to load is reported as an action fault, not answered as a bad req
 
 ## Styling
 
-`import './styles.css'` from any component. Rspack's native CSS pipeline compiles it, and the import
+`import './styles.css'` from any component. Vite's CSS pipeline compiles it, and the import
 attaches the stylesheet to the importing page — so CSS is code-split per route and `<link>`ed in the streamed
 HTML rather than fetched after hydration. `*.module.css` gets a class map.
 
-**There is no PostCSS in the framework**, so a stylesheet that needs a plugin brings one, through the
-[`rspack` hook](#configuration-rshonoconfigts). Tailwind is exactly that and nothing else — four packages, a
-`postcss.config.mjs` and one rule; `npx @rshono/create@latest --tailwind` writes all of it.
+**The framework has no PostCSS dependency**, so a stylesheet that needs a plugin brings one: add a
+`postcss.config.mjs` and Vite runs it. Tailwind is exactly that and nothing else — three packages and that
+file; `npx @rshono/create@latest --tailwind` writes all of it.
 [Styling docs](https://www.rshono.com/docs/styling).
 
 ## Env & secret safety
@@ -192,9 +191,7 @@ export default defineConfig({
   deploy: 'node', // hosting platform to build for (--deploy or RSHONO_DEPLOY override)
   siteUrl: 'https://example.com', // public origin, baked into prerendered pages' absolute URLs
   trustProxy: false, // honour X-Forwarded-Host/-Proto — only behind a proxy you control
-  rspack(config, { isServer, isDev }) {
-    return config; // escape hatch: mutate the generated Rspack config
-  },
+  vite: { plugins: [] }, // escape hatch: Vite config merged over the generated one
 });
 ```
 
@@ -230,7 +227,7 @@ page `(flight only)` rather than counting it as fully prerendered. Everything el
 throwing an `HTTPException` keeps its own status rather than becoming the 500 page.
 [Middleware docs](https://www.rshono.com/docs/hono#security-middleware) · [Hono](https://hono.dev/docs).
 
-`deploy` and `rspack` are consumed by the CLI; `trustProxy` is **compiled into the server bundle** at build
+`deploy` and `vite` are consumed by the CLI; `trustProxy` is **compiled into the server bundle** at build
 time, so changing it means a rebuild and there is no parallel env-var interface for it (environment
 variables are for secrets). The port and bind address are deliberately not config fields — on every host
 that runs this, the environment is what sets them. [Configuration docs](https://www.rshono.com/docs/configuration).
@@ -297,7 +294,7 @@ Every target streams, which is the bar a new one has to clear.
   pulls in. A function is an uploaded directory with no `node_modules` to resolve against, so `vercel`,
   `aws-lambda` and `cloudflare` compile everything in. The cost is that a native addon — or a package that
   reads its own files off disk — fails the build on those targets rather than the deploy; reach for the
-  `rspack` hook, or deploy to `node`.
+  `vite` option, or deploy to `node`.
 
   On `node` a server component's dependencies stay external and resolve from `node_modules`, but anything
   reachable from a `'use client'` component is compiled in on every target. It has to be: the `PUBLIC_`-only
@@ -309,9 +306,9 @@ Every target streams, which is the bar a new one has to clear.
 
 ## Requirements & limitations
 
-- **Node ≥ 22.18** (worker threads, `process.loadEnvFile`, `Promise.withResolvers`, `URL.parse`, and native
+- **Node ≥ 22.18** (`process.loadEnvFile`, `Promise.withResolvers`, `URL.parse`, and native
   TypeScript stripping, so a `.ts` config needs no loader) and **React ≥ 19.1** (the floor
-  `react-server-dom-rspack` requires).
+  the RSC runtime requires).
 - **ESM only.** The package declares `import` and `types` conditions and no `require` one, so
   `require('@rshono/core')` is `ERR_PACKAGE_PATH_NOT_EXPORTED` rather than a working call — deliberately,
   since the framework's own graph is ESM throughout. Use `import`, or `await import()` from CommonJS.
@@ -383,7 +380,7 @@ Every target streams, which is the bar a new one has to clear.
   It cannot be otherwise: an enumerable `ctx` would put `ctx.hono.env`, every binding and secret, into
   React's dev-only serialization of a server component's props. Nested server components are meant to call
   `getRequestContext()` rather than be handed the context.
-- **`rshono build` does not type-check.** swc strips types and `tsc` is never invoked, so the build is as fast
+- **`rshono build` does not type-check.** Vite strips types and `tsc` is never invoked, so the build is as fast
   as it is and no faster because it skipped something. Several of the framework's guarantees are types alone —
   the `handler` an endpoint module owes, and `defineRoutes`' path ↔ props and `staticPaths` ↔ path checks — so
   run `tsc --noEmit` (`npm run typecheck` in a scaffolded app) in CI beside the build. The mistakes that make
@@ -391,15 +388,14 @@ Every target streams, which is the bar a new one has to clear.
 - **`.env` and `rshono.config.ts` are read once, at startup**, and what a build needs from them is compiled
   in — so `rshono dev` does not pick up an edit to either, and a rebuild that serves the old value looks like
   nothing happened. Restart it; it watches both and says so when one changes.
-- The dev proxy doesn't forward WebSocket upgrades to a custom sub-app; production is unaffected.
+- `rshono dev` doesn't forward WebSocket upgrades to a custom sub-app; production is unaffected.
 - **`rshono dev` answers `/_static` itself, so your middleware does not run for an asset** — where a build
-  serves assets through the app and they carry HSTS, your CSP and everything else it sets. The dev front-end
-  owns the prefix on purpose: every request it proxies waits on the server rebuild, and the client bundle is
-  built by a separate compiler, so proxying assets would stall the browser's JS and CSS on a save that only
-  touched a server component. The cost is that a policy is developed against files it does not apply to;
+  serves assets through the app and they carry HSTS, your CSP and everything else it sets. In dev that prefix
+  is Vite's: client modules and the HMR socket are served from it directly. The cost is that a policy is
+  developed against files it does not apply to;
   check a header that has to be on an asset against `rshono build` and `rshono start`.
-- Dev source maps embed the original source of `'use server'` modules (dev binds 127.0.0.1 only, and
-  production ships no client source maps).
+- The dev server serves your source modules, `'use server'` ones included, to the browser that asks (dev
+  binds 127.0.0.1 only, and production ships no client source maps).
 
 ## Testing
 
@@ -453,17 +449,16 @@ than tightened: the code it cannot see is not the code that is thin.
 
 ## How it works
 
-Two coordinated Rspack compilers, using native RSC support (`rspack.experiments.rsc`):
+One Vite build with three environments, compiled by `@vitejs/plugin-rsc`:
 
-- **client** (`target: web`) → `dist/static`: hydration runtime, `'use client'` chunks, CSS.
-- **server** (`target: node`) → `dist/server/main.mjs`: a Hono app assembled from your routes, rendered
-  through two layers — the RSC layer, with the `react-server` condition, produces the flight payload; the SSR
-  layer turns it into an HTML stream with the payload inlined for hydration.
+- **client** → `dist/static`, served at `/_static/`: hydration runtime, `'use client'` chunks, CSS.
+- **rsc** → `dist/server/main.mjs`: a Hono app assembled from your routes. Built with the `react-server`
+  condition, it produces the flight payload.
+- **ssr** → `dist/server/ssr/`: turns that payload into an HTML stream with the payload inlined for hydration.
 
-In dev the CLI watches both bundles, runs the server bundle in a worker thread (restarted per rebuild,
-requests gated on readiness so nothing drops), and fronts everything on one port with static serving and an
-SSE channel: client edits hot-apply via react-refresh, server component edits re-fetch the payload in place,
-and browser state survives both. In production `dist/server/main.mjs` has React, Hono and the framework
-bundled in. On `node` your server-side dependencies still resolve from `node_modules` beside it; on the
+`rshono dev` is one Vite dev server on one port: it serves client modules and HMR under `/_static/`, runs
+the two server environments in-process, and hands every other request to the app. Client edits hot-apply
+through Fast Refresh, server component edits re-fetch the payload in place, and browser state survives both. In production `dist/server/` has React and the framework
+bundled in. On `node` Hono and your server-side dependencies still resolve from `node_modules` beside it; on the
 serverless targets they are bundled too, because nothing installs them there. Whatever a `'use client'`
 component reaches is bundled on every target, which is what lets the env shadow cover it.

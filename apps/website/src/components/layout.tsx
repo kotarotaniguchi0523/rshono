@@ -30,7 +30,7 @@ export function Layout({
   wide?: boolean;
   children: ReactNode;
 }) {
-  const heading = title ? `${title} · rshono` : 'rshono — Hono + Rspack + React Server Components';
+  const heading = title ? `${title} · rshono` : 'rshono — Hono + Vite + React Server Components';
 
   return (
     <html lang="en" className="scroll-smooth">

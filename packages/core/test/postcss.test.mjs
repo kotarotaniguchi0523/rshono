@@ -1,8 +1,8 @@
-// Rspack's native CSS is the whole CSS pipeline here, and it parses *finished* CSS — so an app using
-// Tailwind (or any other PostCSS plugin) puts the loader in front of that parser itself, through the
-// `rspack` hook in rshono.config.ts. The framework has no PostCSS in it and no dependency on any; this
-// fixture is the check that the documented four lines actually work, end to end: from an
-// `@import "tailwindcss"` nobody could resolve to compiled utilities in the stylesheet the page links.
+// The framework has no PostCSS in it and no dependency on any: an app using Tailwind (or any other PostCSS
+// plugin) installs it and adds a `postcss.config.mjs`, which Vite runs. This fixture is the check that the
+// documented setup actually works, end to end — from an `@import "tailwindcss"` in a stylesheet a *server*
+// component imports, where the package has to be resolved from an environment that leaves `node_modules`
+// external (`rshono:css-package-imports`), to compiled utilities in the stylesheet the page links.
 //
 // The apps with no PostCSS at all are the rest of the suite.
 import assert from 'node:assert/strict';
@@ -20,7 +20,7 @@ const css = cssFiles.map((file) => readFileSync(join(chunksDir, file), 'utf8')).
 const { base, child } = await startApp(POSTCSS_APP_DIR, 'start');
 after(() => stopServer(child));
 
-test('a rule added through the rspack hook puts PostCSS in front of the CSS parser', () => {
+test('a postcss.config.mjs in the project is all it takes for PostCSS to run', () => {
   assert.equal(cssFiles.length, 1, 'the page imports one stylesheet, so one CSS chunk should be emitted');
   assert.doesNotMatch(css, /@import[^;]*tailwindcss/, 'an unexpanded @import means PostCSS never ran');
   assert.match(css, /\.font-bold\{/, 'a utility used by the page should be compiled into the stylesheet');

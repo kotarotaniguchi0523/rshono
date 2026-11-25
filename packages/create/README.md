@@ -5,7 +5,7 @@
 <h1 align="center">@rshono/create</h1>
 
 <p align="center">
-  Scaffolds a new <a href="https://github.com/rshono/rshono">rshono</a> app — Hono + Rspack + React Server Components.
+  Scaffolds a new <a href="https://github.com/rshono/rshono">rshono</a> app — Hono + Vite + React Server Components.
 </p>
 
 ```bash
@@ -103,10 +103,10 @@ rules is a compiler one major behind, and the JavaScript implementation rather t
 `typecheck` on a large app is several times slower. When upstream widens the range, the pin in
 `features/quality.ts` is the only thing to delete.
 
-**Tailwind is four packages, a `postcss.config.mjs` and one rule in `rshono.config.ts`.** rshono compiles CSS
-natively and has no PostCSS in it — that is deliberate, and it means an app that wants a plugin chain brings
-its own, through the `rspack` hook. The overlay writes all of it, with a comment saying what to delete to go
-back to plain CSS.
+**Tailwind is three packages and a `postcss.config.mjs`.** rshono has no PostCSS dependency of its own — that
+is deliberate, and it means an app that wants a plugin chain brings its own. Vite runs PostCSS whenever that
+config file is there, so there is nothing to add to `rshono.config.ts`; delete the file and the three
+packages to go back to plain CSS.
 
 ## Adding an option
 

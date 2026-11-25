@@ -260,7 +260,9 @@ function rshonoCore(aliases: ReadonlyMap<string, string>, routesFile: string, sr
 
       const listener = getRequestListener(async (request, env) => {
         try {
-          const { default: handle } = (await environment.runner.import(entry)) as { default: (request: Request, env: unknown) => Response | Promise<Response> };
+          const { default: handle } = await environment.runner.import<{ default: (request: Request, env: unknown) => Response | Promise<Response> }>(
+            entry,
+          );
           return await handle(request, env);
         } catch (error) {
           // The app's own failures are answered by the app. What lands here is a module that would not load
@@ -345,7 +347,7 @@ function serverEnvironment(preset: DeployPreset, outDir: string, entryFileName?:
         onwarn: ignoreExpectedWarnings,
         output: {
           ...(entryFileName ? { entryFileNames: entryFileName } : null),
-          ...(preset.singleFile ? { inlineDynamicImports: true } : null),
+          ...(preset.singleFile ? { codeSplitting: false } : null),
         },
       },
     },
@@ -423,7 +425,7 @@ export function createViteConfig({ rootDir, isDev, config, preset }: ViteConfigO
 
   // The app's own Vite config goes over the generated one, and the framework's plugins after its own — so
   // an app plugin can transform a module before the RSC plugin reads its directives.
-  const merged = mergeConfig(generated, config.vite ?? {});
+  const merged: InlineConfig = mergeConfig(generated, config.vite ?? {});
   return {
     ...merged,
     root: rootDir,

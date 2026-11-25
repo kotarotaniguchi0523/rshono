@@ -3,13 +3,13 @@ title: Getting started
 description: Scaffold an app, run the dev server, ship a production build.
 ---
 
-rshono is a web framework built on [Hono](https://hono.dev), [Rspack](https://rspack.rs) and
+rshono is a web framework built on [Hono](https://hono.dev), [Vite](https://vite.dev) and
 [React Server Components](https://react.dev/reference/rsc/server-components). One required file
 (`src/routes.ts`), one optional file (`src/server.ts`), nine exported values.
 
-> **Alpha.** Built on Rspack's experimental RSC support (`rspack.experiments.rsc`) and
-> `react-server-dom-rspack`, which has not reached 1.0. Both are pinned to exact versions, so a release of
-> rshono is what moves them.
+> **Alpha.** Built on `@vitejs/plugin-rsc`, which has not reached 1.0, and on React's RSC runtime
+> (`react-server-dom-webpack`), which has to match `react` to the patch. All are pinned to exact versions, so
+> a release of rshono is what moves them.
 
 ## Scaffold
 
@@ -42,7 +42,7 @@ property of the build, not of developing.
 
 - **Node ≥ 22.18** — worker threads, `process.loadEnvFile`, `Promise.withResolvers`, `URL.parse`, and
   native TypeScript stripping, so a `.ts` config needs no loader.
-- **React ≥ 19.1** — the floor `react-server-dom-rspack` requires.
+- **React ≥ 19.1** — the floor the RSC runtime requires.
 
 ## Next
 

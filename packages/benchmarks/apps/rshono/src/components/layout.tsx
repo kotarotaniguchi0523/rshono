@@ -25,7 +25,7 @@ export function Layout({ title, children }: { title: string; children: ReactNode
         </header>
         <main>{children}</main>
         <footer>
-          <p>rshono — Hono + Rspack + React Server Components.</p>
+          <p>rshono — Hono + Vite + React Server Components.</p>
         </footer>
       </body>
     </html>

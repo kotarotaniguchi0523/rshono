@@ -11,5 +11,5 @@ export const runtime: DeployRuntime = {
   ...fileSystemRuntime,
   mountStaticAssets() {},
   // `env` is `@hono/node-server`'s `{ incoming, outgoing }` — what the node target passes in production.
-  serveApp: (app: Hono) => (request: Request, env: unknown) => app.fetch(request, env as never),
+  serveApp: (app: Hono) => (request: Request, env: unknown) => app.fetch(request, env),
 };

@@ -38,6 +38,6 @@ export async function startCommand(options: StartOptions): Promise<void> {
   // `--enable-source-maps`, and `bin/rshono.mjs` already enables the same thing in-process before the CLI
   // loads — so a supervisor bought a second PID and its own heap in every container, an extra frame in every
   // stack, and signal forwarding for signals the bundle already handles itself through `onShutdown`. `start`
-  // deliberately imports no Rspack, so the process this leaves behind is the server and little else.
+  // deliberately imports no Vite, so the process this leaves behind is the server and little else.
   await import(pathToFileURL(mainPath).href);
 }
