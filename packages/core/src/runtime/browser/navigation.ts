@@ -125,36 +125,26 @@ let intents = 0;
  */
 export const navigationIntent = (): number => intents;
 
-let underway = 0;
-/** Whether a navigation this runtime intercepted is still fetching or rendering. */
-export const navigating = (): boolean => underway > 0;
-/** Where the newest navigation under way is going. `undefined` when none is. */
-let destination: string | undefined;
+/** The navigations this runtime intercepted that are still fetching or rendering, oldest first. */
+const underway = new Set<NavigateEvent>();
+export const navigating = (): boolean => underway.size > 0;
 
-let onIdle: Array<() => void> = [];
+let becameIdle: PromiseWithResolvers<void> | undefined;
 /** Resolves once no intercepted navigation is under way — at once, when none is. */
 function idle(): Promise<void> {
-  if (underway === 0) return Promise.resolve();
-  const { promise, resolve } = Promise.withResolvers<void>();
-  onIdle.push(resolve);
-  return promise;
+  return underway.size === 0 ? Promise.resolve() : (becameIdle ??= Promise.withResolvers<void>()).promise;
 }
 
 /** Marks an intercepted navigation as under way. The returned function ends it, once. */
 function begin(event: NavigateEvent): () => void {
-  underway++;
-  destination = event.destination.url;
-  let ended = false;
+  underway.add(event);
   const end = () => {
-    if (ended) return;
-    ended = true;
+    if (!underway.delete(event)) return;
     // Ended by its handler rather than by the abort: the signal has nothing left to tell this.
     event.signal.removeEventListener('abort', end);
-    if (--underway !== 0) return;
-    destination = undefined;
-    const waiting = onIdle;
-    onIdle = [];
-    for (const resolve of waiting) resolve();
+    if (underway.size !== 0) return;
+    becameIdle?.resolve();
+    becameIdle = undefined;
   };
   event.signal.addEventListener('abort', end, { once: true });
   return end;
@@ -250,7 +240,7 @@ export function settleRenderIntent(error: unknown, document: PageResource): 'fol
  * happen — and otherwise it is the URL in the address bar.
  */
 export function recoverRoot(): void {
-  leave(destination ?? location.href);
+  leave([...underway].at(-1)?.destination.url ?? location.href);
 }
 
 // ── Showing a payload ────────────────────────────────────────────────────────────────────────────────────

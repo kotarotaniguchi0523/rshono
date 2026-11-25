@@ -8,7 +8,7 @@
  * is re-read instead, because it may have been rendered before the mutation.
  */
 import { createTemporaryReferenceSet, encodeReply, setServerCallback } from '@vitejs/plugin-rsc/browser';
-import { isControlDigest } from '../control.js';
+import { parseControlIntent } from '../control.js';
 import { createRscRequest } from '../request.js';
 import { documentUrl } from './document.js';
 import { followRootIntent, mutationCompleted, navigating, navigationIntent, push, revalidate } from './navigation.js';
@@ -50,12 +50,10 @@ export function installServerFunctions(): void {
       } catch (error) {
         mutationCompleted();
         // A `redirect()` or `notFound()` that arrived as an error is a change of screen like any other.
-        if (isControlDigest((error as { digest?: unknown } | null)?.digest) && !ownsScreen()) {
-          revalidate();
-          return undefined;
-        }
-        if (followRootIntent(resource, error)) return undefined;
-        throw error;
+        if (!parseControlIntent(error)) throw error;
+        if (ownsScreen()) followRootIntent(resource, error);
+        else revalidate();
+        return undefined;
       }
 
       mutationCompleted();

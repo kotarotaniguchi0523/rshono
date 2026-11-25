@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { holdNextPayload, unique } from './payload-holds.mjs';
 
 /*
  * A `redirect()` or `notFound()` raised late — from inside a `<Suspense>`, after the shell — by a page the
@@ -8,35 +9,10 @@ import { expect, test } from '@playwright/test';
  * `/gated-intent?gate=<id>&to=<path>` raises its signal when `POST /api/gate?id=<id>` says so.
  */
 
-const unique = (name) => `${name}-${crypto.randomUUID().slice(0, 8)}`;
 /** From the page, so the POST carries its origin and passes the same check a form would. */
 async function openGate(page, id) {
   const opened = await page.evaluate((gate) => fetch(`/api/gate?id=${gate}`, { method: 'POST' }).then((response) => response.ok), id);
   expect(opened, 'the gate endpoint must have answered').toBe(true);
-}
-
-const isPayloadGet = (request, pathname) =>
-  request.method() === 'GET' && request.headers()['rsc'] === '1' && new URL(request.url()).pathname === pathname;
-
-/** Holds the next payload fetch for `pathname` until `release` is called. `asked` resolves once it is on the wire. */
-async function holdNextPayload(page, pathname) {
-  let release;
-  const held = new Promise((resolve) => {
-    release = resolve;
-  });
-  let seen;
-  const asked = new Promise((resolve) => {
-    seen = resolve;
-  });
-  let used = false;
-  await page.route(`**${pathname}`, async (route) => {
-    if (used || !isPayloadGet(route.request(), pathname)) return route.fallback();
-    used = true;
-    seen();
-    await held;
-    await route.continue().catch(() => {});
-  });
-  return { release, asked };
 }
 
 /** Records every URL the tab shows from here on, document loads included. */
@@ -69,7 +45,7 @@ for (const phase of ['precommit', 'post-commit']) {
       try {
         // The visitor asks for /users, and its payload is kept waiting.
         await page.locator('[data-gated-go]').click();
-        await hold.asked;
+        await hold.snapshotTaken;
         // Now the page being left raises its signal.
         await openGate(page, id);
         // Long enough for the digest to have reached React and for anything it started to show.

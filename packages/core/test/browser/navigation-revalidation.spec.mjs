@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { holdNextPayload, isPayloadGet, unique } from './payload-holds.mjs';
 
 /*
  * Server functions against each other, against navigations, and against the re-read that repairs the screen
@@ -10,12 +11,7 @@ import { expect, test } from '@playwright/test';
  * those alone.
  */
 
-const unique = (name) => `${name}-${crypto.randomUUID().slice(0, 8)}`;
 const entry = (page, label) => page.locator(`[data-race-entry="${label}"]`);
-
-/** Whether a request asks `pathname` for its flight payload — a navigation's fetch or a re-read, not an action. */
-const isPayloadGet = (request, pathname) =>
-  request.method() === 'GET' && request.headers()['rsc'] === '1' && new URL(request.url()).pathname === pathname;
 
 /** Counts the payload fetches for `pathname` from here on. */
 function countPayloadGets(page, pathname) {
@@ -53,32 +49,6 @@ const resultOf = (page, label) => page.evaluate((name) => window.__raceResults[n
 async function overlap(page, slow, fast) {
   await race(page, slow, 400);
   await race(page, fast, 0);
-}
-
-/**
- * Holds the next payload fetch for `pathname`: the server answers at once — so the snapshot is as old as the
- * moment it was asked for — and the browser is given the answer only when `release` is called.
- */
-async function holdNextPayload(page, pathname) {
-  let release;
-  const held = new Promise((resolve) => {
-    release = resolve;
-  });
-  let fetched;
-  const snapshotTaken = new Promise((resolve) => {
-    fetched = resolve;
-  });
-  let used = false;
-  await page.route(`**${pathname}`, async (route) => {
-    if (used || !isPayloadGet(route.request(), pathname)) return route.fallback();
-    used = true;
-    const response = await route.fetch();
-    const body = await response.body();
-    fetched();
-    await held;
-    await route.fulfill({ response, body }).catch(() => {});
-  });
-  return { release, snapshotTaken };
 }
 
 test('calls made in one order and applied in the other both end up on screen', async ({ page }) => {
