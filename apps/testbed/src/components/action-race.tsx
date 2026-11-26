@@ -1,6 +1,6 @@
 import type { PageProps } from '@rsvhono/core';
 import { notFound, redirect } from '@rsvhono/core/server';
-import { raiseSignal } from '../actions';
+import { raiseSignal, recordBound } from '../actions';
 import { countRaceRender, raceLog } from '../race-log';
 import { ActionRaceControls } from './action-race-controls';
 import { Layout } from './layout';
@@ -37,6 +37,12 @@ export default function ActionRace({ url }: PageProps) {
         <form action={raiseSignal} data-raise-signal>
           <input name="to" placeholder="redirect to — empty for notFound()" />
           <button type="submit">Raise</button>
+        </form>
+        {/* The same, with an argument bound on the server: what the form posts names the function *and* carries
+            the bound value, and both have to survive being decoded. */}
+        <form action={recordBound.bind(null, 'bound')} data-bound-form>
+          <input name="suffix" placeholder="suffix" />
+          <button type="submit">Record bound</button>
         </form>
         <h2 id="details">Details</h2>
       </div>

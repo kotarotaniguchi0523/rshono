@@ -447,6 +447,71 @@ describe('beforeServerFunction: one check in front of every server function', ()
     await admin.body?.cancel();
   });
 
+  /*
+   * Every shape a form action is posted in without JavaScript. The guard is told which function by the
+   * function React decoded — so each shape has to come out of the decode still knowing its own name.
+   */
+  /** Posts the first form on `path` matching `selector`, as a browser with JavaScript off would. */
+  const postForm = async (path, selector, fields = {}, headers = {}) => {
+    const html = await (await fetch(`${app.base}${path}`)).text();
+    const form = new RegExp(`<form[^>]*${selector}[^>]*>(.*?)</form>`, 's').exec(html)?.[1];
+    assert.ok(form !== undefined, `${path} has a form matching ${selector}`);
+    const body = new FormData();
+    for (const [name, value] of Object.entries({ ...hiddenFields(form), ...fields })) body.set(name, value);
+    return fetch(`${app.base}${path}`, { method: 'POST', headers: { Origin: app.base, ...headers }, body, redirect: 'manual' });
+  };
+  const guardLines = (from) =>
+    app
+      .getOutput()
+      .slice(from)
+      .split('\n')
+      .filter((line) => line.startsWith('[guard]'));
+
+  for (const [shape, path, selector, fields, named] of [
+    ['a plain form action', '/action-race', 'data-raise-signal', { to: '/users' }, /^\[guard\] form-action [0-9a-f]+#raiseSignal$/],
+    [
+      'a function with an argument bound on the server',
+      '/action-race',
+      'data-bound-form',
+      { suffix: 'x' },
+      /^\[guard\] form-action [0-9a-f]+#recordBound$/,
+    ],
+    ['a useActionState action', '/signup', 'class="form"', { name: 'Ada', email: 'ada@example.com' }, /^\[guard\] form-action [0-9a-f]+#\w+$/],
+    ['a function declared inline in a server component', '/inline-action', 'class="form"', {}, /^\[guard\] form-action [0-9a-f]+#[\w$]+$/],
+  ]) {
+    test(`${shape} is named to the guard, and refused without a pass`, async () => {
+      const before = app.getOutput().length;
+      const res = await postForm(path, selector, fields);
+      await res.body?.cancel();
+      assert.equal(res.status, 401);
+      const lines = guardLines(before);
+      assert.equal(lines.length, 1, 'asked once');
+      assert.match(lines[0], named);
+      assert.doesNotMatch(lines[0], /unnamed/);
+    });
+  }
+
+  test('the bound argument and the form both reach the function once the guard lets it through', async () => {
+    const suffix = unique('sfx');
+    const res = await postForm('/action-race', 'data-bound-form', { suffix }, { cookie: 'guard=user' });
+    assert.ok(res.status < 400, `ran (${res.status})`);
+    await res.body?.cancel();
+    assert.equal(await applied(app.base, `bound:${suffix}`), true);
+  });
+
+  test('a form whose function cannot be named is not run while a guard is installed', async () => {
+    // A body that decodes to nothing React calls a server reference. There is no such form to write by hand
+    // on this React, so this pins the other half of the promise: with a pass, an unnameable post still does
+    // not reach a function — it is answered as the malformed request it is.
+    const body = new FormData();
+    body.set('$ACTION_ID_not-a-reference', '');
+    const before = app.getOutput().length;
+    const res = await fetch(`${app.base}/action-race`, { method: 'POST', headers: { Origin: app.base, cookie: 'guard=admin' }, body });
+    await res.body?.cancel();
+    assert.ok(res.status >= 400, `refused (${res.status})`);
+    assert.deepEqual(guardLines(before), [], 'and the guard was never asked to approve something with no name');
+  });
+
   test('a function called from the notFound page is guarded like any other', async () => {
     const label = unique('from-404');
     const unsigned = await callFunction(app.base, '/no-such-page', 'recordRace', [label, 0]);

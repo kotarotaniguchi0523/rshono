@@ -166,7 +166,10 @@ those.
 
 - **`beforeServerFunction(guard)`** runs before every server function — called from client code, posted by
   a form without JavaScript, or called from the `notFound` page — with the function's id and the Hono
-  context. An `HTTPException` it throws is answered with its own status.
+  context. An `HTTPException` it throws is answered with its own status. The id is always a string: a
+  posted form is named by the function React decoded from it (plain, bound with `.bind()`, `useActionState`
+  and inline functions all are, on React 19.3.1), and a form whose function could not be named is refused
+  with `403` while a guard is installed rather than handed to a rule that cannot see what it is approving.
 
 - **Every server reference is checked against the build's allowlist, on every decode path.** The id in an
   action call's header already was; a reference inside the arguments, in a form's `$ACTION_REF`, or in a

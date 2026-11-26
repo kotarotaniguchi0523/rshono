@@ -3231,13 +3231,30 @@ describe('server function policy', async () => {
     const c = hono();
     await ctx.authorizeServerFunction(c, 'rsc-action', 'm#allowed');
     await assert.rejects(ctx.authorizeServerFunction(c, 'rsc-action', 'm#forbidden'), /not for you/);
-    // A plain form post arrives before its id has been decoded.
-    await ctx.authorizeServerFunction(c, 'form-action', undefined);
+    // A form posted without JavaScript is named by the function React decoded from it.
+    await ctx.authorizeServerFunction(c, 'form-action', 'm#posted');
     assert.deepEqual(seen, [
       ['rsc-action', 'm#allowed', 'POST', true],
       ['rsc-action', 'm#forbidden', 'POST', true],
-      ['form-action', undefined, 'POST', true],
+      ['form-action', 'm#posted', 'POST', true],
     ]);
+  });
+
+  test('whether a guard is installed can be asked, since an unnameable form must not run under one', async () => {
+    // A fresh process: this file's suites install guards, and there is no way to take one out again.
+    const run = spawnSync(
+      process.execPath,
+      [
+        '--input-type=module',
+        '-e',
+        `const ctx = await import(${JSON.stringify(new URL('../dist/runtime/context.js', import.meta.url).href)});
+         const before = ctx.hasServerFunctionGuard();
+         ctx.beforeServerFunction(() => {});
+         console.log(JSON.stringify([before, ctx.hasServerFunctionGuard()]));`,
+      ],
+      { encoding: 'utf8' },
+    );
+    assert.deepEqual(JSON.parse(run.stdout), [false, true]);
   });
 
   test('an async guard is awaited', async () => {

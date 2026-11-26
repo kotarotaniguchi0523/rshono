@@ -101,10 +101,10 @@ if (process.env.TESTBED_ACTION_REFRESH === 'explicit') setServerFunctionRefresh(
 // function the guard was asked about — for a form post that is read off the function React decoded.
 if (process.env.TESTBED_ACTION_GUARD === '1') {
   beforeServerFunction<AppEnv>(({ kind, id, hono }) => {
-    console.log(`[guard] ${kind} ${id ?? '(unnamed)'}`);
+    console.log(`[guard] ${kind} ${id}`);
     const pass = getCookie(hono, 'guard');
     if (!pass) throw new HTTPException(401, { message: 'Sign in to call a server function' });
-    if (pass !== 'admin' && id?.endsWith('#raiseSignal')) throw new HTTPException(403, { message: 'Not allowed to raise signals' });
+    if (pass !== 'admin' && id.endsWith('#raiseSignal')) throw new HTTPException(403, { message: 'Not allowed to raise signals' });
   });
 }
 

@@ -178,3 +178,12 @@ export async function failsLate(label: string): Promise<{ now: string; later: Pr
 export async function handBack<T>(value: T): Promise<{ same: T }> {
   return { same: value };
 }
+
+/**
+ * Takes one argument bound on the server and the form after it — the shape `action.bind(null, value)` gives
+ * a form action. Applies `<bound>:<field>` to the race log, so a test can see both halves arrived.
+ */
+export async function recordBound(bound: string, formData: FormData): Promise<void> {
+  const suffix = formData.get('suffix');
+  raceLog.push(`${bound}:${typeof suffix === 'string' ? suffix : ''}`.slice(0, 80));
+}

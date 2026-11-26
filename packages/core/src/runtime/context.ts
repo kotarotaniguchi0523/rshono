@@ -628,12 +628,14 @@ export interface ServerFunctionCall<E extends Env = Env> {
    */
   kind: 'rsc-action' | 'form-action';
   /**
-   * The function's id — `<module key>#<export name>`. Always present for an `rsc-action`, where the request
-   * names it. For a `form-action` it is read off the function React decoded, and is `undefined` where that
-   * function does not say; it is never inferred from the body. A guard that authorizes by id must therefore
-   * refuse an `undefined` one rather than wave it through.
+   * The function's id — `<module key>#<export name>`. For an `rsc-action` the request names it. For a
+   * `form-action` it is read off the function React decoded from the form — the plain form, one with
+   * arguments bound on the server, a `useActionState` action and a function declared inline all carry it —
+   * and is never inferred from the body. A form whose function does not say what it is does not reach the
+   * guard at all: with a guard installed it is refused, so a rule written per function cannot be passed by
+   * something with no name.
    */
-  id: string | undefined;
+  id: string;
   request: Request;
   /** The Hono context, for whatever middleware put on it: `hono.var.user`, `hono.get('session')`. */
   hono: Context<E>;
@@ -678,7 +680,10 @@ export function beforeServerFunction<E extends Env = Env>(guard: ServerFunctionG
  *
  * @internal
  */
-export async function authorizeServerFunction(c: Context, kind: ServerFunctionCall['kind'], id: string | undefined): Promise<void> {
+/** Whether the app registered a guard — which is when a function that cannot be named must not run. */
+export const hasServerFunctionGuard = (): boolean => functionGuard !== undefined;
+
+export async function authorizeServerFunction(c: Context, kind: ServerFunctionCall['kind'], id: string): Promise<void> {
   await functionGuard?.({ kind, id, request: c.req.raw, hono: c as Context<Env> });
 }
 

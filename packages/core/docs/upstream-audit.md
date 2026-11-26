@@ -65,6 +65,11 @@ below.
   the framework does not depend on it and ships no preset for it. Exercised by the `toolchain-app` fixture:
   a one-name import from a four-module barrel ships one module instead of four, in the browser chunk and in
   the SSR chunk (`test/toolchain.test.mjs`).
+- **Telling a server module that will not load from a body that will not decode.** `decodeAction` reports
+  both through one rejection, and `@vitejs/plugin-rsc` 0.5.39 exports nothing that says which: the public
+  surface is `decodeAction(body, options)` and `loadServerAction(id)`, with no typed error and no "is this
+  module loadable" query. So `cannotLoadServerActions` still answers the question by loading an action for
+  real. It cannot be made smaller on this API; a typed load error upstream would replace it.
 - **`vitest-plugin-rsc` (0.3.0).** Not added. The suite's value is in real requests through Hono and a real
   browser; a third runner for component-level cases would duplicate a small part of that.
 - **RSC debug channel.** The options exist in 0.5.39. The development timing track

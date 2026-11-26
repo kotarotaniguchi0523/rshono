@@ -29,6 +29,7 @@ import { appendVary, etagMatches, varyWith } from '../server/headers.js';
 import { PRERENDER_NONCE_HEADER, setPrerenderFlight } from '../server/prerendered.js';
 import {
   authorizeServerFunction,
+  hasServerFunctionGuard,
   beginPageRender,
   beginServerFunction,
   getRequestContext,
@@ -735,7 +736,11 @@ async function runPostedFunction(c: Context): Promise<FunctionRun | Response> {
     // reads it — so this is the earliest the same guard the direct call passed can be asked. Its id is the
     // one the reference itself carries, where it carries one; nothing is inferred from the fields.
     const named = (decodedAction as { $$id?: unknown }).$$id;
-    await authorizeServerFunction(c, 'form-action', typeof named === 'string' ? named : undefined);
+    if (typeof named === 'string') await authorizeServerFunction(c, 'form-action', named);
+    // React's bound server references all carry their id, on the React this is tested against. If one ever
+    // does not, a guard that authorizes per function has nothing to match — so with a guard installed the
+    // function is not run, rather than run on the strength of a rule that never saw its name.
+    else if (hasServerFunctionGuard()) return plainRefusal(c, 'Forbidden: this form does not name a server function that could be authorized.', 403);
 
     let result: unknown;
     try {
