@@ -7,6 +7,7 @@ import path from 'node:path';
 import { load } from './lib/results.mjs';
 import { RESULTS_DIR, ROUTES, TARGETS } from './lib/targets.mjs';
 import { ms, bytes, num } from './lib/stats.mjs';
+import { browserSection, gridSection, matrixSection } from './lib/report-environments.mjs';
 
 const results = await load();
 const md = render(results);
@@ -31,7 +32,7 @@ function render(r) {
         ['Machine', `${r.env.cpu} · ${r.env.cores} cores · ${r.env.totalMemGB} GB`],
         ['Platform', r.env.platform],
         ['Node', r.env.node],
-        ['CI', r.env.ci ? 'yes' : 'no — laptop numbers, treat spreads under ~10% as noise'],
+        ['CI', r.env.ci ? 'yes' : 'no — one local machine; treat spreads under ~10% as noise'],
       ],
     ),
   );
@@ -51,10 +52,13 @@ function render(r) {
   );
   lines.push('');
 
+  lines.push(...gridSection(r.sections, ids, labels));
   if (r.sections.payload) lines.push(...payloadSection(r.sections.payload, ids, labels));
   if (r.sections.build) lines.push(...buildSection(r.sections.build, ids, labels));
   if (r.sections.coldstart) lines.push(...coldstartSection(r.sections.coldstart, ids, labels));
   if (r.sections.load) lines.push(...loadSection(r.sections.load, ids, labels));
+  if (r.sections.matrix) lines.push(...matrixSection(r.sections.matrix, ids, labels));
+  if (r.sections.browser) lines.push(...browserSection(r.sections.browser, ids, labels));
   if (r.sections.devstart) lines.push(...devstartSection(r.sections.devstart, ids, labels));
   if (r.sections.footprint) lines.push(...footprintSection(r.sections.footprint, ids, labels));
 
@@ -320,7 +324,8 @@ function footprintSection(section, ids, labels) {
 }
 
 function sectionHas(section, id) {
-  return Boolean(section?.[id] ?? section?.targets?.[id]);
+  const nested = Object.values(section?.environments ?? section?.profiles ?? {}).some((entry) => entry.targets?.[id]);
+  return Boolean(section?.[id] ?? section?.targets?.[id]) || nested;
 }
 
 function table(header, rows) {

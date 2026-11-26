@@ -130,10 +130,10 @@ all. Isolates the HTTP layer: router lookup, middleware, response construction.
 - **Nested layouts / route groups.** They differ too much between the three to compare fairly.
 - **Suspense boundaries with delayed data.** Any delay dominates the measurement; the streaming
   behaviour is asserted by each framework's own test suite, not here.
-- **Client-side navigation.** Worth measuring eventually, but the three have such different
-  navigation models (flight payload vs flight payload vs client router + loader) that measuring it
-  well means three different protocols, and measuring it badly is worse than not measuring it. Not
-  in this version.
+- **Client-side navigation, as a protocol.** The three have different navigation models (flight payload,
+  flight payload, client router + loader), and no request-level comparison of them is fair. What
+  `browser.mjs` measures instead is what all three have in common: a click on the same nav link, and the
+  wait until the next page's content is on screen.
 - **Real serverless cold start.** `coldstart.mjs` measures process spawn to first response on the
   local machine, which isolates the framework's own startup cost. Platform container overhead is a
   property of the platform, not of these three.

@@ -7,16 +7,23 @@
   "scripts": {
     "//": "Script names must not collide with a pnpm built-in command: `pnpm --filter <pkg> <name>` resolves the built-in first, and --filter then fails as 'Unknown option: recursive'. `setup` and `clean` are both taken, hence the :apps suffixes.",
     "setup:apps": "node harness/install.mjs",
+    "setup:runtimes": "npm install --no-audit --no-fund --prefix .runtimes node@24",
     "bench": "node harness/run.mjs",
     "bench:build": "node harness/build.mjs",
     "bench:payload": "node harness/payload.mjs",
     "bench:load": "node harness/load.mjs",
+    "bench:matrix": "node harness/matrix.mjs",
+    "bench:browser": "node harness/browser.mjs",
     "bench:coldstart": "node harness/coldstart.mjs",
     "bench:devstart": "node harness/devstart.mjs",
     "bench:footprint": "node harness/footprint.mjs",
+    "test": "node --test \"test/*.test.mjs\"",
     "report": "node harness/report.mjs",
     "site:publish": "node harness/publish-site.mjs",
     "fixtures": "node fixtures/generate.mjs",
     "clean:apps": "node harness/clean.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.65.1"
   }
 }

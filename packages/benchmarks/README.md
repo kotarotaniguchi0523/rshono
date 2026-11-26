@@ -31,14 +31,80 @@ likely to be React version skew as framework design.
 So throughput is in here as a **floor check** — proof that nothing is pathological — and the metrics
 that carry weight are the ones a framework actually decides:
 
-| Metric                               | Runner          | Why it means something                                                                                                           |
-| ------------------------------------ | --------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| Initial-load payload per route       | `payload.mjs`   | What the framework commits the browser to before the route is usable. The one number a minimalist framework should be judged on. |
-| Cold + warm build                    | `build.mjs`     | Vite 8 (Rolldown) with the RSC plugin vs Turbopack vs Vite, on identical input.                                                  |
-| Dev server startup                   | `devstart.mjs`  | Paid many times a day.                                                                                                           |
-| Cold start + server bundle size      | `coldstart.mjs` | What a scale-from-zero request pays.                                                                                             |
-| Throughput, latency, memory          | `load.mjs`      | Floor check, and `/api/health` isolates the HTTP layer with React off the path.                                                  |
-| Production install + app source size | `footprint.mjs` | What the dependency costs before a request is served.                                                                            |
+| Metric                               | Runner          | Why it means something                                                                                                            |
+| ------------------------------------ | --------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| Initial-load payload per route       | `payload.mjs`   | What the framework commits the browser to before the route is usable. The one number a minimalist framework should be judged on.  |
+| Cold + warm build                    | `build.mjs`     | Vite 8 (Rolldown) with the RSC plugin vs Turbopack vs Vite, on identical input.                                                   |
+| Dev server startup                   | `devstart.mjs`  | Paid many times a day.                                                                                                            |
+| Cold start + server bundle size      | `coldstart.mjs` | What a scale-from-zero request pays.                                                                                              |
+| Throughput, latency, memory          | `load.mjs`      | Floor check, and `/api/health` isolates the HTTP layer with React off the path.                                                   |
+| Production install + app source size | `footprint.mjs` | What the dependency costs before a request is served.                                                                             |
+| One request, unloaded                | `matrix.mjs`    | What an answer costs with no queue — the floor under every latency figure.                                                        |
+| Concurrency sweep, CPU per request   | `matrix.mjs`    | How the tail grows with load, and what each answer cost in CPU — which, unlike requests per second, survives a change of machine. |
+| Paint, blocking, script, hydration   | `browser.mjs`   | What the visitor's device pays for the bytes `payload.mjs` counts.                                                                |
+| Interaction, mutation, navigation    | `browser.mjs`   | The page in use, not just arriving: a click, a keystroke, a server function, a link.                                              |
+
+## More than one machine
+
+A number measured once, on one idle machine, is a fact about that machine. `matrix.mjs` and `browser.mjs`
+measure the same three builds under several conditions, and the report gives each its own tables — so a
+result can be seen to hold, or to flip.
+
+**Server environments** (`matrix.mjs`, `--env=id,id` to choose):
+
+| id           | What the server is given                                                                                        |
+| ------------ | --------------------------------------------------------------------------------------------------------------- |
+| `roomy`      | Every core, a 256 MB old-space budget. The long-standing default.                                               |
+| `one-core`   | One core, by `taskset`, with the load driver kept off it. The shape of a small container.                       |
+| `tight-heap` | One core and 128 MB: where allocating more per request is paid for in collections.                              |
+| `node-other` | Another Node line — installed by `setup:runtimes` — running the build the harness's own Node made.              |
+| `bun`        | `bun --bun run start`: the same start script, on Bun. No heap flag exists there, so its memory is not compared. |
+
+Pinning needs Linux; a runtime needs to be installed. An environment that cannot be set up is skipped and
+the report says why — it is never silently replaced by the default.
+
+**Browser profiles** (`browser.mjs`, `--profile=id,id`), applied through the DevTools protocol with
+Lighthouse's figures:
+
+| id           | CPU       | Network                                          |
+| ------------ | --------- | ------------------------------------------------ |
+| `desktop`    | as is     | as is                                            |
+| `mobile-mid` | 4× slower | Slow 4G — 1.6 Mbps down, 750 kbps up, 150 ms RTT |
+| `mobile-low` | 6× slower | 3G — 700 kbps each way, 300 ms RTT               |
+
+Only the browser is throttled. The server is the same unthrottled process in every profile, so what moves
+is what the framework asks the device to do.
+
+The browser stage reaches every target through one proxy the harness starts (`harness/lib/edge.mjs`),
+which asks the server for an uncompressed response and gzips it — level 6, flushed per chunk — the same
+way for all three. Without it the comparison is decided by a default: `vite preview`, which serves
+TanStack Start, gzips static files for any client that accepts them, and the other two send theirs raw,
+which over a throttled link is a threefold difference in bytes that says nothing about the frameworks.
+
+## How a timing is reported
+
+Two conventions are borrowed, because both exist to stop a table being read for more than it holds.
+
+**A timing is a distribution** — after MoonBit's `moon bench`. Where a thing is fast enough to repeat, it is
+run in batches whose size is doubled until one batch takes at least 100 ms, and each batch's mean is one
+sample; the report prints `mean ± σ (min … max) · runs × batch`. A 0.3 ms request is therefore timed over
+hundreds of iterations and a 12 ms one over a handful, and neither is one unlucky scheduling slice. The
+raw samples are in `results/latest.json`, with the same summary fields `@bench.Summary` carries (`runs`,
+`batch_size`, `mean`, `median`, `std_dev`, `median_abs_dev`, `quartiles`, `iqr`, …).
+
+**A comparison is a ratio with an interval** — the top of the report is a grid, after the one Octane
+publishes: every measurement as a multiple of one target's, and a geometric mean per group, which is the
+mean under which twice as slow here and twice as fast there comes out even. Three things are done that a
+grid of bare ratios does not do:
+
+- each ratio from sampled data carries a 95% bootstrap interval, and one whose interval includes 1 is
+  marked `≈` — it is a tie, whatever the point estimate says;
+- size and time are separate tables with separate means. A framework that ships more and runs faster has
+  made a trade, and a single number would hide which;
+- the reference is rsvhono because this is its repository. The grid says so above the first row: these
+  numbers are measured by a project that maintains one of the three.
+
+A row counts toward a mean only when every target has a figure in it, so the means are over the same rows.
 
 ## The rules
 
@@ -113,11 +179,20 @@ These are limitations of the comparison, not of the frameworks. Read them before
 6. **rsvhono is built on a pre-1.0 `@vitejs/plugin-rsc`.** Its minors are breaking by convention and it
    moves under the framework, which is why this is CI infrastructure to re-run per release rather than a
    number to publish once.
-7. **Not measured:** client-side navigation (three different protocols; measuring it badly is worse
-   than not measuring it), HMR round-trip (needs a browser asserting the patch arrived), real
-   serverless cold start (platform overhead is a property of the platform), progressive enhancement
-   (rsvhono and Next have it, TanStack has no equivalent, so the shared client component deliberately
-   doesn't use it).
+7. **Soft navigation is measured as the visitor sees it, not as a protocol.** Click a link, wait for the
+   next page's content: time, bytes and requests. The three get there differently — a flight payload, a
+   flight payload, a client router and its loader — and Next additionally prefetches a link when it
+   scrolls into view, so at the click it has little left to fetch: its navigation row is fast and its
+   bytes were already counted in the page's own row. That is a real behaviour and is left as it is.
+8. **A mutation's bytes include what the framework sends back.** rsvhono's reply to a server function
+   carries the re-rendered page by default (`setServerFunctionRefresh('explicit')` turns that off); the
+   other two return the function's result alone. The app uses each framework's default.
+9. **Throttled profiles are emulation.** DevTools slows the main thread by a factor and shapes the
+   network; it does not model a phone's memory, GPU or thermal behaviour.
+10. **Not measured:** HMR round-trip (needs a browser asserting the patch arrived), real
+    serverless cold start (platform overhead is a property of the platform), progressive enhancement
+    (rsvhono and Next have it, TanStack has no equivalent, so the shared client component deliberately
+    doesn't use it).
 
 ## Runners
 

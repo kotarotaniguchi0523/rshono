@@ -20,6 +20,8 @@ const stages = [
   ['payload', 'payload.mjs'],
   ['coldstart', 'coldstart.mjs'],
   ['load', 'load.mjs'],
+  ['matrix', 'matrix.mjs'],
+  ['browser', 'browser.mjs'],
   ['devstart', 'devstart.mjs'],
   ...(hasFlag('footprint') ? [['footprint', 'footprint.mjs']] : []),
 ];

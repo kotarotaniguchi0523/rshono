@@ -17,3 +17,4 @@ results/latest.json
 results/latest.md
 # Laptop snapshots are not comparable to each other or to anything else — only CI runs are kept.
 results/*-local.json
+.runtimes/
