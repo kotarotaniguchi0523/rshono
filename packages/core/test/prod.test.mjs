@@ -1003,8 +1003,8 @@ test('an action request that fails before the action runs is refused outright, n
 //
 // Reached by breaking a copy of the build the way a partial deploy does — the manifest entry for one action
 // is pointed at a module id the bundle does not hold, which is what React's own "older or newer deployment"
-// message is about. It cannot be done with a fixture: Rspack concatenates every `'use server'` module in the
-// app into one server module, so an action module that throws as it evaluates takes *all* of them with it.
+// message is about. A copy is broken rather than a fixture written because the fault is in the *deployment*,
+// not in any source file: every module here is fine, and one of them is simply not where the manifest says.
 //
 // Both action shapes, because the split that gets this right was made twice. The client-initiated branch has
 // had it since F3; the form branch answered the very same fault with the silent 400 below — `decodeAction`

@@ -23,8 +23,8 @@ taken too. Hence `setup:apps` and `clean:apps`.
 ## Why not a throughput shootout
 
 All three render through the same React and stream through the same `react-dom`. rsvhono's render path
-is a thin shell over `react-server-dom-rspack` and `react-dom/server` — the same two packages Next
-drives, and the same `react-dom` TanStack Start drives. A requests-per-second headline over that
+is a thin shell over `react-server-dom-webpack` (through `@vitejs/plugin-rsc`) and `react-dom/server` —
+the React server runtime and renderer Next drives its own copies of, and the same `react-dom` TanStack Start drives. A requests-per-second headline over that
 shared machinery mostly measures whose HTTP layer is in front of it, and any gap it does show is as
 likely to be React version skew as framework design.
 
@@ -34,7 +34,7 @@ that carry weight are the ones a framework actually decides:
 | Metric                               | Runner          | Why it means something                                                                                                           |
 | ------------------------------------ | --------------- | -------------------------------------------------------------------------------------------------------------------------------- |
 | Initial-load payload per route       | `payload.mjs`   | What the framework commits the browser to before the route is usable. The one number a minimalist framework should be judged on. |
-| Cold + warm build                    | `build.mjs`     | Rspack vs Turbopack vs Vite/Rolldown, on identical input.                                                                        |
+| Cold + warm build                    | `build.mjs`     | Vite 8 (Rolldown) with the RSC plugin vs Turbopack vs Vite, on identical input.                                                  |
 | Dev server startup                   | `devstart.mjs`  | Paid many times a day.                                                                                                           |
 | Cold start + server bundle size      | `coldstart.mjs` | What a scale-from-zero request pays.                                                                                             |
 | Throughput, latency, memory          | `load.mjs`      | Floor check, and `/api/health` isolates the HTTP layer with React off the path.                                                  |
@@ -106,11 +106,12 @@ These are limitations of the comparison, not of the frameworks. Read them before
    users would be bundled into the client graph and the payload number would measure a mistake. Its
    loader data is then serialized into the document for the client router to hydrate, which an RSC
    framework does not pay. That is an architectural difference, not a defect.
-5. **rsvhono pays a production-install cost the other two don't.** `@rspack/core` sits in
-   `@rsvhono/core`'s `dependencies` rather than `devDependencies` — the bundler is what the CLI it ships
-   builds with — so it lands in a production install. `footprint.mjs` measures it.
-6. **rsvhono is built on experimental `rspack.experiments.rsc` and a pre-1.0 `react-server-dom-rspack`.**
-   Those move under it, which is why this is CI infrastructure to re-run per release rather than a
+5. **rsvhono pays a production-install cost the other two don't.** `vite`, `@vitejs/plugin-rsc` and
+   `@vitejs/plugin-react` sit in `@rsvhono/core`'s `dependencies` rather than `devDependencies` — the
+   bundler is what the CLI it ships builds with — so they land in a production install. `footprint.mjs`
+   measures it.
+6. **rsvhono is built on a pre-1.0 `@vitejs/plugin-rsc`.** Its minors are breaking by convention and it
+   moves under the framework, which is why this is CI infrastructure to re-run per release rather than a
    number to publish once.
 7. **Not measured:** client-side navigation (three different protocols; measuring it badly is worse
    than not measuring it), HMR round-trip (needs a browser asserting the patch arrived), real
@@ -156,7 +157,7 @@ showing the previous run, which is why the published file carries the date it wa
 
 ### Why the apps are not workspace members
 
-The root `pnpm-workspace.yaml` pins React, `react-server-dom-rspack` and `@rspack/core` with `overrides`. Forcing
+The root `pnpm-workspace.yaml` pins React and `react-server-dom-webpack` with `overrides`. Forcing
 those onto Next and TanStack Start would benchmark a configuration nobody ships, so all three apps are
 installed with plain `npm` into isolated `node_modules` — which is also what makes the footprint
 numbers mean anything.

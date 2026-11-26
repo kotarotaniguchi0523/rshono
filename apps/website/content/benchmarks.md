@@ -6,6 +6,11 @@ description: One app built three ways â€” rsvhono, Next.js and TanStack Start â€
 _Generated from `packages/benchmarks` on 2026-09-03 (build, payload, coldstart, load, devstart). One run, one machine. Regenerate with
 `pnpm --filter @rsvhono/benchmarks bench` and `pnpm --filter @rsvhono/benchmarks site:publish`._
 
+> **These numbers predate the move to Vite.** They were measured on `1.0.0-rc.20`, when rsvhono was built
+> with Rspack (the versions table below says so). The framework is now built with Vite 8 and
+> `@vitejs/plugin-rsc`; build time, dev startup, bundle sizes and install footprint in particular should be
+> read as the old bundler's until this page is regenerated.
+
 ## Environment
 
 | Property | Value                                                  |
