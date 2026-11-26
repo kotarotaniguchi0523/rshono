@@ -1,5 +1,5 @@
 /**
- * Runs every section in order and snapshots the result. Order matters: build goes first because the other three
+ * Runs every section in order and snapshots the result. Order matters: build goes first because the other stages
  * need artifacts on disk, and it is also the runner most sensitive to a busy machine.
  */
 import { copyFile } from 'node:fs/promises';

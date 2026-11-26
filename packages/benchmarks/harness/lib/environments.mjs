@@ -112,7 +112,7 @@ SERVER_ENVIRONMENTS.push(
  * - **mid-tier mobile** — CPU 4× slower, "Slow 4G" (1.6 Mbps down, 750 kbps up, 150 ms round trip).
  * - **low-end mobile** — CPU 6× slower, "3G" (700 kbps down and up, 300 ms round trip).
  *
- * CPU throttling slows the *browser's* main thread, not the server; the server runs unthrottled in all three,
+ * CPU throttling slows the *browser's* main thread, not the server; the server runs unthrottled in all four,
  * so what moves is what the framework asks the device to do.
  */
 export const BROWSER_PROFILES = [

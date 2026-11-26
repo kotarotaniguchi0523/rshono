@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Framework-cost benchmark: rsvhono vs Next.js vs TanStack Start",
+  "description": "Framework-cost benchmark: rsvhono vs Next.js vs TanStack Start vs Waku",
   "scripts": {
     "//": "Script names must not collide with a pnpm built-in command: `pnpm --filter <pkg> <name>` resolves the built-in first, and --filter then fails as 'Unknown option: recursive'. `setup` and `clean` are both taken, hence the :apps suffixes.",
     "setup:apps": "node harness/install.mjs",

@@ -37,7 +37,7 @@ for (const target of targets) {
     if (!artifacts) artifacts = await measureArtifacts(target);
 
     // Warm: same caches, one changed file. A rebuild with nothing changed measures cache lookup,
-    // not compilation, and every one of these three would win it.
+    // not compilation, and every one of these four would win it.
     const touched = await touch(target);
     const warmRun = await run(...target.build, { cwd: target.dir, label: `${target.id} warm build` });
     await touched.restore();
@@ -86,7 +86,7 @@ async function measureArtifacts(target) {
 /**
  * Appends a comment to the app's own marker file and hands back a restore. Every app carries
  * `src/touch-marker.ts` (or the framework's equivalent) imported by the interactive route, so the
- * edit is real work in all three graphs rather than a no-op the watcher can shortcut.
+ * edit is real work in all four graphs rather than a no-op the watcher can shortcut.
  */
 async function touch(target) {
   const rel = 'src/touch-marker.ts';

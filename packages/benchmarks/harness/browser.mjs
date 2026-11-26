@@ -223,7 +223,7 @@ for (const target of targets) {
     continue;
   }
   // Every target behind the same compressing proxy (`lib/edge.mjs`): the bytes on the wire are gzip, applied
-  // by the harness, for all three.
+  // by the harness, for all four.
   const edge = await startEdge(server.base, target.port + 1000);
   try {
     for (const profile of profiles) {

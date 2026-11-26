@@ -46,12 +46,12 @@ export async function environment() {
 }
 
 /**
- * The single most important thing to publish: React version skew is unavoidable across these three
+ * The single most important thing to publish: React version skew is unavoidable across these four
  * and hiding it is what makes a framework-authored benchmark look dishonest.
  */
 async function appVersions() {
   const out = {};
-  for (const id of ['rsvhono', 'next', 'tanstack-start']) {
+  for (const id of Object.keys(PROBE)) {
     const dir = path.join(ROOT, 'apps', id);
     const lock = path.join(dir, 'node_modules');
     if (!existsSync(lock)) {
@@ -67,6 +67,7 @@ const PROBE = {
   rsvhono: ['react', 'react-dom', '@rsvhono/core', 'hono', 'vite', '@vitejs/plugin-rsc', 'react-server-dom-webpack'],
   next: ['react', 'react-dom', 'next'],
   'tanstack-start': ['react', 'react-dom', '@tanstack/react-start', '@tanstack/react-router', 'vite'],
+  waku: ['react', 'react-dom', 'waku', 'hono', 'vite', '@vitejs/plugin-rsc', 'react-server-dom-webpack'],
 };
 
 async function readVersions(nodeModules, names = []) {

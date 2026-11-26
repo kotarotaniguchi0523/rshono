@@ -284,7 +284,7 @@ function Measured() {
       <div className="mb-6 flex flex-wrap items-baseline justify-between gap-3">
         <h2 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-white">Measured, not claimed</h2>
         <p className="text-sm text-zinc-500 dark:text-zinc-400">
-          One app built three ways, on {summary.machine}. <a href="/benchmarks">Every metric →</a>
+          One app built four ways, on {summary.machine}. <a href="/benchmarks">Every metric →</a>
         </p>
       </div>
 

@@ -4,7 +4,7 @@ The contract every benchmark app implements. A number is only comparable if the 
 is the same on both sides, so this file is the authority: if an app deviates from it, the app is
 wrong, not the spec.
 
-Three implementations live in `../apps/`: `rsvhono`, `next`, `tanstack-start`.
+Four implementations live in `../apps/`: `rsvhono`, `next`, `tanstack-start`, `waku`.
 
 ## Rules
 
@@ -15,25 +15,25 @@ Three implementations live in `../apps/`: `rsvhono`, `next`, `tanstack-start`.
    structure may differ where a framework forces it (root elements, hydration wrappers); content
    must not. `harness/payload.mjs` asserts the text-content checks listed per route below.
 3. **Same client-component count.** Where the spec says a component is interactive, it is interactive
-   in all three apps — same state, same handlers. Nobody gets to win a payload metric by shipping
+   in all four apps — same state, same handlers. Nobody gets to win a payload metric by shipping
    less behaviour.
 4. **No compression at the app layer.** Every app runs with its own compressor off
    (`compress: false`, `compress: false`, no plugin respectively). The harness measures
    uncompressed transfer and applies gzip + brotli itself, identically, so the numbers reflect the
-   bytes and not three different compressor settings.
+   bytes and not four different compressor settings.
 5. **No caching beyond what the route explicitly declares.** `/ssr` must be genuinely dynamic in all
-   three — re-rendered per request. `/` must be prerendered at build time in all three.
+   three — re-rendered per request. `/` must be prerendered at build time in all four.
 6. **Single process, no clustering.** Production mode, one Node process per app, default GC flags.
 7. **No images, no web fonts, no third-party anything.** One stylesheet, inline SVG only. Network
    waterfalls are not what is being measured.
-8. **Server components on both dynamic routes, in all three.** `/ssr` and `/interactive` put React's
+8. **Server components on both dynamic routes, in all four.** `/ssr` and `/interactive` put React's
    flight encode/decode round trip on the request path everywhere, so the throughput rows compare
-   three implementations of one architecture rather than two architectures. See below for the part
+   four implementations of one architecture rather than two architectures. See below for the part
    this does _not_ equalise.
 
 ## Server components
 
-rsvhono and Next render the **whole document** as a server component tree: layout, route and every
+rsvhono, Next and Waku render the **whole document** as a server component tree: layout, route and every
 host element in it are encoded to a flight payload and decoded again on each request.
 
 TanStack Start's RSC support is **opt-in per boundary** — the router, root route and shell stay
@@ -74,6 +74,7 @@ time** and served from disk.
 - rsvhono: `render: 'static'`
 - Next: default (statically rendered at build; no dynamic APIs read)
 - TanStack Start: prerendered via the `prerender` option
+- Waku: `getConfig` returning `render: 'static'` (root, layout and page)
 
 Contains **no client component**. This is the floor measurement: how much JavaScript does the
 framework ship for a page whose content needs none?
@@ -91,6 +92,8 @@ Must be re-rendered per request:
 - Next: `export const dynamic = 'force-dynamic'`
 - TanStack Start: excluded from `prerender`; the table is a server component rendered through
   `renderServerComponent` in the route's `createServerFn` (see **Server components**, below)
+- Waku: `render: 'dynamic'`, and reads the request (`getRequest`) like the others. Its root and layout stay
+  static — that is how Waku composes a page, and the page is what the spec requires to be per-request
 
 Contains **no client component**. Isolates server render cost + the streaming path.
 
@@ -103,14 +106,14 @@ A server-rendered shell that passes fixture data into three client components:
 1. **Counter** — `useState`, a button that increments. The minimal hydration unit.
 2. **Filter** — receives all 100 users as a prop, `useState` for a query string, filters the list
    client-side and renders matches. Exercises a non-trivial serialized payload crossing the boundary.
-3. **SignupForm** — a form calling a server function (rsvhono: `'use server'` action; Next: `'use server'`
-   action; TanStack Start: `createServerFn`), rendering the returned result. Exercises the
+3. **SignupForm** — a form calling a server function (rsvhono, Next and Waku: a `'use server'` function;
+   TanStack Start: `createServerFn`), rendering the returned result. Exercises the
    mutation path.
 
 The server function validates `{ name, email }` and returns `{ ok: true, id }` or
 `{ ok: false, error }`. It does not mutate the fixture — a benchmark run must be idempotent.
 
-The shell is a server component in all three. TanStack Start builds it with
+The shell is a server component in all four. TanStack Start builds it with
 `createCompositeComponent` and slots the three in as **component props** — the only one of its three
 slot kinds through which the server can hand data across the boundary, which `Filter` needs.
 
@@ -124,16 +127,17 @@ all. Isolates the HTTP layer: router lookup, middleware, response construction.
 - rsvhono: `{ type: 'endpoint' }` route
 - Next: `app/api/health/route.ts`
 - TanStack Start: a server route
+- Waku: `src/pages/_api/api/health.ts` exporting `GET`
 
 ## What is deliberately not in here
 
-- **Nested layouts / route groups.** They differ too much between the three to compare fairly.
+- **Nested layouts / route groups.** They differ too much between the four to compare fairly.
 - **Suspense boundaries with delayed data.** Any delay dominates the measurement; the streaming
   behaviour is asserted by each framework's own test suite, not here.
-- **Client-side navigation, as a protocol.** The three have different navigation models (flight payload,
-  flight payload, client router + loader), and no request-level comparison of them is fair. What
-  `browser.mjs` measures instead is what all three have in common: a click on the same nav link, and the
+- **Client-side navigation, as a protocol.** The four have different navigation models (flight payload,
+  flight payload, client router + loader, flight payload per slice), and no request-level comparison of them is fair. What
+  `browser.mjs` measures instead is what all four have in common: a click on the same nav link, and the
   wait until the next page's content is on screen.
 - **Real serverless cold start.** `coldstart.mjs` measures process spawn to first response on the
   local machine, which isolates the framework's own startup cost. Platform container overhead is a
-  property of the platform, not of these three.
+  property of the platform, not of these four.

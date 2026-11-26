@@ -29,7 +29,7 @@ export function parseDocument(html) {
     if (a.src) {
       external.push({ url: a.src, as: 'script', hint: 'script' });
     } else if (m[2].trim()) {
-      // Where the inlined flight payload lives in all three frameworks. It ships on every request and is not a
+      // Where the inlined flight payload lives in all four frameworks. It ships on every request and is not a
       // file, so counting only external assets would hide it entirely.
       inlineScriptBytes += Buffer.byteLength(m[2], 'utf8');
       inlineScripts += 1;

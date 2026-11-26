@@ -43,7 +43,7 @@ const stages = report?.run?.stages?.join(', ') ?? 'a partial run';
 
 const out = `---
 title: Benchmarks
-description: One app built three ways — rsvhono, Next.js and TanStack Start — measured on payload bytes, build time, cold start and install size.
+description: One app built four ways — rsvhono, Next.js, TanStack Start and Waku — measured on payload bytes, build time, cold start and install size.
 ---
 
 _Generated from \`packages/benchmarks\` on ${measuredOn} (${stages}). One run, one machine. Regenerate with
@@ -172,7 +172,7 @@ const METRICS = [
    * Memory, and only the three rows that mean something.
    *
    * `largest` rather than the tree total on both RSS rows: the tree sums whatever `npm run start` left running
-   * and double-counts shared pages, while the largest process is the server itself in all three apps.
+   * and double-counts shared pages, while the largest process is the server itself in all four apps.
    *
    * `churn` is the row to trust: RSS after a fixed-duration load is a high-water mark including uncollected
    * garbage, so the server that answered the most requests grows the largest heap. Dividing by requests removes

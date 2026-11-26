@@ -1,10 +1,10 @@
 # @rsvhono/benchmarks
 
-One application, implemented three times — [`@rsvhono/core`](../core), Next.js App Router, TanStack
-Start — and measured on what the framework costs rather than on who renders React faster.
+One application, implemented four times — [`@rsvhono/core`](../core), Next.js App Router, TanStack
+Start, Waku — and measured on what the framework costs rather than on who renders React faster.
 
 ```bash
-pnpm --filter @rsvhono/benchmarks setup:apps   # build + pack core, install all three apps
+pnpm --filter @rsvhono/benchmarks setup:apps   # build + pack core, install all four apps
 pnpm --filter @rsvhono/benchmarks bench        # everything, then write results/latest.md
 ```
 
@@ -22,7 +22,7 @@ taken too. Hence `setup:apps` and `clean:apps`.
 
 ## Why not a throughput shootout
 
-All three render through the same React and stream through the same `react-dom`. rsvhono's render path
+All four render through the same React and stream through the same `react-dom`. rsvhono's render path
 is a thin shell over `react-server-dom-webpack` (through `@vitejs/plugin-rsc`) and `react-dom/server` —
 the React server runtime and renderer Next drives its own copies of, and the same `react-dom` TanStack Start drives. A requests-per-second headline over that
 shared machinery mostly measures whose HTTP layer is in front of it, and any gap it does show is as
@@ -47,7 +47,7 @@ that carry weight are the ones a framework actually decides:
 ## More than one machine
 
 A number measured once, on one idle machine, is a fact about that machine. `matrix.mjs` and `browser.mjs`
-measure the same three builds under several conditions, and the report gives each its own tables — so a
+measure the same four builds under several conditions, and the report gives each its own tables — so a
 result can be seen to hold, or to flip.
 
 **Server environments** (`matrix.mjs`, `--env=id,id` to choose):
@@ -77,7 +77,7 @@ is what the framework asks the device to do.
 
 The browser stage reaches every target through one proxy the harness starts (`harness/lib/edge.mjs`),
 which asks the server for an uncompressed response and gzips it — level 6, flushed per chunk — the same
-way for all three. Without it the comparison is decided by a default: `vite preview`, which serves
+way for all four. Without it the comparison is decided by a default: `vite preview`, which serves
 TanStack Start, gzips static files for any client that accepts them, and the other two send theirs raw,
 which over a throttled link is a threefold difference in bytes that says nothing about the frameworks.
 
@@ -102,13 +102,13 @@ grid of bare ratios does not do:
 - size and time are separate tables with separate means. A framework that ships more and runs faster has
   made a trade, and a single number would hide which;
 - the reference is rsvhono because this is its repository. The grid says so above the first row: these
-  numbers are measured by a project that maintains one of the three.
+  numbers are measured by a project that maintains one of the four.
 
 A row counts toward a mean only when every target has a figure in it, so the means are over the same rows.
 
 ## The rules
 
-[`spec/APP_SPEC.md`](spec/APP_SPEC.md) is the authority on what the three apps must do. The parts that
+[`spec/APP_SPEC.md`](spec/APP_SPEC.md) is the authority on what the four apps must do. The parts that
 decide whether the numbers are honest:
 
 - **Same data, no I/O.** `fixtures/data.json` — 100 users, committed, deterministic, parsed once at
@@ -117,13 +117,13 @@ decide whether the numbers are honest:
   target `⚠` when its render doesn't contain what the spec says it should. A byte count for a route
   that quietly 404'd or rendered an empty list is worse than no number.
 - **Same client-component count.** Nobody wins a payload metric by shipping less behaviour.
-- **No app-level compression.** All three run with their compressor off; the harness applies gzip 9
-  and brotli 11 itself, identically, so the table reflects bytes rather than three compressor configs.
-- **The same old-space budget.** `load.mjs` starts all three with `--max-old-space-size=256`
+- **No app-level compression.** All four run with their compressor off; the harness applies gzip 9
+  and brotli 11 itself, identically, so the table reflects bytes rather than four compressor configs.
+- **The same old-space budget.** `load.mjs` starts all four with `--max-old-space-size=256`
   (`--heap=N`, or `--heap=0` to opt out). V8 grows the old generation against the allocation rate, so
   left at the default the after-load RSS measures throughput rather than memory: the fastest server
   churns the most garbage in the fixed eight seconds and so ends up looking the worst.
-- **`/` prerendered and `/ssr` genuinely dynamic in all three.** Both are easy to get wrong in a
+- **`/` prerendered and `/ssr` genuinely dynamic in all four.** Both are easy to get wrong in a
   direction that flatters somebody — Next will happily prerender `/ssr` unless told not to, and
   TanStack's prerender crawler follows the nav links off `/` unless `crawlLinks: false` stops it.
 
@@ -159,7 +159,7 @@ These are limitations of the comparison, not of the frameworks. Read them before
    build and throughput numbers more than most of the differences being measured. `run.mjs` prints a
    warning on macOS outside CI. Payload and size numbers are exact anywhere — they're bytes on disk.
 2. **React version skew is real and is reported, not hidden.** Next vendors its own React copy under
-   `next/dist/compiled`, so the three do not run identical renderers and cannot be made to. The
+   `next/dist/compiled`, so the four do not run identical renderers and cannot be made to. The
    version table in every report exists so a few percent on a render path is read as what it probably
    is. This is the single most likely reason a render-path difference here is not about the framework.
 3. **TanStack Start is served by `vite preview`.** That is the official way to run its production
@@ -179,17 +179,22 @@ These are limitations of the comparison, not of the frameworks. Read them before
 6. **rsvhono is built on a pre-1.0 `@vitejs/plugin-rsc`.** Its minors are breaking by convention and it
    moves under the framework, which is why this is CI infrastructure to re-run per release rather than a
    number to publish once.
-7. **Soft navigation is measured as the visitor sees it, not as a protocol.** Click a link, wait for the
-   next page's content: time, bytes and requests. The three get there differently — a flight payload, a
-   flight payload, a client router and its loader — and Next additionally prefetches a link when it
+7. **Waku and rsvhono are the two closest relatives here**, and the row to read with that in mind: both
+   are built on Vite with `@vitejs/plugin-rsc` and serve through Hono, and both are pinned to the same
+   React. Where the two differ it is the framework's own runtime and routing, with the bundler, the RSC
+   plumbing and the HTTP layer held equal — which is a cleaner comparison than either makes with Next.
+   Waku is at a release candidate (`1.0.0-rc.5`), as rsvhono is.
+8. **Soft navigation is measured as the visitor sees it, not as a protocol.** Click a link, wait for the
+   next page's content: time, bytes and requests. The four get there differently — a flight payload, a flight payload, a client router and its loader,
+   and a flight payload again — and Next additionally prefetches a link when it
    scrolls into view, so at the click it has little left to fetch: its navigation row is fast and its
    bytes were already counted in the page's own row. That is a real behaviour and is left as it is.
-8. **A mutation's bytes include what the framework sends back.** rsvhono's reply to a server function
+9. **A mutation's bytes include what the framework sends back.** rsvhono's reply to a server function
    carries the re-rendered page by default (`setServerFunctionRefresh('explicit')` turns that off); the
    other two return the function's result alone. The app uses each framework's default.
-9. **Throttled profiles are emulation.** DevTools slows the main thread by a factor and shapes the
-   network; it does not model a phone's memory, GPU or thermal behaviour.
-10. **Not measured:** HMR round-trip (needs a browser asserting the patch arrived), real
+10. **Throttled profiles are emulation.** DevTools slows the main thread by a factor and shapes the
+    network; it does not model a phone's memory, GPU or thermal behaviour.
+11. **Not measured:** HMR round-trip (needs a browser asserting the patch arrived), real
     serverless cold start (platform overhead is a property of the platform), progressive enhancement
     (rsvhono and Next have it, TanStack has no equivalent, so the shared client component deliberately
     doesn't use it).
@@ -201,14 +206,14 @@ Each writes its own section into `results/latest.json` and can run alone. Pass t
 
 | Command                | Notes                                                                                                                              |
 | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `pnpm setup:apps`      | Builds `@rsvhono/core`, packs it to a tarball, installs all three apps. Run after core changes.                                    |
+| `pnpm setup:apps`      | Builds `@rsvhono/core`, packs it to a tarball, installs all four apps. Run after core changes.                                     |
 | `pnpm bench`           | Every stage, then a snapshot and a report. `--footprint` adds the install measurement.                                             |
 | `pnpm bench:build`     | `--trials=N` (default 3).                                                                                                          |
 | `pnpm bench:payload`   | `--strict` exits non-zero on a failed spec check.                                                                                  |
 | `pnpm bench:load`      | `--connections=32 --duration=8 --warmup=2 --heap=256`, or `--quick`. A route that serves non-2xx is reported as `—`, never as rps. |
 | `pnpm bench:coldstart` | `--trials=N` (default 5).                                                                                                          |
 | `pnpm bench:devstart`  | Clobbers the production builds and rebuilds them afterwards; `--no-restore` skips that.                                            |
-| `pnpm bench:footprint` | Three real `npm install --omit=dev` runs. Slow. `--source-only` skips them.                                                        |
+| `pnpm bench:footprint` | Four real `npm install --omit=dev` runs. Slow. `--source-only` skips them.                                                         |
 | `pnpm report`          | Re-render `results/latest.md` from whatever sections exist.                                                                        |
 | `pnpm site:publish`    | Copy the report into the website — see below.                                                                                      |
 | `pnpm clean:apps`      | Build outputs; `--deep` also removes `node_modules` and lockfiles.                                                                 |
@@ -233,7 +238,7 @@ showing the previous run, which is why the published file carries the date it wa
 ### Why the apps are not workspace members
 
 The root `pnpm-workspace.yaml` pins React and `react-server-dom-webpack` with `overrides`. Forcing
-those onto Next and TanStack Start would benchmark a configuration nobody ships, so all three apps are
+those onto Next, TanStack Start and Waku would benchmark a configuration nobody ships, so all four apps are
 installed with plain `npm` into isolated `node_modules` — which is also what makes the footprint
 numbers mean anything.
 
@@ -246,7 +251,7 @@ walks up to one React — and it is what `npm i @rsvhono/core` actually does.
 ### Load generator
 
 `load.mjs` drives requests from Node worker threads rather than shelling out to `oha` or
-`bombardier`, so it is always present and behaves the same everywhere. It handicaps all three targets
+`bombardier`, so it is always present and behaves the same everywhere. It handicaps all four targets
 identically, which is what a comparison needs; its absolute rps is a lower bound on what the servers
 can do. When the spread across targets drops under 5% the report says so, because at that point the
 driver is the thing being measured.

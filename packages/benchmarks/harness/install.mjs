@@ -51,7 +51,7 @@ console.log(`  ✓ ${tarball} → .pack/rsvhono-core.tgz`);
  * pins the *previous* tarball's integrity hash at a path whose contents changed, so npm reifies a **merge** —
  * new files written, files the new core no longer ships kept, and the old `version` left in `package.json`.
  *
- * Only this entry is removed; pinning react and the rest is what keeps the three apps comparable run to run.
+ * Only this entry is removed; pinning react and the rest is what keeps the four apps comparable run to run.
  */
 async function forgetLockedTarball(lockPath) {
   if (!existsSync(lockPath)) return;

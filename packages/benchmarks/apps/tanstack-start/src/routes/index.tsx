@@ -13,7 +13,7 @@ function Home() {
   return (
     <>
       <h1>Benchmark Suite</h1>
-      <p className="subtitle">One app, three frameworks, identical output.</p>
+      <p className="subtitle">One app, four frameworks, identical output.</p>
       <div className="cards">
         <div className="card">
           <h2>Server Components</h2>

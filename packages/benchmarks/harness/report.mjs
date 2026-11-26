@@ -40,7 +40,7 @@ function render(r) {
 
   lines.push('### Versions', '');
   lines.push(
-    'React version skew across the three is unavoidable — Next vendors its own copy — so it is reported rather than hidden. A render-path difference of a few percent is more likely this than the framework.',
+    'React version skew across the four is unavoidable — Next vendors its own copy — so it is reported rather than hidden. A render-path difference of a few percent is more likely this than the framework.',
     '',
   );
   const allPkgs = [...new Set(ids.flatMap((id) => Object.keys(r.env.versions[id] ?? {}).filter((k) => k !== 'installed')))];
@@ -68,7 +68,7 @@ function render(r) {
 function payloadSection(section, ids, labels) {
   const lines = ['## Initial-load payload', ''];
   lines.push(
-    'Brotli-compressed bytes the browser is committed to fetching before the route is interactive: the document, the inline flight payload, and every statically referenced script and stylesheet. Compression is applied by the harness, identically for all three.',
+    'Brotli-compressed bytes the browser is committed to fetching before the route is interactive: the document, the inline flight payload, and every statically referenced script and stylesheet. Compression is applied by the harness, identically for all four.',
     '',
   );
 
@@ -163,9 +163,9 @@ function loadSection(section, ids, labels) {
   lines.push(
     `${s.connections} connections, ${(s.durationMs ?? 0) / 1000}s per route after a ${(s.warmupMs ?? 0) / 1000}s warmup, driven by the harness's own Node load generator.`,
     '',
-    '**Read this as a floor check, not a headline.** All three render through the same React and stream through the same react-dom, so a large gap would mean an HTTP layer is pathological rather than that one framework renders faster. The in-process driver is identically handicapping for all three, and its absolute rps is a lower bound. `/api/health` is the informative row: no React on the path, so it is router and response construction alone.',
+    '**Read this as a floor check, not a headline.** All four render through the same React and stream through the same react-dom, so a large gap would mean an HTTP layer is pathological rather than that one framework renders faster. The in-process driver is identically handicapping for all four, and its absolute rps is a lower bound. `/api/health` is the informative row: no React on the path, so it is router and response construction alone.',
     '',
-    'All three put React server components on the request path for `/ssr` and `/interactive` (APP_SPEC.md rule 8), so those two rows compare implementations of one architecture. They are not a perfect match: rsvhono and Next encode and decode the whole document, TanStack Start only the route body its RSC helpers wrap — its shell and nav stay on the cheaper non-RSC path. The flight round trip dominates both rows; on `/ssr` it is roughly 85% of the request.',
+    'All four put React server components on the request path for `/ssr` and `/interactive` (APP_SPEC.md rule 8), so those two rows compare implementations of one architecture. They are not a perfect match: rsvhono and Next encode and decode the whole document, TanStack Start only the route body its RSC helpers wrap — its shell and nav stay on the cheaper non-RSC path. The flight round trip dominates both rows; on `/ssr` it is roughly 85% of the request.',
     '',
   );
 
@@ -210,9 +210,9 @@ function loadSection(section, ids, labels) {
 
   lines.push('### Memory', '');
   lines.push(
-    'Resident memory of the whole process tree, and of the single largest process in it — which is the server itself in all three. The tree total carries whatever `npm run start` left running and double-counts pages the processes share, so the **server** row is the one to compare.',
+    'Resident memory of the whole process tree, and of the single largest process in it — which is the server itself in all four. The tree total carries whatever `npm run start` left running and double-counts pages the processes share, so the **server** row is the one to compare.',
     '',
-    '**None of these are retained-memory figures.** RSS is a high-water mark that includes garbage V8 has not collected yet, and V8 sizes the old generation against the *allocation rate* — so under a fixed-duration load the fastest server churns the most and grows the largest heap. On this app a forced GC returned 362 MB of the 472 MB an uncapped `/api/health` run reported. All three are therefore given the same old-space budget' +
+    '**None of these are retained-memory figures.** RSS is a high-water mark that includes garbage V8 has not collected yet, and V8 sizes the old generation against the *allocation rate* — so under a fixed-duration load the fastest server churns the most and grows the largest heap. On this app a forced GC returned 362 MB of the 472 MB an uncapped `/api/health` run reported. All four are therefore given the same old-space budget' +
       (heapMb(section) ? ` (\`--max-old-space-size=${heapMb(section)}\`)` : '') +
       ', which is what makes the rows comparable; the per-route sequence is there so a plateau is distinguishable from a climb. Retention per request measured on the rsvhono app, after a full GC, was under 20 B — a leak is not what these numbers show.',
     '',

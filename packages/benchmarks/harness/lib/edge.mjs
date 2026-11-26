@@ -7,7 +7,7 @@
  * that is a threefold difference in bytes that has nothing to do with the frameworks.
  *
  * So the browser talks to this instead. It asks the server for an uncompressed response, whatever the browser
- * offered, and gzips what comes back the same way for all three — flushing per chunk, so a streamed response
+ * offered, and gzips what comes back the same way for all four — flushing per chunk, so a streamed response
  * still arrives as it is produced. It is what a CDN in front of the origin would do, and it costs each target
  * the same.
  */

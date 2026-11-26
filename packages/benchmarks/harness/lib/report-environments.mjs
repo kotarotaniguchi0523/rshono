@@ -102,7 +102,7 @@ export function gridSection(sections, ids, labels) {
   const lines = ['## At a glance', ''];
   lines.push(
     `Every measurement below as a multiple of ${labels[0]}'s, which is **1×** by construction — it is the reference because this is its repository, not because it is the baseline anyone should hold. ` +
-      'These were measured by the project that maintains one of the three; read them with that in mind, and re-run them.',
+      'These were measured by the project that maintains one of the four; read them with that in mind, and re-run them.',
     '',
     'Lower is better in every row. Where the samples support one, the ratio carries a 95% bootstrap interval: `1.25× [1.18, 1.31]` is a difference, `1.04× [0.96, 1.12]` is not, and is marked `≈`. ' +
       'The last row of each group is the geometric mean of the rows above it — the mean under which twice as slow in one place and twice as fast in another comes out even.',
@@ -158,7 +158,7 @@ export function gridSection(sections, ids, labels) {
 export function matrixSection(section, ids, labels) {
   const lines = ['## Server, by environment', ''];
   lines.push(
-    'The same three builds, given different amounts of machine. `load.mjs` above runs each with every core to itself; a deployed server usually has a slice of one. ' +
+    'The same four builds, given different amounts of machine. `load.mjs` above runs each with every core to itself; a deployed server usually has a slice of one. ' +
       'A pinned server is held to core 0 with `taskset` and the load driver kept off that core.',
     '',
   );

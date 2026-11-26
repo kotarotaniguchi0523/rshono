@@ -10,7 +10,7 @@ export const FIXTURES = path.join(ROOT, 'fixtures', 'data.json');
 
 /**
  * The four routes from spec/APP_SPEC.md. `checks` are text-content assertions the payload runner
- * uses to prove the three apps actually rendered the same thing — a byte count for a route that
+ * uses to prove the apps actually rendered the same thing — a byte count for a route that
  * 404'd or rendered an empty list is worse than no number at all.
  */
 export const ROUTES = [
@@ -66,6 +66,19 @@ export const TARGETS = [
     cacheDirs: ['.output', '.nitro', '.tanstack', 'dist', 'node_modules/.vite'],
     artifactDirs: ['dist'],
     serverBundle: 'dist/server/server.js',
+    clientAssetPrefix: '/assets/',
+  },
+  {
+    id: 'waku',
+    label: 'Waku',
+    dir: path.join(APPS_DIR, 'waku'),
+    port: 4104,
+    build: ['npm', ['run', 'build']],
+    start: ['npm', ['run', 'start']],
+    dev: ['npm', ['run', 'dev']],
+    cacheDirs: ['dist', 'node_modules/.vite'],
+    artifactDirs: ['dist'],
+    serverBundle: 'dist/server/index.js',
     clientAssetPrefix: '/assets/',
   },
 ];

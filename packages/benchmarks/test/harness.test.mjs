@@ -173,14 +173,14 @@ suite('the grid', () => {
   test('the reference is 1× and says why it is the reference', () => {
     assert.match(text, /\| `\/ssr` +\| 1× /);
     assert.match(text, /it is the reference because this is its repository/);
-    assert.match(text, /measured by the project that maintains one of the three/);
+    assert.match(text, /measured by the project that maintains one of the four/);
   });
 
   test('a difference is shown with its interval, and a tie is marked', () => {
     assert.match(text, /\| `\/ssr` +\| 1× +\| 2\.0\d× \[1\.9\d, 2\.0\d\] +\| ≈ 1\.0\d× \[/);
   });
 
-  test('a mean is over the rows every target has: one twice as slow, one twice as fast, but only the first counts for all three', () => {
+  test('a mean is over the rows every target has: one twice as slow, one twice as fast, but only the first counts for all four', () => {
     // `/api/health` has no figure for C, so it is in no column's mean — B's mean is 2×, not the 1× that its
     // two rows would average to.
     assert.match(text, /\*\*geometric mean\*\* \| \*\*1\.00×\*\* \| \*\*2\.0\d×\*\* +\| \*\*1\.0\d×\*\*/);

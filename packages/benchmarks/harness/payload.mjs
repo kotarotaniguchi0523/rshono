@@ -3,7 +3,7 @@
  *
  * Per route, per target: the document, the inline script bytes (the flight payload is in here), and
  * every JS/CSS asset the document commits to loading. Compression is applied here — gzip 9 and
- * brotli 11, identically for all three — rather than trusted to each app's own compressor.
+ * brotli 11, identically for all four — rather than trusted to each app's own compressor.
  */
 import { resolveTargets, ROUTES, hasFlag } from './lib/targets.mjs';
 import { indent, startServer } from './lib/proc.mjs';
