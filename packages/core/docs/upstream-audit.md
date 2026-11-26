@@ -12,6 +12,7 @@ below.
 
 | What                                        | Upstream piece                                                                   | What it replaced                                                                 |
 | ------------------------------------------- | -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| Which file a page thunk names               | Vite's resolver (`this.resolve`, RSC environment), from `rsvhono:pages`          | `page-files.ts`'s own: relative and `@/` only, four extensions, `index` probing  |
 | `process.env` shadowing in the SSR bundle   | `transformWithOxc` (`define` + `inject`), Vite 8.3.8                             | a text transform: three regular expressions, a prologue scanner, a prelude       |
 | A page's stylesheets                        | `import.meta.viteRsc.loadCss()`, 0.5.39                                          | an AST wrap of the page's default export (`transformWrapExport`) and a component |
 | CSS package imports in the server bundles   | `createIdResolver`, Vite 8.3.8                                                   | reading `package.json` `style` / `main` / `exports` by hand                      |
@@ -115,30 +116,74 @@ since — so they bound the cost from above rather than measure it.
 Chrome on the same host, so network time is nil). Medians unless said otherwise. These are one machine's
 numbers: useful against each other and against a re-run, not as claims about anyone's production.
 
-|                                                                    |                                                               |
-| ------------------------------------------------------------------ | ------------------------------------------------------------- |
-| `rsvhono build`, testbed                                           | 1.5 s                                                         |
-| browser JS / CSS                                                   | 283 kB (92.7 kB gzipped per file) / 5.8 kB                    |
-| server JS                                                          | 531 kB                                                        |
-| `rsvhono start` to listening                                       | 0.12 s, 78 MB resident                                        |
-| rendered document, `/users`                                        | p50 2.2 ms, p95 4.8 ms                                        |
-| its flight payload                                                 | p50 1.4 ms, p95 3.9 ms                                        |
-| prerendered document                                               | p50 0.9 ms, p95 2.3 ms                                        |
-| 50 responses streaming at once (each suspended 2 s)                | all done in 2.11 s, 143 MB resident                           |
-| resident memory after 5k / 10k / 15k / 20k requests                | 216 / 225 / 225 / 225 MB — it levels off                      |
-| first load of `/`: TTFB / FCP / hydrated                           | 16 ms / 88 ms / 122 ms, 10 requests, 272 kB of JS on the wire |
-| soft navigation `/` → `/users`                                     | 29 ms                                                         |
-| `rsvhono dev` to listening / first request                         | 0.24 s / 1.7 s, 418 MB resident                               |
-| dev, warm request                                                  | p50 5.8 ms                                                    |
-| edit → on screen: server component / client component / stylesheet | 84 ms / 50 ms / 66 ms                                         |
+The two columns are the same script and **the same testbed source**, built by the framework at `4a184b4`
+(before the review round that added prefetch rules, chunk-recovery ownership, the result-only lifecycle and
+resolver delegation) and by the framework now, so the difference is the framework's alone. Each was run
+twice and the second run is shown; a first run in a fresh checkout pays for a cold dependency cache.
+
+|                                                                        | `4a184b4`                    | now                          |
+| ---------------------------------------------------------------------- | ---------------------------- | ---------------------------- |
+| `rsvhono build`, testbed (best of 5 / median of 3)                     | — / 1.60 s                   | 1.56 s / 1.77 s              |
+| browser JS, raw / gzipped per file                                     | 285.7 / 93.9 kB              | 286.7 / 94.3 kB              |
+| server JS                                                              | 538.9 kB                     | 539.5 kB                     |
+| `rsvhono start` to listening, resident memory                          | 0.13 s, 78 MB                | 0.12 s, 78 MB                |
+| rendered document, `/users` (p50 / p95)                                | 2.3 / 5.6 ms                 | 2.3 / 5.6 ms                 |
+| its flight payload (p50 / p95)                                         | 1.4 / 3.7 ms                 | 1.4 / 4.0 ms                 |
+| prerendered document (p50)                                             | 0.9 ms                       | 0.9 ms                       |
+| a streamed payload: first byte / last byte (page suspends 2 s)         | 5 ms / 2.01 s                | 4 ms / 2.01 s                |
+| 50 responses streaming at once: all done, resident memory              | 2.11 s, 139 MB               | 2.12 s, 143 MB               |
+| resident memory after 5k / 10k / 15k / 20k requests                    | 218 / 226 / 226 / 226        | 212 / 216 / 215 / 217        |
+| first load of `/`: TTFB / FCP / hydrated                               | 16 / 92 / 121 ms             | 15 / 88 / 115 ms             |
+| `navigate()` to commit, `/transition-probe` → `/users`                 | 16 ms                        | 18.5 ms                      |
+| browser heap: idle / 4 prefetches held / after 400 more / after a call | 1736 / 1959 / 1991 / 2833 kB | 1722 / 1949 / 1980 / 2839 kB |
+| `rsvhono dev` to listening / first request                             | 0.25 s / 1.9 s               | 0.31 s / 2.0 s               |
+| dev resident memory                                                    | 413 MB                       | 423 MB                       |
+| edit → on screen: server component / client component / stylesheet     | 98 / 49 / 66 ms              | 99 / 50 / 74 ms              |
+| source lines: `builder/` / `runtime/` / all of `src/`                  | 743 / 6264 / 10029           | 823 / 6469 / 10315           |
+
+Read plainly: this round changed correctness, not speed. Every timing is inside the spread between two runs
+of the same code; memory levels off the same way; the browser bundle grew by 1.0 kB (0.4 kB gzipped) and the
+source by 286 lines, most of it comments and the two modules split out to be testable. The one figure that
+looked like a regression — the median build time — did not survive a second look: best of five is 1.56 s,
+and resolving every page thunk through Vite at `buildStart` measures at about 13 ms of it.
+
+Four prefetched payloads cost about 225 kB of browser heap while held, and turning 400 more over in the same
+four slots adds 30 kB that does not grow further (960 in a row level off at +100 kB): nothing is kept per
+prefetch. The jump after a server function is that call's own first run, the same in both columns.
 
 Two things these show that are not the framework's doing but are worth knowing: `rsvhono start` serves
-`/_static/` uncompressed (272 kB on the wire for 93 kB of gzip), which is a CDN's or a proxy's job and is
+`/_static/` uncompressed (273 kB on the wire for 94 kB of gzip), which is a CDN's or a proxy's job and is
 not done here; and in dev, a second write to one client module within tens of milliseconds of the first
 being applied was seen to be dropped, which the measurement works around by waiting. A third dev-only
 observation, from `test/hmr.test.mjs`: editing a `'use server'` module that a client component imports takes
 effect on the next call without a reload, but the importing component keeps its state only about half the
 time — the edit is both a Fast Refresh and a payload re-read, and their order is not fixed. Not fixed here.
+
+### Against the Rspack build this replaced
+
+The testbed cannot answer this — it has grown by a dozen routes since — so the comparison is on the one app
+that is the same at both ends: the `minimal-app` fixture (four pages, one endpoint, no client components),
+built by `main` (Rspack 2.2.8, `react-server-dom-rspack` 0.1.0) and by this branch. Two runs each.
+
+|                                       | `main` (Rspack)  | this branch (Vite 8) |
+| ------------------------------------- | ---------------- | -------------------- |
+| build, best of 5                      | 0.76–0.84 s      | 0.92–0.96 s          |
+| browser JS, raw / gzipped             | 230.2 / 72.7 kB  | 266.1 / 83.4 kB      |
+| server JS, raw / gzipped              | 382.5 / 120.2 kB | 368.8 / 114.7 kB     |
+| `start` to listening, resident memory | 0.09 s, 84 MB    | 0.09 s, 102 MB       |
+| document / payload, p50               | 1.5–1.7 / 2.3 ms | 1.7–1.8 / 2.4 ms     |
+| `dev` to listening                    | 0.15 s           | 0.25 s (0.6 s cold)  |
+| dev, first request                    | 0.55 s           | 1.7–1.9 s            |
+| dev, warm request p50                 | 6.6–8.9 ms       | 4.6–5.1 ms           |
+| dev resident memory                   | 255–261 MB       | 401 MB (621 MB cold) |
+
+The migration did not make this app faster to build or lighter to run. The build is about 0.15 s slower, the
+dev server takes three times as long to answer its first request and holds 140 MB more, and the browser
+bundle is 36 kB larger (10.7 kB gzipped) — that last one is not the bundler: the app has no client code of
+its own, so the difference is the client runtime written since (page resources, route intents, prefetch,
+build ids, chunk recovery). What it bought is on the other side of the ledger — the server bundle is
+smaller, a warm dev request is faster, and the five hand-maintained pieces listed at the top of this
+document are upstream's now.
 
 ### What React Compiler does to the fixture
 

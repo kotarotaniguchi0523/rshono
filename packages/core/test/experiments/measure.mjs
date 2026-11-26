@@ -100,6 +100,16 @@ results.bundles = bundleSizes();
     results.start.document = await timeRequests(`${base}/users`, 200);
     results.start.payload = await timeRequests(`${base}/users`, 200, 1, { rsc: '1' });
     results.start.prerendered = await timeRequests(`${base}/docs/getting-started`, 200);
+    // A payload that streams: time to its first byte, and to its last (the page suspends for two seconds).
+    {
+      const from3 = performance.now();
+      const res = await fetch(`${base}/slow-stream`, { headers: { rsc: '1' } });
+      const reader = res.body.getReader();
+      await reader.read();
+      const firstByte = ms(from3);
+      while (!(await reader.read()).done);
+      results.start.streamedPayload = { firstByteMs: firstByte, lastByteMs: ms(from3) };
+    }
     results.start.afterSequential = memory(child.pid);
     // Streaming under load: fifty responses held open at once, each suspended for two seconds.
     const from2 = performance.now();
@@ -159,6 +169,51 @@ if (browser) {
       runs.push({ ...timing, hydrated, soft, jsBytes, requests });
       await context.close();
     }
+    // What fetching ahead costs the page, and whether it gives it back: the JS heap after a forced collection —
+    // before any prefetch, with four held, after four hundred more have turned over in those slots, and after
+    // a server function (whose own first run allocates more than the payloads did).
+    {
+      const context = await browser.newContext();
+      const page = await context.newPage();
+      const cdp = await context.newCDPSession(page);
+      const heapKB = async () => {
+        await cdp.send('HeapProfiler.collectGarbage');
+        return Math.round((await cdp.send('Runtime.getHeapUsage')).usedSize / 1024);
+      };
+      await page.goto(`${base}/transition-probe`, { waitUntil: 'networkidle' });
+      const before = await heapKB();
+      const prefetchMany = (count) =>
+        page.evaluate(async (many) => {
+          for (let n = 0; n < many; n++) {
+            const anchor = Object.assign(document.createElement('a'), { href: `/users?prefetch=${Math.random()}` });
+            anchor.dataset.prefetch = '';
+            document.body.append(anchor);
+            anchor.dispatchEvent(new PointerEvent('pointerenter'));
+            anchor.remove();
+            await new Promise((resolve) => setTimeout(resolve, 15));
+          }
+          await new Promise((resolve) => setTimeout(resolve, 400));
+        }, count);
+      await prefetchMany(40);
+      const holding = await heapKB();
+      // Many more: only four are ever kept, so this is the same four slots turning over.
+      await prefetchMany(400);
+      const afterTurnover = await heapKB();
+      await page.locator('[data-probe-do="action"]').click();
+      await page.waitForTimeout(800);
+      const released = await heapKB();
+      // And a navigation: from the call to `navigate()` to the new page being committed, and to its payload's root.
+      const navigation = await page.evaluate(async () => {
+        const from4 = performance.now();
+        const finished = navigation.navigate('/users').finished;
+        await finished;
+        return Math.round((performance.now() - from4) * 10) / 10;
+      });
+      results.prefetchHeapKB = { before, holdingFour: holding, after400More: afterTurnover, afterServerFunction: released };
+      results.navigationToCommitMs = navigation;
+      await context.close();
+    }
+
     const pick = (key) => Math.round(median(runs.map((run) => run[key] ?? 0)));
     results.firstLoad = {
       ttfbMs: pick('ttfb'),
@@ -248,4 +303,15 @@ if (browser) {
 }
 
 await browser?.close();
+
+// ── How much code that was ──────────────────────────────────────────────────────────────────────────────
+{
+  const SRC = join(TESTBED_DIR, '..', '..', 'packages', 'core', 'src');
+  const lines = (dir) =>
+    readdirSync(join(SRC, dir), { recursive: true })
+      .filter((file) => /\.tsx?$/.test(file))
+      .reduce((total, file) => total + readFileSync(join(SRC, dir, file), 'utf8').split('\n').length, 0);
+  results.sourceLines = { builder: lines('builder'), runtime: lines('runtime'), all: lines('.') };
+}
+
 console.log(JSON.stringify(results, null, 2));
