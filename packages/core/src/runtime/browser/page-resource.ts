@@ -129,52 +129,43 @@ function readInlinePayload(): ReadableStream<Uint8Array> {
   // arrive through `push`.
   const data = (self.__FLIGHT_DATA ??= []);
   for (const chunk of data) enqueue(chunk);
+  // Handed over, not copied: the stream owns those chunks now, and the array would otherwise keep the whole
+  // payload alive as text for as long as the page lives.
+  data.length = 0;
   data.push = enqueue as typeof data.push;
 
-  // The last payload script lands before parsing finishes, so that is what closes the stream.
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => controller.close(), { once: true });
-  } else {
+  // The last payload script lands before parsing finishes, so that is what closes the stream. After it there
+  // is nothing left that pushes — and `push` lets go of the controller rather than hold a closed stream.
+  const close = () => {
     controller.close();
-  }
+    data.push = () => 0;
+  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', close, { once: true });
+  else close();
   return stream;
 }
 
 /**
  * `source` as a stream whose ending is observable, without a second reader: a `tee()` would hold every chunk
  * in memory twice for as long as either branch lagged, to learn one fact.
+ *
+ * The platform's own pipe, into an identity transform. `pipeTo`'s promise settles when the body closes, when
+ * it errors, and when the reader cancels — each of which is "the stream is over" — and the pipe is what
+ * carries each to the other side: an error forward to React, a cancel back to the response body, which
+ * releases the connection. A reader that cancels before the response has arrived leaves the writable side
+ * errored, so the pipe that starts later ends at once and cancels the body it was given. A response that
+ * never arrives (a refusal, another build, an aborted fetch) is passed to the reader as the stream's error.
  */
 function observed(source: Promise<ReadableStream<Uint8Array>>): { stream: ReadableStream<Uint8Array>; finished: Promise<void> } {
-  const { promise: finished, resolve } = Promise.withResolvers<void>();
-  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
-  let cancelled: { reason: unknown } | undefined;
-  const stream = new ReadableStream<Uint8Array>({
-    async pull(controller) {
-      try {
-        if (!reader) {
-          const body = await source;
-          // Cancelled while the response was still on its way: there was no reader to cancel then, so the
-          // body that has just arrived is released here instead of being read by nobody.
-          if (cancelled) return void body.cancel(cancelled.reason).catch(() => {});
-          reader = body.getReader();
-        }
-        const { done, value } = await reader.read();
-        if (done) {
-          controller.close();
-          resolve();
-        } else controller.enqueue(value);
-      } catch (error) {
-        controller.error(error);
-        resolve();
-      }
-    },
-    cancel(reason) {
-      cancelled = { reason };
-      resolve();
-      return reader?.cancel(reason);
-    },
-  });
-  return { stream, finished };
+  const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
+  const over = () => {};
+  const finished = source
+    .then(
+      (body) => body.pipeTo(writable),
+      (error: unknown) => writable.abort(error),
+    )
+    .then(over, over);
+  return { stream: readable, finished };
 }
 
 function createResource(

@@ -385,11 +385,12 @@ const actionId = (name) => {
 };
 
 /** A server function called the way client code calls it. */
-const callFunction = (base, path, name, args, headers = {}) =>
+const callFunction = (base, path, name, args, headers = {}, signal = undefined) =>
   fetch(`${base}${path}`, {
     method: 'POST',
     headers: { Origin: base, rsc: '1', 'x-rsc-action': actionId(name), 'content-type': 'text/plain;charset=UTF-8', ...headers },
     body: JSON.stringify(args),
+    signal,
   });
 
 /** The `raiseSignal` form on `/action-race`, posted the way a browser without JavaScript posts it. */
@@ -555,5 +556,85 @@ describe("setServerFunctionRefresh('explicit'): the reply is the result unless t
     const missing = await fetch(`${app.base}/action-race`, { method: 'POST', headers: { Origin: app.base }, body });
     assert.equal(missing.status, 404);
     assert.match(await missing.text(), /<!DOCTYPE html>/i);
+  });
+  /*
+   * A reply with no page is still a flight render, and what a function returns can keep that render going
+   * long after the first byte: a promise, an async iterable. It ends, fails and is abandoned like any other.
+   */
+  const tickCount = async (label) => {
+    const payload = await (await callFunction(app.base, '/action-race', 'tickCount', [label])).text();
+    return Number(/"value":(-?\d+)/.exec(payload)?.[1]);
+  };
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  /** Starts `ticking`, reads until the reply has begun, and hangs up. */
+  const abandonTicking = async (label) => {
+    const abort = new AbortController();
+    // A hundred values, one every 30ms: three seconds if nobody stops it.
+    const res = await callFunction(app.base, '/action-race', 'ticking', [label, 100, 30], {}, abort.signal);
+    const reader = res.body.getReader();
+    await reader.read();
+    await sleep(100);
+    abort.abort();
+    await reader.read().catch(() => {});
+  };
+
+  test('a nested promise is resolved all the way down, in the one reply', async () => {
+    const res = await callFunction(app.base, '/action-race', 'nested', ['n']);
+    const payload = await res.text();
+    assert.match(payload, /"resultOnly":true/);
+    assert.match(payload, /"c":"n-deep"/, 'the innermost value arrived before the stream closed');
+  });
+
+  test('an async iterable is sent value by value, and the reply ends when it does', async () => {
+    const label = `ticks-${crypto.randomUUID()}`;
+    const res = await callFunction(app.base, '/action-race', 'ticking', [label, 4, 30]);
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    const arrivals = [];
+    let text = '';
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      text += decoder.decode(value, { stream: true });
+      arrivals.push(performance.now());
+    }
+    assert.ok(arrivals.length >= 3, `the values came in ${arrivals.length} reads rather than one at the end`);
+    assert.ok(arrivals.at(-1) - arrivals[0] >= 60, 'spread over the time the function took to make them');
+    assert.equal(await tickCount(label), 4);
+    assert.match(text, /"resultOnly":true/);
+  });
+
+  test('a client that goes away stops the function’s iterable, instead of leaving it to run to the end', async () => {
+    const label = `abandoned-${crypto.randomUUID()}`;
+    await abandonTicking(label);
+
+    await sleep(300);
+    const soonAfter = await tickCount(label);
+    await sleep(400);
+    const later = await tickCount(label);
+    assert.ok(soonAfter > 0 && soonAfter < 100, `it had started (${soonAfter})`);
+    assert.equal(later, soonAfter, 'and made nothing more once there was nobody to send it to');
+  });
+
+  test('a value that fails after the reply has started is reported to onServerError, once', async () => {
+    const label = `late-${crypto.randomUUID()}`;
+    const res = await callFunction(app.base, '/action-race', 'failsLate', [label]);
+    const payload = await res.text();
+    assert.equal(res.status, 200, 'the head was sent before the failure existed');
+    assert.match(payload, new RegExp(`"now":"${label}"`), 'the half that was ready arrived');
+    await sleep(100);
+    const reports = app
+      .getOutput()
+      .split('\n')
+      .filter((line) => line.includes('[error-reporter]') && line.includes(`late failure ${label}`));
+    assert.equal(reports.length, 1, 'the app’s reporter heard about it');
+    assert.match(reports[0], /\[error-reporter\] action \/action-race/);
+  });
+
+  test('a client that left is not reported as a failure of the function', async () => {
+    const before = app.getOutput().length;
+    await abandonTicking(`left-${crypto.randomUUID()}`);
+    await sleep(400);
+    assert.doesNotMatch(app.getOutput().slice(before), /\[error-reporter\]/);
   });
 });

@@ -25,6 +25,27 @@ test.describe('hydration', () => {
     await counter.click();
     await expect(counter).toHaveText(/Clicked 2 times/);
   });
+
+  test('the payload the document carried is handed to the decoder, not kept beside it', async ({ page }) => {
+    await page.goto('/users');
+    await expect(page.getByText('Ada Lovelace')).toBeVisible();
+    await page.waitForLoadState('load');
+    const kept = await page.evaluate(() => ({
+      length: self.__FLIGHT_DATA.length,
+      pushed: self.__FLIGHT_DATA.push('late'),
+      after: self.__FLIGHT_DATA.length,
+    }));
+    // Empty once read — the whole payload as text would otherwise live as long as the page — and a push
+    // after the document has finished is dropped rather than thrown into a closed stream.
+    expect(kept).toEqual({ length: 0, pushed: 0, after: 0 });
+  });
+
+  test('a streamed document hands its late chunks over as they come, and keeps none', async ({ page }) => {
+    await page.goto('/slow-stream');
+    await expect(page.locator('[data-slow-stream-content]')).toBeVisible();
+    await page.waitForLoadState('load');
+    expect(await page.evaluate(() => self.__FLIGHT_DATA.length)).toBe(0);
+  });
 });
 
 test.describe('soft navigation', () => {

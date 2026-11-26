@@ -1,7 +1,7 @@
 'use client';
 
 import { startTransition, useEffect, useOptimistic, useState } from 'react';
-import { like, recordRace, recordRaceAndRefresh, streamed } from '../actions';
+import { failsLate, handBack, like, nested, recordRace, recordRaceAndRefresh, streamed, ticking } from '../actions';
 
 declare global {
   interface Window {
@@ -11,6 +11,13 @@ declare global {
     __raceAndRefresh?: (label: string) => Promise<string>;
     /** Resolves with both halves of a streamed return value. */
     __streamed?: (label: string) => Promise<{ now: string; later: string }>;
+    /** The newer return shapes, each resolved all the way down so a test can compare plain values. */
+    __returns?: {
+      ticking: (label: string, count: number, intervalMs: number) => Promise<number[]>;
+      nested: (label: string) => Promise<string>;
+      failsLate: (label: string) => Promise<{ now: string; later: string }>;
+      handBack: () => Promise<{ sameFunction: boolean; sameInstance: boolean }>;
+    };
   }
 }
 
@@ -32,11 +39,36 @@ export function ActionRaceControls() {
       const value = await streamed(label);
       return { now: value.now, later: await value.later };
     };
+    window.__returns = {
+      ticking: async (label, count, intervalMs) => {
+        const seen: number[] = [];
+        for await (const n of await ticking(label, count, intervalMs)) seen.push(n);
+        return seen;
+      },
+      nested: async (label) => (await (await (await nested(label)).a).b).c,
+      failsLate: async (label) => {
+        const value = await failsLate(label);
+        // `await`, not `.catch()`: what flight hands back for a pending value is React's own thenable, whose
+        // `then` settles the callbacks it is given and returns nothing to chain on.
+        try {
+          return { now: value.now, later: await value.later };
+        } catch (error) {
+          return { now: value.now, later: `rejected: ${error instanceof Error ? error.message : String(error)}` };
+        }
+      },
+      handBack: async () => {
+        const fn = () => 'not serializable';
+        const instance = new (class Local {})();
+        const [a, b] = await Promise.all([handBack(fn), handBack(instance)]);
+        return { sameFunction: a.same === fn, sameInstance: b.same === instance };
+      },
+    };
     document.documentElement.dataset.actionRaceReady = 'true';
     return () => {
       delete window.__race;
       delete window.__raceAndRefresh;
       delete window.__streamed;
+      delete window.__returns;
     };
   }, []);
 

@@ -1,4 +1,5 @@
 import type { Context, Handler } from 'hono';
+import { releaseWhenDone, renderSignal } from './stream-lifetime.js';
 import { Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 // Type-only side effect: augments Hono's `ContextVariableMap` with `secureHeadersNonce`, read in `cspNonce`.
@@ -45,7 +46,6 @@ import type { renderHTML, RenderHTMLOptions } from './entry.ssr.js';
 import { hasServerAction, knownServerActions, referenceValidation } from './server-references.js';
 import { failureDocument } from './failure-document.js';
 // Type-only, so it is erased — the RSC layer does not take its own instance of the SSR layer's module.
-import type { CancellableTransformer } from './flight-inject.js';
 import { RouterProvider } from './navigation.js';
 import { asksForRsc, isBrowserFormPost, parseRenderRequest, requestWantsRsc, RSC_VARY_HEADER, wantsRsc, type RenderRequest } from './request.js';
 import { ERROR_ROUTE, NOT_FOUND_ROUTE } from './route-functions.js';
@@ -307,19 +307,27 @@ function once<T>(load: () => Promise<T>): () => Promise<T> {
 }
 
 /**
- * Passes `stream` through untouched, calling `done` however it ends — for the flight-only response
- * path, which has no transform of its own to hang a completion hook off. `done` must be idempotent.
+ * A reply that carries a function's result and no page. There is no component tree in it, but it is a
+ * render all the same: what the function returned can be a promise or an async iterable that goes on
+ * producing after the first byte, so it is aborted with the request, its failures are reported, and its
+ * hold on the request is let go when it ends — as for a page.
+ *
+ * The one difference is whose failure it is. Nothing here is a page that failed to render; a value that
+ * rejects on the way out is the function failing late, so that is how it is reported.
  */
-function releaseWhenDone(stream: ReadableStream<Uint8Array>, done: () => void): ReadableStream<Uint8Array> {
-  return stream.pipeThrough(
-    new TransformStream<Uint8Array, Uint8Array>({
-      transform(chunk, controller) {
-        controller.enqueue(chunk);
-      },
-      flush: done,
-      cancel: done,
-    } as CancellableTransformer<Uint8Array, Uint8Array>),
-  );
+function resultFlight(c: Context, payload: RscPayload, temporaryReferences: unknown): ReadableStream<Uint8Array> {
+  const { renderAbort, release } = renderSignal(c.req.raw.signal);
+  const { signal } = renderAbort;
+  const stream = renderToReadableStream(payload, {
+    temporaryReferences,
+    signal,
+    onError(error: unknown) {
+      // A client that hung up aborts the render, and every pending value then "fails" with that abort.
+      if (!signal.aborted)
+        reportServerError(error, { source: 'action', hono: c, message: '[rsvhono] a server function’s result failed while it was being sent:' });
+    },
+  });
+  return releaseWhenDone(stream, release);
 }
 
 /**
@@ -390,18 +398,8 @@ function pageProps(c: Context, errorInfo: ErrorPageInfo | undefined): PageProps 
 }
 
 async function renderComponent(c: Context, Page: PageComponent, opts: ComponentRenderOptions): Promise<Response> {
-  // React's renderers must never be handed `c.req.raw.signal`: they add an `abort` listener and only
-  // remove it if the abort fires, so on the happy path it stays on a request-lifetime signal and pins the
-  // whole rendered tree. The render gets its own controller and the request signal forwards into it —
-  // `release` detaches on the normal path. Not `AbortSignal.any()`, whose composite signals Node holds in
-  // a process-lifetime set until they abort.
-  const requestSignal = c.req.raw.signal;
-  const renderAbort = new AbortController();
+  const { renderAbort, release } = renderSignal(c.req.raw.signal);
   const signal = renderAbort.signal;
-  const forwardAbort = () => renderAbort.abort(requestSignal.reason);
-  if (requestSignal.aborted) renderAbort.abort(requestSignal.reason);
-  else requestSignal.addEventListener('abort', forwardAbort, { once: true });
-  const release = () => requestSignal.removeEventListener('abort', forwardAbort);
 
   // Documents only: the nonce goes on the bootstrap scripts and the `<meta>` React hydrates from, and a
   // flight payload has neither — which is what keeps a prerendered one servable under a nonce-based CSP.
@@ -828,7 +826,7 @@ async function renderPage(c: Context, loadPage: () => Promise<PageComponent>, as
   // return — a promise, a stream, a client reference — it can return here.
   if (renderRequest.kind === 'rsc-action' && !wantsRefresh(c)) {
     const payload: RscPayload = { root: null, returnValue: run.returnValue, resultOnly: true };
-    return c.body(renderToReadableStream(payload, { temporaryReferences: run.temporaryReferences }), (run.status ?? 200) as ContentfulStatusCode, {
+    return c.body(resultFlight(c, payload, run.temporaryReferences), (run.status ?? 200) as ContentfulStatusCode, {
       'content-type': 'text/x-component;charset=utf-8',
     });
   }
@@ -991,8 +989,9 @@ function buildApp(): Hono {
         // the screen goes, not what the call returned. An action that redirected *itself* never set one.
         const reply = actionReplies.get(c);
         const payload: RscPayload = { root: null, redirect: signal.location, ...(reply ? { returnValue: reply.returnValue } : null) };
-        // No `signal`: a few fields and no component tree, so there is nothing worth aborting.
-        return c.body(renderToReadableStream(payload, { temporaryReferences: reply?.temporaryReferences }), 200, {
+        // No component tree, but the function's result rides along and can still be producing — a promise, an
+        // iterable — so this is the same render as a reply with no page.
+        return c.body(resultFlight(c, payload, reply?.temporaryReferences), 200, {
           'content-type': 'text/x-component;charset=utf-8',
         });
       }

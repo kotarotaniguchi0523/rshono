@@ -136,3 +136,45 @@ export async function like(): Promise<number> {
 export async function streamed(label: string): Promise<{ now: string; later: Promise<string> }> {
   return { now: label, later: new Promise((resolve) => setTimeout(() => resolve(`${label}-later`), 200)) };
 }
+
+/** How far each `ticking` run has got, by label — read back by `tickCount`, so a test can see a run stop. */
+const ticks = new Map<string, number>();
+
+/**
+ * Returns an async iterable: `count` values, one every `intervalMs`. The reply streams them as they are
+ * made. If the client goes away the generator has nobody to yield to, and should not go on making values.
+ */
+export async function ticking(label: string, count: number, intervalMs: number): Promise<AsyncIterable<number>> {
+  ticks.set(label, 0);
+  return (async function* () {
+    for (let n = 1; n <= count; n++) {
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+      ticks.set(label, n);
+      yield n;
+    }
+  })();
+}
+
+export async function tickCount(label: string): Promise<number> {
+  return ticks.get(label) ?? -1;
+}
+
+/** A value three promises deep, each ready later than the one around it. */
+export async function nested(label: string): Promise<{ a: Promise<{ b: Promise<{ c: string }> }> }> {
+  const later = <T>(ms: number, value: T) => new Promise<T>((resolve) => setTimeout(() => resolve(value), ms));
+  return { a: later(50, { b: later(100, { c: `${label}-deep` }) }) };
+}
+
+/** Returns a value whose second half fails while the reply is already on the wire. */
+export async function failsLate(label: string): Promise<{ now: string; later: Promise<string> }> {
+  return { now: label, later: new Promise((_, reject) => setTimeout(() => reject(new Error(`late failure ${label}`)), 100)) };
+}
+
+/**
+ * Hands back what it was given. Called with something flight cannot serialize — a function, a class
+ * instance — the argument crosses as a temporary reference, and the reply has to name the same one for the
+ * caller to get its own object back.
+ */
+export async function handBack<T>(value: T): Promise<{ same: T }> {
+  return { same: value };
+}

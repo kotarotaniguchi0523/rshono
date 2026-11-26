@@ -3399,3 +3399,122 @@ describe('defineRoutes and shutdown', async () => {
     }
   });
 });
+
+describe('how long a render holds its request', async () => {
+  const { releaseWhenDone, renderSignal } = await import('../dist/runtime/stream-lifetime.js');
+  const encoder = new TextEncoder();
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 5));
+
+  /** A source the test feeds by hand, and a count of how many times `done` ran. */
+  function wired() {
+    let controller;
+    const state = { done: 0, cancelled: undefined, pulls: 0 };
+    const source = new ReadableStream({
+      start: (c) => void (controller = c),
+      pull: () => void state.pulls++,
+      cancel: (reason) => void (state.cancelled = reason ?? 'no reason'),
+    });
+    const out = releaseWhenDone(source, () => void state.done++);
+    return { controller, state, reader: out.getReader() };
+  }
+
+  test('the bytes pass through unchanged, and done runs once when the source closes', async () => {
+    const { controller, state, reader } = wired();
+    controller.enqueue(encoder.encode('one'));
+    controller.enqueue(encoder.encode('two'));
+    controller.close();
+    const seen = [];
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      seen.push(new TextDecoder().decode(value));
+    }
+    await tick();
+    assert.deepEqual(seen, ['one', 'two']);
+    assert.equal(state.done, 1);
+  });
+
+  test('done runs once when the source errors, and the reader is told why', async () => {
+    // The path a transformer's flush and cancel never saw: a render that dies mid-stream.
+    const { controller, state, reader } = wired();
+    controller.enqueue(encoder.encode('partial'));
+    await reader.read();
+    controller.error(new Error('render died'));
+    await assert.rejects(reader.read(), /render died/);
+    await tick();
+    assert.equal(state.done, 1);
+  });
+
+  test('done runs once when the reader cancels, and the cancel reaches the source', async () => {
+    const { controller, state, reader } = wired();
+    controller.enqueue(encoder.encode('partial'));
+    await reader.read();
+    await reader.cancel(new Error('client went away'));
+    await tick();
+    assert.equal(state.done, 1);
+    assert.match(String(state.cancelled), /client went away/, 'so the render behind it is stopped rather than left running');
+  });
+
+  test('a reader that cancels before reading anything still releases', async () => {
+    const { state, reader } = wired();
+    await reader.cancel();
+    await tick();
+    assert.equal(state.done, 1);
+    assert.notEqual(state.cancelled, undefined);
+  });
+
+  test('nothing after the end calls done again', async () => {
+    const { controller, state, reader } = wired();
+    controller.close();
+    await reader.read();
+    await reader.cancel().catch(() => {});
+    await tick();
+    assert.equal(state.done, 1);
+  });
+
+  test('a reader that is not reading holds the source back', async () => {
+    const { controller, state } = wired();
+    for (let n = 0; n < 50; n++) controller.enqueue(new Uint8Array(1024));
+    await tick();
+    const stalled = state.pulls;
+    await tick();
+    assert.equal(state.pulls, stalled, 'the source is not asked for more while nobody takes what is there');
+    assert.ok(controller.desiredSize <= 0, 'and can see that it is ahead of its reader');
+    assert.equal(state.done, 0);
+  });
+
+  test('the render signal follows the request’s, and release detaches it', () => {
+    const request = new AbortController();
+    const { renderAbort } = renderSignal(request.signal);
+    assert.equal(renderAbort.signal.aborted, false);
+    request.abort(new Error('client went away'));
+    assert.equal(renderAbort.signal.aborted, true);
+    assert.match(String(renderAbort.signal.reason), /client went away/);
+
+    const second = new AbortController();
+    const held = renderSignal(second.signal);
+    held.release();
+    second.abort();
+    assert.equal(held.renderAbort.signal.aborted, false, 'a render that has finished is no longer the request’s to abort');
+  });
+
+  test('a request already aborted aborts the render at once, and leaves no listener behind', () => {
+    const request = new AbortController();
+    request.abort(new Error('gone before it began'));
+    let added = 0;
+    const signal = request.signal;
+    const original = signal.addEventListener.bind(signal);
+    signal.addEventListener = (...args) => (added++, original(...args));
+    const { renderAbort, release } = renderSignal(signal);
+    assert.equal(renderAbort.signal.aborted, true);
+    assert.equal(added, 0);
+    assert.doesNotThrow(release);
+  });
+
+  test('the render can be aborted on its own account without touching the request', () => {
+    const request = new AbortController();
+    const { renderAbort } = renderSignal(request.signal);
+    renderAbort.abort(new Error('a redirect ended this render'));
+    assert.equal(request.signal.aborted, false);
+  });
+});

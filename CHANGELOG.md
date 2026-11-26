@@ -107,6 +107,17 @@ those.
   carries a page. Still an ordinary `<a>`, and only fetched ahead when a click on it would soft-navigate:
   not for `data-native`, `download`, another `target`, a file, another origin, or a jump within the page
   on screen. `router.prefetch()` refuses only what cannot be soft-navigated.
+- **A reply that carries only a function's result is rendered like any other flight response.** It was
+  written with a bare `renderToReadableStream`: a value that failed after the reply began — a rejected
+  promise, an iterable that threw — was printed by React and never reached `onServerError`, and the render
+  had no signal of its own. It now aborts with the request, reports to `onServerError` with source
+  `action` (not when the client simply left), and releases its hold on the request when it ends. The same
+  for the reply that carries a redirect beside a result.
+- **A flight response releases its request when the render errors, not only when it closes or is
+  cancelled.** The pass-through that watched for the end was a `TransformStream` whose `flush` and `cancel`
+  are not told about a source error; it is now the promise `pipeTo` returns. The browser's payload reader
+  is the same pipe, in place of a hand-written pull loop, and the array the document's inline payload
+  arrives in is emptied as it is read instead of keeping the payload as text for the life of the page.
 - **A redirected navigation scrolls to the fragment of the URL it ends on** — added, changed or dropped by
   the redirect — instead of the one it started with. After a late redirect followed as a document load, the
   new document no longer restores the scroll offset of the entry it replaced.

@@ -70,6 +70,59 @@ test.describe('the caller’s result, whatever the page does next', () => {
   });
 });
 
+/*
+ * What a function can return: anything flight carries. The same in a reply with a page and in one without,
+ * so each case runs against both servers.
+ */
+for (const mode of ['auto', 'explicit']) {
+  test.describe(`return values, with ${mode === 'auto' ? 'the page in the reply' : 'no page in the reply'}`, () => {
+    let server;
+    test.beforeAll(async () => {
+      if (mode === 'explicit') server = await startTestbed('start', { env: { TESTBED_ACTION_REFRESH: 'explicit' } });
+    });
+    test.afterAll(async () => {
+      if (server) await stopServer(server.child);
+    });
+    const at = (path) => (server ? `${server.base}${path}` : path);
+
+    test('a promise inside a promise inside a promise', async ({ page }) => {
+      await openRace(page, at('/action-race'));
+      expect(await page.evaluate(() => window.__returns.nested('n'))).toBe('n-deep');
+    });
+
+    test('an async iterable, value by value', async ({ page }) => {
+      await openRace(page, at('/action-race'));
+      expect(await page.evaluate((label) => window.__returns.ticking(label, 5, 30), unique('ticks'))).toEqual([1, 2, 3, 4, 5]);
+    });
+
+    test('a value that fails after the reply began rejects where it is awaited, and the rest still arrives', async ({ page }) => {
+      await openRace(page, at('/action-race'));
+      const result = await page.evaluate(() => window.__returns.failsLate('half'));
+      expect(result.now).toBe('half');
+      expect(result.later).toMatch(/^rejected: /);
+    });
+
+    test('what cannot be serialized comes back as the caller’s own object', async ({ page }) => {
+      await openRace(page, at('/action-race'));
+      expect(await page.evaluate(() => window.__returns.handBack())).toEqual({ sameFunction: true, sameInstance: true });
+    });
+
+    test('navigating away mid-stream takes the screen, not the caller’s values', async ({ page }) => {
+      await openRace(page, at('/action-race'));
+      await page.evaluate((label) => {
+        window.__kept = window.__returns.ticking(label, 8, 80);
+      }, unique('kept'));
+      // A couple of values in, the visitor leaves the page that made the call.
+      await page.waitForTimeout(200);
+      await page.evaluate(() => navigation.navigate('/users').finished);
+      await expect(page.getByRole('heading', { level: 1, name: 'Users' })).toBeVisible();
+      // The navigation owns the screen. The caller is still owed everything the function returns.
+      expect(await page.evaluate(() => window.__kept)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+      await expect(page).toHaveURL(at('/users'));
+    });
+  });
+}
+
 test.describe("setServerFunctionRefresh('explicit')", () => {
   let server;
   test.beforeAll(async () => {
