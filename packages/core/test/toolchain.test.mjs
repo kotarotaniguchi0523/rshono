@@ -141,3 +141,41 @@ describe('both together', () => {
     assert.ok(!both.clientBoard.includes('icon-marker-beta'));
   });
 });
+
+describe('a page named through the app’s own alias', () => {
+  build({});
+
+  test('is built as a page: it renders, and its stylesheet is attached', async () => {
+    const { base, child } = await startApp(TOOLCHAIN_APP_DIR, 'start');
+    try {
+      const res = await fetch(`${base}/aliased`);
+      const html = await res.text();
+      assert.equal(res.status, 200, 'not the "was not built as a page" refusal an unrecognised thunk gets');
+      assert.match(html, /data-page="aliased"/);
+      // The stylesheet a page imports is attached by the page transform — which only runs for a file the
+      // framework knew to be a page.
+      const href = /<link rel="stylesheet"[^>]*href="(\/_static\/assets\/[^"]+\.css)"/.exec(html)?.[1];
+      assert.ok(href, 'the page links its stylesheet');
+      assert.match(await (await fetch(`${base}${href}`)).text(), /rgb\(10, ?20, ?30\)|#0a141e/i);
+    } finally {
+      await stopServer(child);
+    }
+  });
+
+  test('and under dev', async () => {
+    const { base, child } = await startApp(TOOLCHAIN_APP_DIR, 'dev');
+    try {
+      const res = await fetch(`${base}/aliased`);
+      assert.equal(res.status, 200);
+      assert.match(await res.text(), /data-page="aliased"/);
+    } finally {
+      await stopServer(child);
+    }
+  });
+
+  test('the manifest traced it like any other page', () => {
+    const manifest = JSON.parse(readFileSync(join(TOOLCHAIN_APP_DIR, 'dist', 'server', 'route-functions.json'), 'utf8'));
+    assert.deepEqual(manifest.unresolved, []);
+    assert.deepEqual(manifest.routes['/aliased'], []);
+  });
+});

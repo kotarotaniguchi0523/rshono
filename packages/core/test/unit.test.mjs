@@ -9,7 +9,7 @@ import { dirname, join } from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { scanPageFiles } from '../dist/builder/page-files.js';
+import { pageSpecifiers } from '../dist/builder/page-files.js';
 import { checkReactVersions } from '../dist/builder/react-versions.js';
 import { publicProcessModule, readsRealProcess, shadowProcessEnv } from '../dist/builder/env-shadow.js';
 import { createViteConfig } from '../dist/builder/vite-config.js';
@@ -1566,52 +1566,39 @@ describe('RequestContext enumerability', () => {
   });
 });
 
-describe('scanPageFiles', () => {
-  test('resolves inline component thunks, including @/ and index files', () => {
-    const dir = tempDir();
-    const srcDir = join(dir, 'src');
-    mkdirSync(join(srcDir, 'components', 'nested'), { recursive: true });
-    writeFileSync(join(srcDir, 'components', 'home.tsx'), 'export default () => null;');
-    writeFileSync(join(srcDir, 'components', 'about.ts'), 'export default () => null;');
-    writeFileSync(join(srcDir, 'components', 'nested', 'index.tsx'), 'export default () => null;');
-
-    const routesFile = join(srcDir, 'routes.ts');
-    writeFileSync(
-      routesFile,
-      `export const routes = [
+describe('pageSpecifiers', () => {
+  test('finds the specifier of every inline component thunk, as written', () => {
+    const source = `export const routes = [
          { path: '/', component: () => import('./components/home') },
          { path: '/about', component: async () => import("@/components/about") },
-         { path: '/nested', component: () => import('./components/nested') },
-         { path: '/missing', component: () => import('./components/gone') },
-         { path: '/indirect', component: loadSomething },
-       ];`,
-    );
-
-    const found = new Set();
-    scanPageFiles(routesFile, srcDir, found);
-    assert.deepEqual(
-      [...found].sort(),
-      [join(srcDir, 'components', 'about.ts'), join(srcDir, 'components', 'home.tsx'), join(srcDir, 'components', 'nested', 'index.tsx')].sort(),
-      'unresolvable and non-inline thunks are simply not page files',
-    );
+         { path: '/aliased', component: () => import('~pages/aliased') },
+         { path: '/spaced', component:( ) =>  import( './components/spaced' ) },
+         { path: '/pkg', component: () => import('some-package/page') },
+       ];`;
+    // Not resolved here: which file each names is the bundler's to say, alias and extension and all.
+    assert.deepEqual(pageSpecifiers(source), [
+      './components/home',
+      '@/components/about',
+      '~pages/aliased',
+      './components/spaced',
+      'some-package/page',
+    ]);
   });
 
-  test('clears previous results so a removed route stops being a page file', () => {
-    const dir = tempDir();
-    const srcDir = join(dir, 'src');
-    mkdirSync(srcDir, { recursive: true });
-    const routesFile = join(srcDir, 'routes.ts');
-    writeFileSync(routesFile, `export const routes = [];`);
-
-    const found = new Set(['stale-entry']);
-    scanPageFiles(routesFile, srcDir, found);
-    assert.deepEqual([...found], []);
+  test('a thunk that is not inline names nothing', () => {
+    const source = `const load = () => import('./components/manual');
+       export const routes = [
+         { path: '/indirect', component: load },
+         { path: '/wrapped', component: () => lazily(import('./components/wrapped')) },
+         { path: '/computed', component: () => import(\`./components/\${name}\`) },
+         { type: 'endpoint', path: '/api', server: () => import('./api') },
+       ];`;
+    assert.deepEqual(pageSpecifiers(source), [], 'such a page declares "use server-entry" itself');
   });
 
-  test('an unreadable routes file leaves the set empty instead of throwing', () => {
-    const found = new Set();
-    scanPageFiles(join(tempDir(), 'does-not-exist.ts'), tempDir(), found);
-    assert.deepEqual([...found], []);
+  test('no routes, no specifiers', () => {
+    assert.deepEqual(pageSpecifiers('export const routes = [];'), []);
+    assert.deepEqual(pageSpecifiers(''), []);
   });
 });
 
@@ -3545,5 +3532,131 @@ describe('how long a render holds its request', async () => {
     const { renderAbort } = renderSignal(request.signal);
     renderAbort.abort(new Error('a redirect ended this render'));
     assert.equal(request.signal.aborted, false);
+  });
+});
+
+describe('walking a build’s module graph', async () => {
+  const { walkModuleGraph } = await import('../dist/builder/module-graph.js');
+
+  /** A graph written as `id → { imports, dynamic, external }`; anything not listed has no record. */
+  const graphOf = (modules) => ({
+    getModuleInfo: (id) =>
+      Object.hasOwn(modules, id)
+        ? { importedIds: modules[id].imports ?? [], dynamicallyImportedIds: modules[id].dynamic ?? [], isExternal: modules[id].external ?? false }
+        : null,
+  });
+  const lookupOf = ({ client = {}, server = {} } = {}) => ({
+    clientReference: (id) => client[id],
+    serverFunctions: (id) => server[id] ?? [],
+  });
+  const walk = (modules, roots, lookup) => {
+    const { clientReferences, functions, complete } = walkModuleGraph(graphOf(modules), roots, lookupOf(lookup));
+    return { clientReferences: [...clientReferences].sort(), functions: [...functions].sort(), complete };
+  };
+
+  test('static and dynamic imports are both edges', () => {
+    const result = walk(
+      { page: { imports: ['a'], dynamic: ['lazy'] }, a: { imports: ['actions'] }, lazy: { imports: ['more'] }, actions: {}, more: {} },
+      ['page'],
+      { server: { actions: ['m1#save'], more: ['m2#remove'] } },
+    );
+    assert.deepEqual(result, { clientReferences: [], functions: ['m1#save', 'm2#remove'], complete: true });
+  });
+
+  test('a page that reaches nothing is complete and empty — which is an answer', () => {
+    assert.deepEqual(walk({ page: { imports: ['util'] }, util: {} }, ['page']), { clientReferences: [], functions: [], complete: true });
+  });
+
+  test('a root the bundler has no record of is not a page that reaches nothing', () => {
+    const result = walk({}, ['page']);
+    assert.equal(result.complete, false, 'unknown, and said so');
+    assert.deepEqual(result.functions, []);
+  });
+
+  test('a module with no record anywhere on the way makes the whole walk incomplete', () => {
+    const result = walk({ page: { imports: ['a', 'gone'] }, a: { imports: ['actions'] }, actions: {} }, ['page'], {
+      server: { actions: ['m1#save'] },
+    });
+    assert.equal(result.complete, false);
+    assert.deepEqual(result.functions, ['m1#save'], 'what was found before the trail went cold is a lower bound, kept for the diagnostic');
+  });
+
+  test('an external dependency is a leaf that is known, not one that is missing', () => {
+    const result = walk({ page: { imports: ['react', 'a'] }, react: { external: true, imports: ['never-followed'] }, a: {} }, ['page']);
+    assert.equal(result.complete, true, 'an external cannot hold an app’s server function');
+  });
+
+  test('client components are collected, by the id the browser build knows them by', () => {
+    const result = walk({ page: { imports: ['card'] }, card: { imports: ['button'] }, button: {} }, ['page'], {
+      client: { card: 'client:card', button: 'client:button' },
+    });
+    assert.deepEqual(result.clientReferences, ['client:button', 'client:card']);
+  });
+
+  test('a cycle ends, and each module is asked about once', () => {
+    let asked = 0;
+    const modules = { a: { imports: ['b'] }, b: { imports: ['c'] }, c: { imports: ['a'], dynamic: ['b'] } };
+    const graph = {
+      getModuleInfo: (id) => {
+        asked++;
+        return { importedIds: modules[id].imports ?? [], dynamicallyImportedIds: modules[id].dynamic ?? [] };
+      },
+    };
+    const result = walkModuleGraph(graph, ['a'], lookupOf());
+    assert.equal(result.complete, true);
+    assert.equal(asked, 3);
+  });
+
+  test('several roots are one walk: shared modules are not counted twice', () => {
+    const result = walk({ one: { imports: ['shared'] }, two: { imports: ['shared'] }, shared: {} }, ['one', 'two'], { server: { shared: ['m#f'] } });
+    assert.deepEqual(result.functions, ['m#f']);
+  });
+
+  test('a tree-shaken module is still in the graph, so what it imports is still counted', () => {
+    // The bundler keeps a record of a module it later drops. Listing a function that is imported and never
+    // called over-counts, which is the safe direction for "what may this page call".
+    const result = walk({ page: { imports: ['unused'] }, unused: { imports: ['actions'] }, actions: {} }, ['page'], {
+      server: { actions: ['m#orphan'] },
+    });
+    assert.deepEqual(result, { clientReferences: [], functions: ['m#orphan'], complete: true });
+  });
+});
+
+describe('which build warnings are by design', async () => {
+  const { isExpectedWarning } = await import('../dist/builder/vite-config.js');
+
+  test('a broken source map from the RSC plugin’s own plugins is expected', () => {
+    for (const plugin of ['rsc:virtual:vite-rsc/assets-manifest', 'rsc:inject-async-local-storage', 'rsc:encryption-key'])
+      assert.equal(isExpectedWarning({ code: 'SOURCEMAP_BROKEN', plugin }), true, plugin);
+  });
+
+  test('a broken source map from anywhere else is the author’s to know about', () => {
+    for (const plugin of ['my-app-plugin', 'rsvhono:pages', 'rsvhono:env-shadow', 'vite:react-compiler', undefined])
+      assert.equal(isExpectedWarning({ code: 'SOURCEMAP_BROKEN', plugin }), false, String(plugin));
+  });
+
+  test('the two RSC directives being dropped by the bundler is the point', () => {
+    for (const directive of ['"use client"', "'use server'", '`use client`'])
+      assert.equal(
+        isExpectedWarning({
+          code: 'MODULE_LEVEL_DIRECTIVE',
+          message: `Module level directives cause errors when bundled, ${directive} in "x.tsx" was ignored.`,
+        }),
+        true,
+      );
+  });
+
+  test('any other directive that is dropped is still reported', () => {
+    for (const message of [
+      'Module level directives cause errors when bundled, "use asm" in "x.js" was ignored.',
+      '"use strict" was ignored',
+      undefined,
+    ])
+      assert.equal(isExpectedWarning({ code: 'MODULE_LEVEL_DIRECTIVE', message }), false);
+  });
+
+  test('nothing else is hidden', () => {
+    for (const code of ['CIRCULAR_DEPENDENCY', 'UNRESOLVED_IMPORT', 'EVAL', undefined])
+      assert.equal(isExpectedWarning({ code, plugin: 'rsc:x', message: '"use client"' }), false);
   });
 });

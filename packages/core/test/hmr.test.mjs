@@ -77,6 +77,91 @@ describe('a production build', async () => {
   });
 });
 
+/*
+ * Whether a position in what was built still points at the line that was written. Two of this framework's
+ * own transforms touch the modules below — the page gets two exports appended (`rsvhono:pages`), and a client
+ * component rendered on the server has `process` rebound (`rsvhono:env-shadow`) — and the page imports a
+ * stylesheet, which the RSC plugin rewrites around. A map that survived all of that names the source line.
+ */
+describe('source maps', async () => {
+  const { SourceMap } = await import('node:module');
+  buildApp(APP_DIR, { env: ENV });
+
+  /** 1-based line and 0-based column of `needle` in `text`. */
+  function positionOf(text, needle) {
+    const at = text.indexOf(needle);
+    assert.notEqual(at, -1, `${JSON.stringify(needle)} is in the text`);
+    const before = text.slice(0, at);
+    return { line: before.split('\n').length, column: at - (before.lastIndexOf('\n') + 1) };
+  }
+
+  /** Where the server bundle's map says `needle` came from. */
+  function originOf(dir, needle) {
+    for (const file of readdirSync(dir, { recursive: true }).filter((name) => /\.m?js$/.test(name))) {
+      const code = readFileSync(join(dir, file), 'utf8');
+      if (!code.includes(needle) || !existsSync(join(dir, `${file}.map`))) continue;
+      const map = new SourceMap(JSON.parse(readFileSync(join(dir, `${file}.map`), 'utf8')));
+      const { line, column } = positionOf(code, needle);
+      const entry = map.findEntry(line - 1, column);
+      return { source: entry.originalSource, line: entry.originalLine + 1, file };
+    }
+    assert.fail(`no built file with a map contains ${JSON.stringify(needle)}`);
+  }
+
+  const sourceLine = (file, needle) => positionOf(readFileSync(join(APP_DIR, 'src', file), 'utf8'), needle).line;
+
+  test('a page that imports a stylesheet and had exports appended still maps to its own lines', () => {
+    // Near the top of the component and near the bottom: appended code must not have shifted either.
+    for (const needle of ['vite app', 'item 7']) {
+      const origin = originOf(join(APP_DIR, 'dist', 'server'), needle);
+      assert.match(origin.source, /src\/pages\/home\.tsx$/, `${needle}: ${origin.source}`);
+      assert.equal(origin.line, sourceLine('pages/home.tsx', needle), `${JSON.stringify(needle)} maps to the line it was written on`);
+    }
+  });
+
+  test('a server function maps to its own line', () => {
+    const origin = originOf(join(APP_DIR, 'dist', 'server'), 'fixture action failure');
+    assert.match(origin.source, /src\/actions\.ts$/);
+    assert.equal(origin.line, sourceLine('actions.ts', 'fixture action failure'));
+  });
+
+  test('a client component, as rendered on the server with its environment shadowed, maps to its own line', () => {
+    const origin = originOf(join(APP_DIR, 'dist', 'server', 'ssr'), 'data-testid');
+    assert.match(origin.source, /src\/components\/counter\.tsx$/);
+    assert.equal(origin.line, sourceLine('components/counter.tsx', 'data-testid'));
+  });
+
+  test('the browser bundle ships no map at all', () => {
+    const files = readdirSync(join(APP_DIR, 'dist', 'static'), { recursive: true });
+    assert.deepEqual(
+      files.filter((name) => name.endsWith('.map')),
+      [],
+      'that directory is public',
+    );
+    for (const name of files.filter((file) => file.endsWith('.js')))
+      assert.doesNotMatch(readFileSync(join(APP_DIR, 'dist', 'static', name), 'utf8'), /sourceMappingURL/, name);
+  });
+
+  test('under dev, the module the browser is served carries a map back to the source file', async () => {
+    const { child, base } = await startApp(APP_DIR, 'dev', { env: ENV });
+    try {
+      await (await fetch(`${base}/`)).text();
+      const served = await (await fetch(`${base}/_static/src/components/counter.tsx`)).text();
+      const inline = /\/\/# sourceMappingURL=data:application\/json;base64,([A-Za-z0-9+/=]+)\s*$/.exec(served);
+      assert.ok(inline, 'an inline map, which is what DevTools reads');
+      const payload = JSON.parse(Buffer.from(inline[1], 'base64').toString('utf8'));
+      assert.ok(payload.sources.some((source) => /counter\.tsx$/.test(source)));
+      const map = new SourceMap(payload);
+      const { line, column } = positionOf(served, '"count"');
+      const entry = map.findEntry(line - 1, column);
+      assert.match(entry.originalSource, /counter\.tsx$/);
+      assert.equal(entry.originalLine + 1, sourceLine('components/counter.tsx', 'data-testid="count"'));
+    } finally {
+      await stopServer(child);
+    }
+  });
+});
+
 describe('rsvhono dev', async () => {
   const { child, base } = await startApp(APP_DIR, 'dev', { env: ENV });
   after(() => stopServer(child));

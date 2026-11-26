@@ -120,6 +120,17 @@ those.
   are not told about a source error; it is now the promise `pipeTo` returns. The browser's payload reader
   is the same pipe, in place of a hand-written pull loop, and the array the document's inline payload
   arrives in is emptied as it is read instead of keeping the payload as text for the life of the page.
+- **A page named through the app's own alias is recognised as a page.** Which file an inline
+  `component: () => import('…')` names was worked out by a small resolver of the framework's own — relative
+  paths, `@/`, four extensions, `index` files — so `import('~pages/home')` under an alias from
+  `vite.resolve.alias` failed the build with advice to add `'use server-entry'`. The specifier is now given
+  to Vite's resolver, in the environment the page is built in.
+- **The route-functions manifest no longer records a page it could not trace as one that reaches nothing.**
+  A module the bundler has no record of makes the page `unresolved`; an external dependency is a known
+  leaf; a tree-shaken import is still counted.
+- **Build warnings are hidden only where they are by design**: `SOURCEMAP_BROKEN` from the RSC plugin's own
+  `rsc:*` plugins, and `MODULE_LEVEL_DIRECTIVE` for `'use client'` / `'use server'`. The same warnings from
+  an app's plugin, or about any other directive, are shown again.
 - **A redirected navigation scrolls to the fragment of the URL it ends on** — added, changed or dropped by
   the redirect — instead of the one it started with. After a late redirect followed as a document load, the
   new document no longer restores the scroll offset of the entry it replaced.

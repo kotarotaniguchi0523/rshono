@@ -16,7 +16,14 @@ export default defineConfig({
   react: compiler ? { compiler: true } : undefined,
   vite: {
     // Stands in for an icon package: a bare specifier with a barrel behind it.
-    resolve: { alias: { 'fixture-icons': fileURLToPath(new URL('./src/vendor/icons', import.meta.url)) } },
+    resolve: {
+      alias: {
+        'fixture-icons': fileURLToPath(new URL('./src/vendor/icons', import.meta.url)),
+        // An alias of the app's own, used by a route: the framework has to learn which file it names from
+        // the resolver, since it is nowhere in the framework's own conventions.
+        '~pages': fileURLToPath(new URL('./src/pages', import.meta.url)),
+      },
+    },
     ...(importMap === 'all' ? { build: { chunkImportMap: true } } : null),
     ...(importMap === 'client' ? { environments: { client: { build: { chunkImportMap: true } } } } : null),
     plugins: transform ? [transformImports({ 'fixture-icons': { transform: 'fixture-icons/{{member}}' } })] : [],

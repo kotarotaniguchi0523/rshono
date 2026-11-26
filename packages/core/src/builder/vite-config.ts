@@ -12,6 +12,7 @@ import rsc, { getPluginApi } from '@vitejs/plugin-rsc';
 import { hasDirective } from '@vitejs/plugin-rsc/transforms';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { BUILD_GLOBAL } from '../runtime/build-id.js';
+import { walkModuleGraph, type ModuleGraph } from './module-graph.js';
 import { writeFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import {
@@ -30,7 +31,7 @@ import type { DeployPreset } from '../deploy/presets.js';
 import { PAGE_ASSETS, PAGE_MARK } from '../runtime/validate-entries.js';
 import { resolveServerConfig, type ServerConfig } from '../server/server-config.js';
 import { PUBLIC_PROCESS_ID, publicProcessModule, readsRealProcess, shadowProcessEnv } from './env-shadow.js';
-import { scanPageFiles } from './page-files.js';
+import { pageSpecifiers } from './page-files.js';
 import { publicEnv } from './public-env.js';
 import { checkReactVersions } from './react-versions.js';
 
@@ -151,27 +152,14 @@ function rsvhonoRouteFunctions(pageFiles: Set<string>, srcDir: string): Plugin {
   const reached = new Map<string, Set<string>>();
 
   /** Everything reachable from `roots` in the graph of the environment `context` belongs to. */
-  const walk = (
-    context: { getModuleInfo(id: string): { importedIds: readonly string[]; dynamicallyImportedIds: readonly string[] } | null },
-    roots: Iterable<string>,
-  ) => {
-    const clientReferences = new Set<string>();
-    const functions = new Set<string>();
-    const seen = new Set<string>();
-    const queue = [...roots];
-    for (let index = 0; index < queue.length; index++) {
-      const id = queue[index];
-      if (seen.has(id)) continue;
-      seen.add(id);
-      const client = manager!.clientReferenceMetaMap[id];
-      if (client) clientReferences.add(client.importId);
-      const server = manager!.serverReferences.metaMap.get(id);
-      if (server) for (const name of server.exportNames) functions.add(`${server.referenceKey}#${name}`);
-      const info = context.getModuleInfo(id);
-      if (info) queue.push(...info.importedIds, ...info.dynamicallyImportedIds);
-    }
-    return { clientReferences, functions };
-  };
+  const walk = (context: ModuleGraph, roots: Iterable<string>) =>
+    walkModuleGraph(context, roots, {
+      clientReference: (id) => manager!.clientReferenceMetaMap[id]?.importId,
+      serverFunctions: (id) => {
+        const server = manager!.serverReferences.metaMap.get(id);
+        return server ? server.exportNames.map((name) => `${server.referenceKey}#${name}`) : [];
+      },
+    });
 
   return {
     name: 'rsvhono:route-functions',
@@ -182,14 +170,19 @@ function rsvhonoRouteFunctions(pageFiles: Set<string>, srcDir: string): Plugin {
       if (!manager || manager.isScanBuild) return;
       if (this.environment.name === 'rsc') {
         for (const file of pageFiles) {
-          const { clientReferences, functions } = walk(this, [file]);
+          const { clientReferences, functions, complete } = walk(this, [file]);
+          // A page whose graph could not be followed to the end is left out, which the join reads as
+          // "unresolved" — never as a page that reaches nothing.
+          if (!complete) continue;
           clientRoots.set(file, clientReferences);
           reached.set(file, functions);
         }
       }
       if (this.environment.name === 'client') {
         for (const [file, roots] of clientRoots) {
-          for (const id of walk(this, roots).functions) reached.get(file)!.add(id);
+          const { functions, complete } = walk(this, roots);
+          if (!complete) reached.delete(file);
+          else for (const id of functions) reached.get(file)!.add(id);
         }
       }
     },
@@ -208,12 +201,45 @@ function rsvhonoRouteFunctions(pageFiles: Set<string>, srcDir: string): Plugin {
   };
 }
 
-function rsvhonoPages(pageFiles: Set<string>, srcDir: string): Plugin {
+function rsvhonoPages(pageFiles: Set<string>, srcDir: string, routesFile: string): Plugin {
+  const routes = normalizePath(routesFile);
+  /** The pages `routes.ts` named last time it was read — as distinct from the ones that declared themselves. */
+  let named = new Set<string>();
+  /** Learns which files the routes module's thunks load, by asking the resolver what each `import('…')` names. */
+  async function learn(context: { resolve(source: string, importer?: string): Promise<{ id: string; external: unknown } | null> }, source: string) {
+    const next = new Set<string>();
+    for (const specifier of pageSpecifiers(source)) {
+      const resolved = await context.resolve(specifier, routesFile);
+      if (resolved && !resolved.external) next.add(fileOf(resolved.id));
+    }
+    for (const page of named) pageFiles.delete(page);
+    for (const page of next) pageFiles.add(page);
+    named = next;
+  }
   return {
     name: 'rsvhono:pages',
+    // Before anything is loaded. A page is not always reached through the routes module first: one that
+    // declares a server function inline is also a module the RSC plugin loads for its own reasons, and can be
+    // transformed before `routes.ts` is.
+    async buildStart() {
+      if (this.environment.name !== 'rsc') return;
+      let source: string;
+      try {
+        source = readFileSync(routesFile, 'utf8');
+      } catch {
+        return;
+      }
+      await learn(this, source);
+    },
     async transform(code, id) {
       if (this.environment.name !== 'rsc') return;
       const file = fileOf(id);
+      // And again whenever the routes module is edited while the dev server runs: it is re-transformed
+      // before any page it now names can be imported through it.
+      if (normalizePath(file) === routes) {
+        await learn(this, code);
+        return;
+      }
       if (!pageFiles.has(file) && !code.includes('use server-entry')) return;
       const ast = await parseAstAsync(code);
       // Left for `assertPageModule` to refuse, with a message about the page rather than about a wrapper.
@@ -326,7 +352,7 @@ function rsvhonoEnvShadow(env: Record<string, string>, nodeEnv: string, srcDir: 
 }
 
 /** Resolves the framework's build-time specifiers, and serves the server-action allowlist. */
-function rsvhonoCore(aliases: ReadonlyMap<string, string>, routesFile: string, srcDir: string, pageFiles: Set<string>, rootDir: string): Plugin {
+function rsvhonoCore(aliases: ReadonlyMap<string, string>, rootDir: string): Plugin {
   let resolvedConfig: ResolvedConfig | undefined;
 
   return {
@@ -396,11 +422,6 @@ function rsvhonoCore(aliases: ReadonlyMap<string, string>, routesFile: string, s
       });
     },
 
-    // A route added or re-pointed while the dev server runs is a page the next transform has to recognise.
-    watchChange(id) {
-      if (normalizePath(id) === normalizePath(routesFile)) scanPageFiles(routesFile, srcDir, pageFiles);
-    },
-
     resolveId: {
       order: 'pre',
       handler(source, importer) {
@@ -431,16 +452,24 @@ function rsvhonoCore(aliases: ReadonlyMap<string, string>, routesFile: string, s
 
 /**
  * Two warnings the bundler raises on every build, about things that are by design here, and that bury the
- * ones an app author can act on:
+ * ones an app author can act on. Each is let through unless it is exactly the case that is by design:
  *
- * - `SOURCEMAP_BROKEN` — the RSC plugin's own virtual modules are transformed without a source map;
- * - `MODULE_LEVEL_DIRECTIVE` — `'use client'` / `'use server'` "may not be preserved when bundling", which is
- *   the point: the RSC plugin has already read each directive and replaced the module with a reference.
+ * - `SOURCEMAP_BROKEN` **from one of the RSC plugin's own plugins** (`rsc:*`) — its virtual modules and the
+ *   two patches it makes to React's server build are emitted without a map. Measured on the testbed: every
+ *   one of the 45 comes from there. The same warning from the app's plugin, or from this framework's, means
+ *   a stack trace or DevTools will point at the wrong line, and is shown.
+ * - `MODULE_LEVEL_DIRECTIVE` **for `'use client'` or `'use server'`** — "may not be preserved when
+ *   bundling", which is the point: the RSC plugin has already read the directive and replaced the module
+ *   with a reference. Any other directive the bundler drops is still reported.
  */
-const EXPECTED_WARNINGS = new Set(['SOURCEMAP_BROKEN', 'MODULE_LEVEL_DIRECTIVE']);
+export function isExpectedWarning(warning: { code?: string; plugin?: string; message?: string }): boolean {
+  if (warning.code === 'SOURCEMAP_BROKEN') return warning.plugin?.startsWith('rsc:') === true;
+  if (warning.code === 'MODULE_LEVEL_DIRECTIVE') return /["'`]use (?:client|server)["'`]/.test(warning.message ?? '');
+  return false;
+}
 
-function ignoreExpectedWarnings(warning: { code?: string }, warn: (warning: never) => void): void {
-  if (!warning.code || !EXPECTED_WARNINGS.has(warning.code)) warn(warning as never);
+function ignoreExpectedWarnings(warning: { code?: string; plugin?: string; message?: string }, warn: (warning: never) => void): void {
+  if (!isExpectedWarning(warning)) warn(warning as never);
 }
 
 /** One of the two server environments: what the deploy target needs of it. */
@@ -491,9 +520,8 @@ export function createViteConfig({ rootDir, isDev, config, preset, buildId }: Vi
     ['@rsvhono/deploy', frameworkFile(isDev ? join('deploy', 'dev', 'runtime.js') : preset.runtimeModule)],
   ]);
 
-  /** The app's page modules, by file. Shared: filled here and on a routes edit, wrapped by `rsvhonoPages`, skipped by the RSC plugin. */
+  /** The app's page modules, by file. Shared: filled and marked by `rsvhonoPages`, skipped by the RSC plugin. */
   const pageFiles = new Set<string>();
-  scanPageFiles(routesFile, srcDir, pageFiles);
 
   const serverConfig: ServerConfig = {
     ...resolveServerConfig(config, { isDev, outDir: BUILD_OUT_DIR, envBindings: preset.envBindings }),
@@ -552,7 +580,7 @@ export function createViteConfig({ rootDir, isDev, config, preset, buildId }: Vi
     plugins: [
       ...(merged.plugins ?? []),
       react(config.react),
-      rsvhonoPages(pageFiles, srcDir),
+      rsvhonoPages(pageFiles, srcDir, routesFile),
       ...(isDev ? [] : [rsvhonoRouteFunctions(pageFiles, srcDir)]),
       rsc({
         entries: {
@@ -564,7 +592,7 @@ export function createViteConfig({ rootDir, isDev, config, preset, buildId }: Vi
         serverHandler: false,
         rscCssTransform: { filter: (id) => !pageFiles.has(fileOf(id)) },
       }),
-      rsvhonoCore(aliases, routesFile, srcDir, pageFiles, rootDir),
+      rsvhonoCore(aliases, rootDir),
       rsvhonoEnvShadow(browserEnv, browserEnv.NODE_ENV, srcDir),
       rsvhonoCssPackageImports(),
     ],
