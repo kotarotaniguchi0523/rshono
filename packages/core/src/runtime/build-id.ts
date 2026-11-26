@@ -47,7 +47,17 @@ export function isOtherBuild(theirs: string | null | undefined): boolean {
 export class BuildMismatchError extends Error {
   /** For a caller that wants to tell this from an ordinary failure without matching on the message. */
   readonly code = 'RSVHONO_BUILD_MISMATCH';
-  constructor(readonly serverBuild: string) {
+  /**
+   * @param serverBuild - The build the server named.
+   * @param refused - Whether the server is known to have turned the request down *before running anything*:
+   *   its `409` to a function call from another build. `false` is not "it ran" but "nothing says it did
+   *   not" — another build answered with a reply this page will not decode, and a function may be behind it.
+   *   A caller deciding whether a mutation is safe to make again reads this; nothing retries on its own.
+   */
+  constructor(
+    readonly serverBuild: string,
+    readonly refused = false,
+  ) {
     super('[rsvhono] this page was built by a different deployment than the server that answered. Reload the page to get the current one.');
     this.name = 'BuildMismatchError';
   }

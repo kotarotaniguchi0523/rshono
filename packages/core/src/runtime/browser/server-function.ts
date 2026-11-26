@@ -12,7 +12,7 @@ import { BuildMismatchError } from '../build-id.js';
 import { parseControlIntent } from '../control.js';
 import { createRscRequest } from '../request.js';
 import { documentUrl, reloadForBuild } from './document.js';
-import { followRootIntent, mutationCompleted, navigating, navigationIntent, push, revalidate } from './navigation.js';
+import { followRootIntent, mutationCompleted, navigating, navigationIntent, push, recoverRoot, revalidate } from './navigation.js';
 import { discardPrefetched, requestResource } from './page-resource.js';
 import { createAttempt, schedule } from './render-attempt.js';
 
@@ -57,17 +57,23 @@ export function installServerFunctions(): void {
       try {
         payload = await resource.rootReady;
       } catch (error) {
-        pagesArrived = true;
-        mutationCompleted();
-        // The server is another build: it refused the call before running anything, and this page can call
-        // nothing on it. The caller is told — the call is not sent again, here or after the reload, since
-        // nothing says it is safe to — and the page is replaced with the server's own, once the caller's
-        // handlers have had the rejection.
+        // The server is another build, and this page can call nothing on it. The caller is told — the call is
+        // not sent again, here or after the reload, since nothing says it is safe to — and the page is
+        // replaced with the server's own once the caller's handlers have had the rejection. Replaced with
+        // *where the visitor is going*, if a navigation is under way: a reload of this URL would cancel it.
         if (error instanceof BuildMismatchError) {
-          const { serverBuild } = error;
-          setTimeout(() => reloadForBuild(serverBuild), 0);
+          const { serverBuild, refused } = error;
+          // Refused before anything ran: no mutation happened, so nothing on screen or on the wire is older
+          // for it. Answered by the other build, a function may have run, and that is treated as if it had.
+          if (!refused) {
+            pagesArrived = true;
+            mutationCompleted();
+          }
+          setTimeout(() => reloadForBuild(serverBuild, recoverRoot), 0);
           throw error;
         }
+        pagesArrived = true;
+        mutationCompleted();
         // A `redirect()` or `notFound()` that arrived as an error is a change of screen like any other.
         if (!parseControlIntent(error)) throw error;
         if (ownsScreen()) followRootIntent(resource, error);

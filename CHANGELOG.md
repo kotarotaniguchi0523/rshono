@@ -63,7 +63,9 @@ those.
   - A payload from another build is not decoded — it names chunks the page does not have. The navigation
     ends in a document load of where it was going.
   - A function call from a page another build rendered is refused with `409` **before it runs**. The caller
-    gets a `BuildMismatchError` (`code: 'RSVHONO_BUILD_MISMATCH'`), the call is never re-sent, and the page
+    gets a `BuildMismatchError` (`code: 'RSVHONO_BUILD_MISMATCH'`, and `refused: true` — as against a reply
+    another build did send, where a function may have run), the call is never re-sent, nothing is re-read
+    for a call that was refused, and the page
     reloads once per build per tab.
   - Nothing is added to a page fetch's request, so nothing varies by it and no cache key grows. Off under
     `rsvhono dev`.

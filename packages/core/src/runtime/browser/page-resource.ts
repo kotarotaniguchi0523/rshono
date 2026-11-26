@@ -97,11 +97,13 @@ async function payloadResponse(request: Request): Promise<Response> {
   // Before the body is looked at, whatever it is: a payload from another build names chunks this page
   // cannot load, and a refusal from one is not a payload at all. Nothing of it reaches the decoder.
   const theirs = response.headers.get(BUILD_HEADER);
+  const contentType = response.headers.get('content-type');
   if (isOtherBuild(theirs)) {
     void response.body?.cancel().catch(() => {});
-    throw new BuildMismatchError(theirs!);
+    // The framework's own refusal is a 409 that is not flight, sent before any function is looked up. A
+    // reply in flight from another build — whatever its status — came from past that point.
+    throw new BuildMismatchError(theirs!, response.status === 409 && !contentType?.startsWith(FLIGHT_CONTENT_TYPE));
   }
-  const contentType = response.headers.get('content-type');
   if (contentType?.startsWith(FLIGHT_CONTENT_TYPE)) return response;
   // Read for the message: a plain-text refusal says what it refused only in its body, and HTTP/2 has no
   // `statusText` at all. Bounded, because this is an error path and the body is not ours to trust.

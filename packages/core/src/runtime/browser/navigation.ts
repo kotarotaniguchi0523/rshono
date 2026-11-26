@@ -250,7 +250,9 @@ export function settleRenderIntent(error: unknown, document: PageResource): 'fol
  * happen — and otherwise it is the URL in the address bar.
  */
 export function recoverRoot(): void {
-  leave([...underway].at(-1)?.destination.url ?? location.href);
+  // With nowhere else to go it is a reload, said as one: navigating to the address bar's own URL is a
+  // fragment navigation whenever that URL has a fragment, and loads nothing.
+  leave([...underway].at(-1)?.destination.url);
 }
 
 // ── Showing a payload ────────────────────────────────────────────────────────────────────────────────────

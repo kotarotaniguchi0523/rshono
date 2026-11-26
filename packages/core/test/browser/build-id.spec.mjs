@@ -121,6 +121,101 @@ test('a function call refused by another build reaches its caller, is not sent a
   expect(posts).toBe(2);
 });
 
+const refuse = (route) => route.fulfill({ status: 409, contentType: 'text/plain', headers: { 'x-rsvhono-build': OTHER_BUILD }, body: 'Conflict' });
+const callRace = (page, label) =>
+  page.evaluate(
+    (name) =>
+      window.__race(name, 0).then(
+        () => 'resolved',
+        (error) => ({ code: error.code, refused: error.refused }),
+      ),
+    label,
+  );
+
+test('a call the other build refused did not run, and says so; one it answered may have', async ({ page }) => {
+  await page.goto('/action-race');
+  await page.waitForFunction(() => document.documentElement.dataset.actionRaceReady === 'true');
+  let answer = 'refuse';
+  await page.route('**/action-race', async (route) => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    if (answer === 'refuse') return refuse(route);
+    // The other build *ran* it and replied; the reply is flight this page must not decode.
+    const response = await route.fetch();
+    await route.fulfill({ response, headers: { ...response.headers(), 'x-rsvhono-build': OTHER_BUILD } });
+  });
+  expect(await callRace(page, 'refused')).toEqual({ code: 'RSVHONO_BUILD_MISMATCH', refused: true });
+  await page.waitForFunction(() => document.documentElement.dataset.actionRaceReady === 'true');
+  answer = 'run';
+  expect(await callRace(page, 'ran-elsewhere')).toEqual({ code: 'RSVHONO_BUILD_MISMATCH', refused: false });
+});
+
+test('calls that were refused changed nothing, so nothing is re-read for them', async ({ page }) => {
+  await page.goto('/action-race');
+  await page.waitForFunction(() => document.documentElement.dataset.actionRaceReady === 'true');
+  const rereads = [];
+  page.on('request', (request) => {
+    if (isPayloadGet(request, '/action-race')) rereads.push(request.url());
+  });
+  await page.route('**/action-race', (route) => (route.request().method() === 'POST' ? refuse(route) : route.fallback()));
+
+  // Two at once: with replies that carry pages this ends in a re-read, since neither page can be trusted to
+  // be the newer. Neither of these ran.
+  const both = await page.evaluate(() =>
+    Promise.all(
+      ['a', 'b'].map((name) =>
+        window.__race(name, 0).then(
+          () => 'resolved',
+          (error) => error.refused,
+        ),
+      ),
+    ),
+  );
+  expect(both).toEqual([true, true]);
+  await page.waitForFunction(() => document.documentElement.dataset.actionRaceReady === 'true');
+  expect(rereads).toEqual([]);
+});
+
+test('a refusal that arrives while the visitor is navigating reloads where they are going, not where they were', async ({ page }) => {
+  await page.goto('/action-race');
+  await page.waitForFunction(() => document.documentElement.dataset.actionRaceReady === 'true');
+  let answerCall;
+  const callHeld = new Promise((resolve) => (answerCall = resolve));
+  await page.route('**/action-race', async (route) => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    await callHeld;
+    await refuse(route);
+  });
+  // The navigation's payload is held too, so it is still on its way when the refusal lands.
+  let answerNavigation;
+  const navigationHeld = new Promise((resolve) => (answerNavigation = resolve));
+  await page.route('**/users', async (route) => {
+    if (!isPayloadGet(route.request(), '/users')) return route.fallback();
+    await navigationHeld;
+    await route.fallback().catch(() => {});
+  });
+  try {
+    await page.evaluate(() => {
+      window.__refused = window.__race('late', 0).then(
+        () => 'resolved',
+        (error) => error.code,
+      );
+    });
+    await page.waitForTimeout(100);
+    await page.evaluate(() => void navigation.navigate('/users').finished.catch(() => {}));
+    await page.waitForTimeout(100);
+    await expect(page).toHaveURL('/action-race');
+
+    answerCall();
+
+    // One document, of the page the visitor asked for. The caller was told first — on the page that is gone.
+    await expect(page.getByRole('heading', { level: 1, name: 'Users' })).toBeVisible();
+    await expect(page).toHaveURL('/users');
+  } finally {
+    answerCall();
+    answerNavigation();
+  }
+});
+
 test('alternating between two builds never loops: every recovery is one document load the visitor asked for', async ({ page }) => {
   await open(page, '/');
   const loads = countDocumentLoads(page);

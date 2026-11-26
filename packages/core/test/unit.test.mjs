@@ -2619,6 +2619,8 @@ describe('build id', () => {
     assert.equal(error.code, 'RSVHONO_BUILD_MISMATCH');
     assert.equal(error.name, 'BuildMismatchError');
     assert.equal(error.serverBuild, 'build-b');
+    assert.equal(error.refused, false, 'unless told otherwise, nothing says the call did not run');
+    assert.equal(new BuildMismatchError('build-b', true).refused, true);
     assert.ok(error instanceof Error);
     assert.equal(BUILD_HEADER, 'x-rsvhono-build');
   });
@@ -2864,6 +2866,16 @@ describe('browser document helpers', async () => {
 
   test('spendOnce is false when it cannot keep count', () => {
     withBrowser({ throws: true }, () => assert.equal(doc.spendOnce('k'), false));
+  });
+
+  test('a build mismatch reloads by the load it is given, counted the same way', () => {
+    withBrowser({}, ({ calls }) => {
+      const went = [];
+      doc.reloadForBuild('build-q', () => went.push('elsewhere'));
+      doc.reloadForBuild('build-q', () => went.push('again'));
+      assert.deepEqual(went, ['elsewhere'], 'once per build, whoever does the loading');
+      assert.deepEqual(calls, [], 'and not also by the default');
+    });
   });
 
   test('a build mismatch reloads once per server build', () => {

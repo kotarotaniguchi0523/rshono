@@ -255,9 +255,12 @@ export function spendOnce(key: string): boolean {
  * Reloads for a server that turned out to be a newer build than this page — once per build, per tab. After
  * the reload the document and its scripts are the server's own; if they are not, because a cache in between
  * is still handing out the old page, a second reload would get the same thing.
+ *
+ * `load` is how: by default this document again. A caller that knows the visitor is on their way somewhere
+ * passes the load that goes there instead — the page being replaced is the one they were leaving.
  */
-export function reloadForBuild(serverBuild: string): void {
-  if (spendOnce(`rsvhono:build:${serverBuild}`)) loadDocument();
+export function reloadForBuild(serverBuild: string, load: () => void = loadDocument): void {
+  if (spendOnce(`rsvhono:build:${serverBuild}`)) load();
 }
 
 /** The `sessionStorage` key bounding the recovery reload for one URL. Spent here, released in {@link main}. */
