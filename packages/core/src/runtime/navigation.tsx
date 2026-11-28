@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, startTransition, useContext, useLayoutEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { createContext, useContext, useMemo, useSyncExternalStore, type ReactNode } from 'react';
 
 /** Outcome of a router action: a committed page, an unavailable history entry, or a browser load. */
 export type NavigationOutcome = { kind: 'rendered'; url: URL } | { kind: 'no-op' } | { kind: 'document-navigation' };
@@ -40,6 +40,13 @@ export interface NavigationRouter {
   forward(): Promise<NavigationOutcome>;
   /** Re-fetches the current route from the server, re-running its server components. */
   refresh(): Promise<NavigationOutcome>;
+  /**
+   * Starts fetching the page at `href` ahead of a navigation to it. Nothing visible changes: no URL, no
+   * `pending`, and a redirect in what comes back is not followed unless a navigation takes it over. The
+   * payload is used once, by the next navigation to that URL within 30 seconds, and is thrown away by any
+   * server function that runs in between. A link can ask for the same thing with `data-prefetch`.
+   */
+  prefetch(href: string): void;
   /** `true` while a soft navigation is in flight — use it to disable controls or show a spinner. */
   pending: boolean;
 }
@@ -62,7 +69,7 @@ export interface NavigationState {
 
 const noop = (): Promise<NavigationOutcome> => Promise.resolve({ kind: 'no-op' });
 
-const defaultRouter: NavigationRouter = { push: noop, replace: noop, back: noop, forward: noop, refresh: noop, pending: false };
+const defaultRouter: NavigationRouter = { push: noop, replace: noop, back: noop, forward: noop, refresh: noop, prefetch: () => {}, pending: false };
 
 /**
  * Carries the live {@link NavigationRouter} from the hydration runtime to {@link useNavigation}.
@@ -76,22 +83,14 @@ export const RouterContext = createContext<NavigationRouter>(defaultRouter);
 type RouteState = { href: string; params: Record<string, string> };
 const NavigationContext = createContext<RouteState | null>(null);
 
-function subscribeToBrowserUrl(onStoreChange: () => void): () => void {
-  if (typeof navigation !== 'undefined') navigation.addEventListener('currententrychange', onStoreChange);
-  window.addEventListener('hashchange', onStoreChange);
-  window.addEventListener('popstate', onStoreChange);
-  return () => {
-    if (typeof navigation !== 'undefined') navigation.removeEventListener('currententrychange', onStoreChange);
-    window.removeEventListener('hashchange', onStoreChange);
-    window.removeEventListener('popstate', onStoreChange);
-  };
-}
+/**
+ * The browser's address as the root currently renders it — see `browser/root.tsx`, which owns the one piece
+ * of state behind it. `undefined` where there is no browser root: the server render.
+ *
+ * @internal
+ */
+export const BrowserAddressContext = createContext<string | undefined>(undefined);
 
-const readBrowserUrl = (): string => (typeof navigation !== 'undefined' ? navigation.currentEntry?.url : undefined) ?? location.href;
-
-// This immutable snapshot distinguishes hydration from a later client mount. It does not subscribe
-// to URL mutations: those updates remain transition-owned. A newly mounted error-boundary child must
-// not start from an old payload URL and throw before its layout effect can reconcile the address.
 const subscribeToHydration = () => () => {};
 const readHydrated = () => true;
 const readServerHydrated = () => false;
@@ -124,7 +123,8 @@ export function useNavigationPathname(): string | undefined {
  * `'use client'` component.
  *
  * During SSR and hydration, `url` and `params` come from the server payload. After hydration `url`
- * follows the browser address, including on prerendered pages and while the next payload is pending.
+ * follows the browser address, including on prerendered pages and while the next payload is pending —
+ * and a component that suspends on it holds `router.pending`, and the navigation, until it resolves.
  * `params` still describes the displayed page until its replacement commits. `router` holds the
  * imperative actions and a `pending` flag, true while a soft navigation is in flight.
  *
@@ -136,7 +136,7 @@ export function useNavigationPathname(): string | undefined {
  * @example
  * ```tsx
  * 'use client';
- * import { useNavigation } from '@rshono/core/client';
+ * import { useNavigation } from '@rsvhono/core/client';
  *
  * export function NextPage() {
  *   const { url, router } = useNavigation();
@@ -154,33 +154,21 @@ export function useNavigationPathname(): string | undefined {
  * @throws If called outside a page's React tree, where there is no navigation
  *   context to read.
  *
- * @see {@link https://www.rshono.com/docs/api#rshonocoreclient | Docs — `@rshono/core/client`}
+ * @see {@link https://www.rshono.com/docs/api#rsvhonocoreclient | Docs — `@rsvhono/core/client`}
  * @see {@link https://www.rshono.com/docs/pages#client-components | Docs — client components}
  */
 export function useNavigation(): NavigationState {
   const value = useContext(NavigationContext);
   if (!value) {
     throw new Error(
-      "[rshono] useNavigation() must be called inside a 'use client' component rendered by a page. In a server component, read the URL from getRequestContext() instead.",
+      "[rsvhono] useNavigation() must be called inside a 'use client' component rendered by a page. In a server component, read the URL from getRequestContext() instead.",
     );
   }
   const router = useContext(RouterContext);
-  // Preserve SSR markup, then read the address independently of page fetching after hydration.
+  const address = useContext(BrowserAddressContext);
+  // The server's markup was rendered from the payload's URL, which has no fragment — and, on a prerendered
+  // page, no query. Hydrate against that, then switch to the browser's address.
   const hydrated = useSyncExternalStore(subscribeToHydration, readHydrated, readServerHydrated);
-  const [browserHref, setBrowserHref] = useState(() => (hydrated ? readBrowserUrl() : value.href));
-  useLayoutEffect(() => {
-    let lastHref: string | undefined;
-    const update = () => {
-      const href = readBrowserUrl();
-      // Several browser events may report the same address; avoid restarting an unchanged transition.
-      if (href === lastHref) return;
-      lastHref = href;
-      startTransition(() => setBrowserHref(href));
-    };
-    const unsubscribe = subscribeToBrowserUrl(update);
-    // Catch address changes between rendering and registration, including initial fragments.
-    update();
-    return unsubscribe;
-  }, []);
+  const browserHref = hydrated && address !== undefined ? address : value.href;
   return useMemo(() => ({ url: new URL(browserHref), params: value.params, router }), [browserHref, value.params, router]);
 }

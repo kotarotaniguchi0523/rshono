@@ -1,19 +1,19 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { readdirSync, readFileSync } from 'node:fs';
+import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = join(fileURLToPath(import.meta.url), '..', '..', '..', '..');
 export const TESTBED_DIR = join(ROOT, 'apps', 'testbed');
 export const TESTBED_DIST = join(TESTBED_DIR, 'dist');
-/** Where `rshono dev` builds to — deliberately not `dist/`, so `rshono build` cannot overwrite a running server. */
-export const TESTBED_DEV_DIR = join(TESTBED_DIR, '.rshono');
 export const FIXTURES_DIR = join(ROOT, 'packages', 'core', 'test', 'fixtures');
 /** The smallest app the framework accepts: src/routes.ts and nothing else. */
 export const MINIMAL_APP_DIR = join(FIXTURES_DIR, 'minimal-app');
 /** An app whose CSS only compiles if the builder found its `postcss.config.mjs`. */
 export const POSTCSS_APP_DIR = join(FIXTURES_DIR, 'postcss-app');
-const CLI = join(ROOT, 'packages', 'core', 'bin', 'rshono.mjs');
+/** An app that turns on React Compiler and an import transform through the framework's config, each by env switch. */
+export const TOOLCHAIN_APP_DIR = join(FIXTURES_DIR, 'toolchain-app');
+const CLI = join(ROOT, 'packages', 'core', 'bin', 'rsvhono.mjs');
 
 /** What each command prints once it is listening; the capture group is the port. */
 const READY = {
@@ -62,7 +62,7 @@ export function buildTestbed(config, { env } = {}) {
 }
 
 /**
- * Runs `rshono <args>` to completion — for asserting on a command that is expected to *exit*, where
+ * Runs `rsvhono <args>` to completion — for asserting on a command that is expected to *exit*, where
  * {@link startApp} would only ever reject. Both streams are returned as one string, because which of
  * them a refusal lands on is not the point of any test that uses this.
  */
@@ -92,18 +92,38 @@ export function importServerBundle(cacheKey) {
   return importAppBundle(TESTBED_DIR, cacheKey);
 }
 
-/** {@link importServerBundle} for any app directory — the fixtures included. */
+/**
+ * {@link importServerBundle} for any app directory — the fixtures included.
+ *
+ * Imported from a private copy of `dist/`, not from `dist/` itself. A build is `main.mjs` plus the chunks it
+ * imports by relative path, and Node caches those by URL: a second build evaluated from the same directory
+ * would get a fresh `main.mjs` wired to the *previous* build's chunks — two RSC runtimes sharing one React.
+ * The copy sits inside the app so `node_modules` still resolves, and keeps the `dist/server` shape the
+ * runtime finds its root by.
+ */
 export function importAppBundle(dir, cacheKey) {
-  return import(`${pathToFileURL(join(dir, 'dist', 'server', 'main.mjs')).href}?${cacheKey}`);
+  const copy = mkdtempSync(join(dir, `.bundle-${cacheKey ?? 'app'}-`));
+  process.on('exit', () => rmSync(copy, { recursive: true, force: true }));
+  cpSync(join(dir, 'dist'), join(copy, 'dist'), { recursive: true });
+  return import(pathToFileURL(join(copy, 'dist', 'server', 'main.mjs')).href);
 }
 
-/** Runs `rshono <command>` in `dir` and resolves once it reports the address it is listening on. */
+/** Runs `rsvhono <command>` in `dir` and resolves once it reports the address it is listening on. */
 export function startApp(dir, command, { env = {}, timeoutMs = 60_000 } = {}) {
   const ready = READY[command];
-  if (!ready) throw new Error(`no ready pattern for \`rshono ${command}\` — it would resolve on any output`);
+  if (!ready) throw new Error(`no ready pattern for \`rsvhono ${command}\` — it would resolve on any output`);
   const child = spawn(process.execPath, [CLI, command], {
     cwd: dir,
-    env: { ...process.env, PORT: '0', ...APP_ENV, ...env },
+    env: {
+      ...process.env,
+      PORT: '0',
+      ...APP_ENV,
+      ...env,
+      // The dev server runs the framework's own `dist/runtime/*.js` through Vite's module runner — the same
+      // file URLs, but transformed code — so its V8 coverage maps to those files as noise. Set empty rather
+      // than left out: Node hands the variable down to a child that does not name it.
+      ...(command === 'dev' ? { NODE_V8_COVERAGE: '' } : null),
+    },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let output = '';
@@ -145,56 +165,61 @@ export function stopServer(child) {
   });
 }
 
-/** The built browser bundle's sources — the only way to assert what did, and did not, ship to it. */
-export function clientChunks() {
-  const dir = join(TESTBED_DIST, 'static', 'chunks');
-  return readdirSync(dir).map((file) => readFileSync(join(dir, file), 'utf8'));
+const CLIENT_ASSETS_DIR = join(TESTBED_DIST, 'static', 'assets');
+
+/** The built browser bundle, file name → source. */
+function clientScripts() {
+  return new Map(
+    readdirSync(CLIENT_ASSETS_DIR)
+      .filter((file) => file.endsWith('.js'))
+      .map((file) => [file, readFileSync(join(CLIENT_ASSETS_DIR, file), 'utf8')]),
+  );
 }
 
-/** Where one module's body starts inside a minified chunk: `DRuE(e,c,a){` or `"+TQ/"(e,c,a){`. */
-const MODULE_BOUNDARY = /(?:"(?:[^"\\]|\\.)*"|[A-Za-z_$][\w$]*)\(\w+,\w+,\w+\)\{/g;
+/** The built browser bundle's sources — the only way to assert what did, and did not, ship to it. */
+export function clientChunks() {
+  return [...clientScripts().values()];
+}
 
-/** The chunk from the start of the module containing `marker` — enough to read that module's call sites. */
-function moduleContaining(chunk, marker) {
-  const at = chunk.indexOf(marker);
-  if (at === -1) return null;
-  let start = 0;
-  for (const boundary of chunk.matchAll(MODULE_BOUNDARY)) {
-    if (boundary.index > at) break;
-    start = boundary.index;
-  }
-  return chunk.slice(start);
+/** `{o as a,i,n}` → `[['o', 'a'], ['i', 'i'], ['n', 'n']]`: each binding's name on the left of `as`, and on the right. */
+function bindings(list) {
+  return list
+    .split(',')
+    .map((entry) => entry.trim().split(/\s+as\s+/))
+    .filter(([name]) => name)
+    .map(([left, right = left]) => [left, right]);
 }
 
 /**
  * The id React assigned a server action, found the way the browser finds it: through the `'use client'`
  * component that calls it, identified by `marker` — a string only that component renders.
  *
- * Not by position. The RSC transform turns the app's action module into a proxy of
- * `createServerReference("<id>")` declarations, and *every* chunk that needs *any* action gets the whole
- * proxy — so all of the app's ids appear in all of them, in an order that is the minifier's business and
- * shifts when an action is added. What is unambiguous is the call site: the component reaches for exactly
- * one of the proxy's mangled exports, and that name maps back to a declaration and so to an id.
+ * The RSC plugin turns the app's action module into a chunk of `createServerReference("<key>#<name>")`
+ * declarations, exported under minified names; the component's chunk imports the ones it uses. So: the
+ * chunk holding the marker, its imports, and the first of those it actually calls.
  */
 export function serverActionId(marker) {
-  for (const chunk of clientChunks()) {
-    const body = moduleContaining(chunk, marker);
-    if (!body) continue;
+  const scripts = clientScripts();
+  for (const source of scripts.values()) {
+    if (!source.includes(marker)) continue;
 
-    // `let r=(0,f.createServerReference)("<id>"),d=…` — the declaration order, as local names.
-    const idForLocal = new Map(
-      [...chunk.matchAll(/([A-Za-z_$][\w$]*)=\(0,\w+\.createServerReference\)\(\s*"([0-9a-f]{20,})"/g)].map((m) => [m[1], m[2]]),
-    );
-    // `a.d(c,{},{$5:b,Oy:n,…})` — the mangled export names those locals are published under.
-    const localForExport = new Map(
-      [...chunk.matchAll(/\.d\(\w+,\{\},\{([^}]*)\}\)/g)].flatMap((m) => [...m[1].matchAll(/([\w$]+):([\w$]+)/g)].map((e) => [e[1], e[2]])),
-    );
+    let first = null;
+    for (const [, imported, from] of source.matchAll(/import\{([^}]*)\}from"\.\/([^"]+)"/g)) {
+      const proxy = scripts.get(from);
+      if (!proxy) continue;
+      // `n=t(\`1b65654b4e6a#createUser\`,…` — each declaration's local name and the id it carries.
+      const idForLocal = new Map([...proxy.matchAll(/([\w$]+)=[\w$]+\(`([0-9a-f]+#[\w$]+)`/g)].map((m) => [m[1], m[2]]));
+      if (idForLocal.size === 0) continue;
+      const localForExport = new Map(bindings(proxy.match(/export\{([^}]*)\}/)?.[1] ?? '').map(([local, exported]) => [exported, local]));
 
-    // The first of those exports the marker's own module calls, e.g. `(0,d.ri)()`.
-    for (const call of body.matchAll(/\(0,[\w$]+\.([\w$]+)\)\(/g)) {
-      const id = idForLocal.get(localForExport.get(call[1]));
-      if (id) return id;
+      for (const [exported, local] of bindings(imported)) {
+        const id = idForLocal.get(localForExport.get(exported));
+        if (!id) continue;
+        const call = new RegExp(`(?<![\\w$.])${local.replace(/\$/g, '\\$')}\\(`).exec(source);
+        if (call && (first === null || call.index < first.index)) first = { id, index: call.index };
+      }
     }
+    if (first) return first.id;
   }
   throw new Error(
     `no client component rendering ${JSON.stringify(marker)} calls a server action. ` +
@@ -217,7 +242,7 @@ export function actionFormData(html, fields = {}) {
 
   const meta = hidden('$ACTION_1:0');
   const key = hidden('$ACTION_KEY');
-  const id = html.match(/name="(\$ACTION_ID_[0-9a-f]+)"/)?.[1];
+  const id = html.match(/name="(\$ACTION_ID_[0-9a-f]+#\w+)"/)?.[1];
   if (meta && key) {
     form.set('$ACTION_REF_1', hidden('$ACTION_REF_1') ?? '');
     form.set('$ACTION_1:0', meta);
@@ -231,4 +256,14 @@ export function actionFormData(html, fields = {}) {
 
   for (const [name, value] of Object.entries(fields)) form.set(name, value);
   return form;
+}
+
+/** Every hidden field of a server-rendered form, as a browser without JavaScript would post them. */
+export function hiddenFields(html) {
+  return Object.fromEntries(
+    [...html.matchAll(/<input type="hidden" name="([^"]+)"(?: value="([^"]*)")?\/>/g)].map(([, name, value = '']) => [
+      name,
+      value.replaceAll('&quot;', '"').replaceAll('&amp;', '&'),
+    ]),
+  );
 }

@@ -1,18 +1,35 @@
-// Rspack through its Node API rather than `@rspack/cli`, a dependency whose only job would be parsing a config
-// file this already has in hand.
-import { rspack } from '@rspack/core';
-import config from '../rspack.config.mjs';
+// Vite through its Node API rather than a config file and the CLI: two entries, bundled for Node with their
+// one dependency (@clack/prompts) inlined, so the published package installs nothing.
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { build } from 'vite';
 
-const stats = await new Promise((resolve, reject) => {
-  rspack(config, (error, stats) => (error ? reject(error) : resolve(stats)));
+const dir = join(import.meta.dirname, '..');
+const { version } = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'));
+
+const { output } = await build({
+  configFile: false,
+  root: dir,
+  logLevel: 'warn',
+  define: { __CREATE_RSVHONO_VERSION__: JSON.stringify(version) },
+  ssr: { noExternal: true },
+  build: {
+    ssr: true,
+    target: 'node22',
+    outDir: 'dist',
+    emptyOutDir: true,
+    minify: false,
+    rollupOptions: {
+      input: { cli: join(dir, 'src', 'cli.ts'), api: join(dir, 'src', 'api.ts') },
+      output: {
+        entryFileNames: '[name].mjs',
+        chunkFileNames: '[name]-[hash].mjs',
+        banner: '// Bundled by Vite — edit src/ and rebuild. Includes @clack/prompts (MIT).',
+      },
+    },
+  },
 });
 
-const { errors, warnings } = stats.toJson({ errors: true, warnings: true, all: false });
-for (const warning of warnings ?? []) console.warn(`  ⚠ ${warning.message}`);
-if (errors?.length) {
-  for (const error of errors) console.error(`  ✗ ${error.message}`);
-  process.exit(1);
+for (const file of output) {
+  if (file.type === 'chunk') console.log(`  • bundled dist/${file.fileName} (${(file.code.length / 1024).toFixed(0)} kB)`);
 }
-
-const { assets } = stats.toJson({ assets: true, all: false });
-for (const asset of assets ?? []) console.log(`  • bundled dist/${asset.name} (${(asset.size / 1024).toFixed(0)} kB)`);

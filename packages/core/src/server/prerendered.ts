@@ -28,10 +28,10 @@ export const VARIANTS = {
  * request — so the file the pass is about to write is one no deployment will read, and saying "prerendered"
  * about it is a lie by omission.
  *
- * Set only while `RSHONO_PRERENDER` is in the environment, which is `rshono build`'s own process, so it never
+ * Set only while `RSVHONO_PRERENDER` is in the environment, which is `rsvhono build`'s own process, so it never
  * reaches a deployed response; and never stored, since only the body is.
  */
-export const PRERENDER_NONCE_HEADER = 'x-rshono-prerender-nonce';
+export const PRERENDER_NONCE_HEADER = 'x-rsvhono-prerender-nonce';
 
 /**
  * Process-local bridge from the server bundle's build-time HTML render to the SSG writer.
@@ -41,7 +41,7 @@ export const PRERENDER_NONCE_HEADER = 'x-rshono-prerender-nonce';
  * an HTTP header or changing the public response body. It is attached to the response stream because Hono may
  * copy the `Response` object while it finalizes a handler result.
  */
-const PRERENDER_FLIGHT: unique symbol = Symbol.for('rshono.prerender.flight-stream');
+const PRERENDER_FLIGHT: unique symbol = Symbol.for('rsvhono.prerender.flight-stream');
 
 type PrerenderResponseBody = ReadableStream<Uint8Array> & {
   [PRERENDER_FLIGHT]?: Promise<Uint8Array>;
@@ -62,7 +62,7 @@ export function getPrerenderFlight(response: Response): Promise<Uint8Array> | un
  * It exists so a reader can tell "this store has no page for that path" without asking the store, which is
  * the difference between a `Map` lookup and a failed `readFile` (or, without a filesystem, a failed store
  * fetch) on **every** request to a static route the build could not prerender — misses are deliberately not
- * cached, so that one never warms up. Absent is not an error: a build from an older rshono has none, and a
+ * cached, so that one never warms up. Absent is not an error: a build from an older rsvhono has none, and a
  * reader that finds none looks the way it always did.
  */
 export const SSG_MANIFEST_FILE = 'manifest.json';

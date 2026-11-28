@@ -6,7 +6,7 @@ export default async function UserList() {
   const users = await fakeDB.listUsers();
 
   return (
-    <Layout title="Users — rshono">
+    <Layout title="Users — rsvhono">
       <div className="page">
         <h1>Users</h1>
         <p className="description">

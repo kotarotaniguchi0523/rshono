@@ -11,6 +11,210 @@ those.
 
 ## Unreleased
 
+### Changed
+
+- **The package is now `rsvhono`.** The npm scope is `@rsvhono/*`, the CLI is `rsvhono`, the config file is
+  `rsvhono.config.ts`, the scaffolder is `create-rsvhono`, and environment variables read `RSVHONO_*`. Nothing
+  answers to the old names; rename the dependency, the config file and the scripts together.
+
+- **The bundler is Vite.** `rsvhono build` and `rsvhono dev` now run on Vite with
+  [`@vitejs/plugin-rsc`](https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-rsc) and React's
+  own `react-server-dom-webpack`, in place of Rspack and `react-server-dom-rspack`. Routes, pages, server
+  functions, the Hono sub-app, prerendering and the four deploy targets behave as before, and the output
+  keeps its layout (`dist/server/main.mjs`, `dist/static`, `dist/public`, `dist/ssg`).
+  [`packages/core/docs/vite-migration.md`](packages/core/docs/vite-migration.md) is the full record,
+  including what is known to be weaker.
+
+- **`rsvhono dev` is one Vite dev server.** No worker thread, proxy or `.rshono/` output directory: client
+  modules and HMR are served under `/_static/`, and every other request is handled by the app in-process. A
+  client edit is Fast Refresh; a server-component edit re-renders the page in place, client state kept.
+
+- **React 19.3.1**, with `react-server-dom-webpack` to match — and required: the peer range is exactly
+  `19.3.1`, and a build fails unless `react`, `react-dom` and the RSC runtime resolve to one version. It used
+  to check the first two and warn about the minor.
+
+- **The client runtime needs the Navigation API** (Chrome/Edge 135, Firefox 147, Safari 26.2). Without it
+  the page is no longer hydrated at all — it stays the server-rendered document — where `router.push()` used
+  to fall back to `location.assign()`.
+
+- **A server action's reply changes the screen only if nothing has asked to navigate since the call.** That
+  now covers its `redirect()` and `notFound()` as well as its re-rendered page, and a reply that loses no
+  longer cancels the navigation that won: the destination commits and is re-read. Two actions in flight
+  together end in one re-read. Return values and errors reach the caller as before. A re-read goes round
+  until the screen has caught up with the last mutation — it waits for a navigation rather than cancelling
+  it, discards a result that a later mutation has outdated, and bypasses the HTTP cache.
+
+- **A late `redirect()` or `notFound()` no longer takes the visitor away from a navigation they started.** A
+  signal raised inside a `<Suspense>` after the shell reaches the browser as an error, and it used to be
+  followed whatever page it came from — so a page being left could pull the visitor to its redirect target,
+  or reload itself, in the middle of the navigation leaving it. The signal is now traced to the payload it
+  arrived in and followed only if that payload still owns the navigation; the history mode comes from what
+  asked for the payload rather than from whatever was pending. A page that asks for two different redirects
+  is sent to the first.
+
+- **A server action called from the `notFound` page runs.** Its POST goes to a URL no route matches, and
+  that was answered with the 404 page and nothing else: the action never ran, and its caller got `undefined`
+  back as if it had. It now runs like an action posted to any page — same origin check, same id check — and
+  the page it re-renders is the 404 page, with the action's result in the payload.
+
+- **A page and a server from different builds notice.** Every `rsvhono build` mints one id, compiled into
+  the server bundle, handed to the browser by the document, and written to `dist/rsvhono-build.json`. The server names its
+  build on every response (`x-rsvhono-build`); the browser names its own on a server function call.
+  - A payload from another build is not decoded — it names chunks the page does not have. The navigation
+    ends in a document load of where it was going.
+  - A function call from a page another build rendered is refused with `409` **before it runs**. The caller
+    gets a `BuildMismatchError` (`code: 'RSVHONO_BUILD_MISMATCH'`, and `refused: true` — as against a reply
+    another build did send, where a function may have run), the call is never re-sent, nothing is re-read
+    for a call that was refused, and the page
+    reloads once per build per tab.
+  - Nothing is added to a page fetch's request, so nothing varies by it and no cache key grows. Off under
+    `rsvhono dev`.
+
+- **A rebuild of unchanged source ships under unchanged file names.** The build id was inlined into the
+  browser bundle, and a value that is new on every build renamed the chunk it landed in — the one with React
+  — and every chunk importing it: on the testbed, 20 of 23 files and 95% of the bytes, with no source
+  change. The browser now reads the id from the document (`self.__rsvhonoBuild`, in the inline script React
+  writes ahead of the entry, with the nonce), and the two server bundles keep their inlined copy. A document
+  whose CSP refuses that inline script boots a page that claims no build: its calls run, and it does not
+  notice a deploy.
+- **`build.chunkImportMap` is refused at build time.** Vite's experimental option imports chunks by names
+  that only an import map in the document resolves, and rsvhono does not emit one — the build used to
+  succeed and no page booted (client environment), or the server bundle failed to load (everywhere).
+- **A document whose scripts will not load reloads itself, once.** Two halves, for two moments. Before the
+  runtime is up, an inline preamble ahead of the entry chunk watches for the entry failing to load and for
+  Vite's `vite:preloadError`, and reloads the document so the server can hand out a page that names the files
+  it has. Once the runtime is up the preamble stands down and the runtime reloads only when React reports a
+  chunk's error _from a render_ — the page on screen, inside an app error boundary or not — because a failed
+  import on its own does not say whose it was:
+  - a payload fetched ahead (`data-prefetch`) that names a missing chunk does nothing to the page on screen
+    (it used to reload it);
+  - a navigation whose page needs a missing chunk recovers by one document load of its destination, and the
+    document that comes back is not reloaded again for the same hole;
+  - a build mismatch reloads on its own count, and is no longer held back by a chunk reload moments before.
+
+  One chunk reload per 30 seconds per tab, recorded as a time in `sessionStorage` and never released early:
+  a working boot does not prove the lazily imported chunks are there. Never while the page is being left;
+  not at all where `sessionStorage` is unusable. The preamble carries the CSP nonce and is not emitted under
+  `rsvhono dev`.
+
+- **`react` in `rsvhono.config.ts`** is passed to the `@vitejs/plugin-react` instance the framework
+  registers — `react: { compiler: true }` turns on the React Compiler (Oxc, client code only; needs
+  `oxc-transform-react`). A second `react()` under `vite.plugins` would register the plugin twice.
+
+- **`data-prefetch` and `router.prefetch(href)`.** A link marked `data-prefetch` has its payload fetched on
+  hover, focus or touch; the click that follows uses that fetch instead of making another. The payload is
+  held outside any navigation — the URL does not move, `router.pending` stays false, and a redirect in it is
+  not followed unless a navigation takes it over. At most four are kept, for thirty seconds, and any server
+  function throws them away — at the start of the call and again at its end, whether or not its reply
+  carries a page. Still an ordinary `<a>`, and only fetched ahead when a click on it would soft-navigate:
+  not for `data-native`, `download`, another `target`, a file, another origin, or a jump within the page
+  on screen. `router.prefetch()` refuses only what cannot be soft-navigated.
+- **A reply that carries only a function's result is rendered like any other flight response.** It was
+  written with a bare `renderToReadableStream`: a value that failed after the reply began — a rejected
+  promise, an iterable that threw — was printed by React and never reached `onServerError`, and the render
+  had no signal of its own. It now aborts with the request, reports to `onServerError` with source
+  `action` (not when the client simply left), and releases its hold on the request when it ends. The same
+  for the reply that carries a redirect beside a result.
+- **A flight response releases its request when the render errors, not only when it closes or is
+  cancelled.** The pass-through that watched for the end was a `TransformStream` whose `flush` and `cancel`
+  are not told about a source error; it is now the promise `pipeTo` returns. The browser's payload reader
+  is the same pipe, in place of a hand-written pull loop, and the array the document's inline payload
+  arrives in is emptied as it is read instead of keeping the payload as text for the life of the page.
+- **A page named through the app's own alias is recognised as a page.** Which file an inline
+  `component: () => import('…')` names was worked out by a small resolver of the framework's own — relative
+  paths, `@/`, four extensions, `index` files — so `import('~pages/home')` under an alias from
+  `vite.resolve.alias` failed the build with advice to add `'use server-entry'`. The specifier is now given
+  to Vite's resolver, in the environment the page is built in.
+- **The route-functions manifest no longer records a page it could not trace as one that reaches nothing.**
+  A module the bundler has no record of makes the page `unresolved`; an external dependency is a known
+  leaf; a tree-shaken import is still counted.
+- **Build warnings are hidden only where they are by design**: `SOURCEMAP_BROKEN` from the RSC plugin's own
+  `rsc:*` plugins, and `MODULE_LEVEL_DIRECTIVE` for `'use client'` / `'use server'`. The same warnings from
+  an app's plugin, or about any other directive, are shown again.
+- **A redirected navigation scrolls to the fragment of the URL it ends on** — added, changed or dropped by
+  the redirect — instead of the one it started with. After a late redirect followed as a document load, the
+  new document no longer restores the scroll offset of the entry it replaced.
+
+- **In development, the Performance panel has an `rsvhono` track** beside React's: when each payload's root
+  arrived and its stream ended, and how long each render took from being handed to React to committing. Not
+  in a production bundle.
+
+- **`setServerFunctionRefresh('explicit')` and `requestRefresh()`.** By default a server function called
+  from client code is still answered with the page rendered again. In `'explicit'` mode the reply is the
+  return value alone — the page module is not loaded and nothing is rendered — unless the function called
+  `requestRefresh()`. The client shows nothing and re-reads nothing for such a reply. A form posted without
+  JavaScript is answered with the page in either mode.
+
+- **`classifyRequest(request)`** tells middleware what a page-route request is: `document`, `rsc`,
+  `rsc-action` (with the id) or `form-action`. It is the framework's own classification, exported.
+
+- **An action's result survives whatever the page does after it.** A reply that is a redirect or the 404
+  page now carries the result of an action that had already finished, and the client no longer discards a
+  result because the reply also redirects.
+
+- **`navigation.finished` rejects for a navigation whose destination did not commit** — superseded, or failed
+  to render — instead of resolving once something else had.
+
+- **Navigations render under a React transition type** (`navigation-push`, `-replace`, `-reload`, `-back`,
+  `-forward`), for `<ViewTransition>`.
+
+### Security
+
+- **Server functions are held to the app's own origin by the framework**, for a call from client code as
+  well as for a form post, and without relying on `csrf()` or CORS. A call with `x-rsc-action` used to be
+  checked by nothing: another origin cannot send that header without a preflight, and the framework answers
+  none — until a `cors()` middleware does. An `Origin` that is present now has to be the app's, unless the
+  browser says `Sec-Fetch-Site: same-origin`. **Breaking** for an app that deliberately takes calls from
+  another origin: name it with `trustServerFunctionOrigins([...])`. A client that sends no `Origin` is
+  unaffected.
+
+- **`rsvhono build` records which server functions each route reaches**, in
+  `dist/server/route-functions.json`, and reports on it: how many functions, which routes it could not
+  trace, and which functions no route reaches. Worked out from Vite's module graph in both bundles, the way
+  `@vitejs/plugin-rsc`'s `action-reachability` example does, so a re-export, a lazy client component and a
+  dynamically imported server component are all followed. **Not enforced**: a request is not checked against
+  it. It is per module — a page that reaches one export of a `'use server'` file reaches them all.
+
+- **`beforeServerFunction(guard)`** runs before every server function — called from client code, posted by
+  a form without JavaScript, or called from the `notFound` page — with the function's id and the Hono
+  context. An `HTTPException` it throws is answered with its own status. The id is always a string: a
+  posted form is named by the function React decoded from it (plain, bound with `.bind()`, `useActionState`
+  and inline functions all are, on React 19.3.1), and a form whose function could not be named is refused
+  with `403` while a guard is installed rather than handed to a rule that cannot see what it is approving.
+
+- **Every server reference is checked against the build's allowlist, on every decode path.** The id in an
+  action call's header already was; a reference inside the arguments, in a form's `$ACTION_REF`, or in a
+  `useActionState` key was left to the loader. An export the module never had is now a 400 before anything
+  loads.
+
+- **The client runtime is rebuilt** around two objects: a `PageResource` (one payload being read — one fetch,
+  one `AbortController`, from the Navigation API's precommit phase to the render that shows it) and a
+  `RenderAttempt` (one request to show it, settled when React commits). Back and Forward are intercepted
+  like any other navigation instead of being answered from `popstate`.
+  [`packages/core/docs/client-runtime.md`](packages/core/docs/client-runtime.md) has what replaced what.
+  - `navigation.finished` now waits for a traversal's page to commit.
+  - A component suspending on `useNavigation().url` holds `router.pending` and the navigation until it
+    resolves, where under React 19.3 it would have been left behind.
+  - A server action's re-rendered page is shown only on the visit that called it; its return value always
+    reaches the caller.
+
+### Fixed
+
+- **A client disconnecting while the `error` page rendered** could still be logged as `the error page failed
+to render`, when the abort landed in the RSC half of that render.
+
+### Breaking
+
+- **`rspack` in `rsvhono.config.ts` is replaced by `vite`** — a Vite config merged over the generated one.
+  `RspackHookContext` is no longer exported. A `vite.config.*` file is not read.
+- **Tailwind needs no build config.** Remove the `postcss-loader` rule and the `postcss-loader` package; Vite
+  runs `postcss.config.mjs` itself.
+- **Client asset URLs** are `/_static/assets/<name>-<hash>.<ext>` (were `/_static/chunks/…`), and the document
+  boots one `<script type="module">`.
+- **Server action ids** are `<module key>#<export name>`.
+- **A page that is neither an inline `component: () => import('…')` thunk nor marked `'use server-entry'`**
+  now fails with a message naming it, where it used to fail for missing client assets.
+
 ## 1.0.0-rc.29
 
 ### Changed

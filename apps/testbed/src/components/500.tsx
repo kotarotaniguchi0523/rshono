@@ -1,5 +1,5 @@
-import type { ErrorPageProps } from '@rshono/core';
-import { notFound, redirect } from '@rshono/core/server';
+import type { ErrorPageProps } from '@rsvhono/core';
+import { notFound, redirect } from '@rsvhono/core/server';
 import { Layout } from './layout';
 
 export default function ErrorPage({ error, url }: ErrorPageProps) {
@@ -17,7 +17,7 @@ export default function ErrorPage({ error, url }: ErrorPageProps) {
   if (boom === 'throw') throw new Error('Intentional error-page failure.');
 
   return (
-    <Layout title="Something went wrong — rshono">
+    <Layout title="Something went wrong — rsvhono">
       <div className="page">
         <h1>Something went wrong</h1>
         <p className="description">{error.message}</p>

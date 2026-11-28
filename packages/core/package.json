@@ -1,7 +1,7 @@
 {
-  "name": "@rshono/core",
+  "name": "@rsvhono/core",
   "version": "1.0.0-rc.29",
-  "description": "Minimalist web framework — Hono + Rspack + React Server Components",
+  "description": "Minimalist web framework — Hono + Vite + React Server Components",
   "author": "Lasse <lasse@lassetange.com> (https://www.lassetange.com)",
   "license": "MIT",
   "keywords": [
@@ -9,7 +9,7 @@
     "react-server-components",
     "rsc",
     "hono",
-    "rspack",
+    "vite",
     "framework"
   ],
   "repository": {
@@ -38,7 +38,7 @@
     "./package.json": "./package.json"
   },
   "bin": {
-    "rshono": "./bin/rshono.mjs"
+    "rsvhono": "./bin/rsvhono.mjs"
   },
   "files": [
     "dist",
@@ -51,7 +51,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && node scripts/copy-dist-assets.mjs",
+    "build": "tsc -p tsconfig.build.json",
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
     "dev": "tsc -p tsconfig.build.json --watch",
     "typecheck": "tsc --noEmit",
@@ -62,10 +62,10 @@
   },
   "dependencies": {
     "@hono/node-server": "^2.1.8",
-    "@rspack/core": "2.2.8",
-    "@rspack/plugin-react-refresh": "2.0.2",
-    "react-refresh": "0.18.0",
-    "react-server-dom-rspack": "0.1.0"
+    "@vitejs/plugin-react": "6.3.0",
+    "@vitejs/plugin-rsc": "0.5.39",
+    "react-server-dom-webpack": "19.3.1",
+    "vite": "8.3.8"
   },
   "devDependencies": {
     "@playwright/test": "^1.65.1",
@@ -73,13 +73,13 @@
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.5",
     "hono": "^4.13.17",
-    "react": "19.2.8",
-    "react-dom": "19.2.8",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
     "typescript": "^7.0.2"
   },
   "peerDependencies": {
     "hono": "^4.8.0",
-    "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
   }
 }

@@ -1,4 +1,4 @@
-import type { PageProps } from '@rshono/core';
+import type { PageProps } from '@rsvhono/core';
 import { HydrationProbe } from './hydration-probe';
 import { Layout } from './layout';
 
@@ -8,7 +8,7 @@ import { Layout } from './layout';
  */
 export default function SlowShellSource(_props: PageProps) {
   return (
-    <Layout title="Slow shell source — rshono">
+    <Layout title="Slow shell source — rsvhono">
       <HydrationProbe name="slowShellSourceHydrated" />
       <div className="page">
         <p data-slow-shell-source>source</p>

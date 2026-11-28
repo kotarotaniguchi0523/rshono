@@ -7,7 +7,7 @@ Every page module **default-exports a server component** — nothing else. It ma
 data directly.
 
 ```tsx
-import type { PageProps } from '@rshono/core';
+import type { PageProps } from '@rsvhono/core';
 import { db } from '../db';
 
 export default async function Profile({ params, ctx }: PageProps<'/profile/:id'>) {
@@ -55,11 +55,11 @@ component's props. Don't spread page props: nested server components are meant t
 themselves.
 
 Nested server components and `'use server'` actions get no props — they call `getRequestContext()` from
-`@rshono/core/server` for the same object. There, `ctx.params` stands in for the `params` prop and
+`@rsvhono/core/server` for the same object. There, `ctx.params` stands in for the `params` prop and
 `ctx.req` for the parsed request:
 
 ```tsx
-import { getRequestContext } from '@rshono/core/server';
+import { getRequestContext } from '@rsvhono/core/server';
 
 async function Breadcrumb() {
   const ctx = getRequestContext(); // no props down here
@@ -81,7 +81,7 @@ on a full page load and silently vanish on a soft navigation. Write it from a
 
 Hono's response builders are the same story, and say so: `ctx.redirect()`, `ctx.notFound()`, `ctx.json()`
 and friends throw with a pointer to the API that works — `redirect()` and `notFound()` from
-`@rshono/core/server`, or an [endpoint route](/docs/routing#endpoint-routes) for a non-HTML response.
+`@rsvhono/core/server`, or an [endpoint route](/docs/routing#endpoint-routes) for a non-HTML response.
 `ctx.hono` is the full Hono `Context` for the long tail, and going through it bypasses the error rather
 than fixing it.
 
@@ -107,7 +107,7 @@ API:
 
 ```tsx
 'use client';
-import { useNavigation } from '@rshono/core/client';
+import { useNavigation } from '@rsvhono/core/client';
 
 export function NextPage() {
   const { url, router } = useNavigation();
@@ -162,7 +162,7 @@ response — [the rule above](#a-page-can-read-ctx-not-write-to-it) is the other
 
 ```ts
 'use server';
-import { getRequestContext, redirect } from '@rshono/core/server';
+import { getRequestContext, redirect } from '@rsvhono/core/server';
 
 export async function login(form: FormData) {
   const ctx = getRequestContext();
@@ -185,14 +185,14 @@ For headers that belong to a route rather than to a mutation, use
 
 ### Every action is a public endpoint
 
-That is the RSC model, not an rshono choice: the client is handed an id for each action and can call it
+That is the RSC model, not an rsvhono choice: the client is handed an id for each action and can call it
 with whatever arguments it likes. A [CSRF check](/docs/configuration#security-middleware) proves a
 request came from your own site; it says nothing about _who_ sent it. Authenticate, authorize and validate
 arguments inside the action, exactly as in a route handler.
 
 An action's arguments are decoded from the request body, which means the body is buffered before your code
 sees any of it. Register [`bodyLimit()`](/docs/configuration#security-middleware) so there is a size past
-which that never happens — `rshono build` warns when nothing under `src/` registers one.
+which that never happens — `rsvhono build` warns when nothing under `src/` registers one.
 
 ### Errors
 
@@ -220,11 +220,10 @@ See [Environment & secrets](/docs/configuration#environment-and-secrets).
 ## The `'use server-entry'` directive
 
 A technical note, not a step: none of the pages above write this directive, and neither does an app. It
-shows up in Rspack's output and in one error message, which is the only reason it is documented here.
+shows up in one error message, which is the only reason it is documented here.
 
-Compiled pages carry Rspack's `'use server-entry'`, which hangs the page's own client JS and CSS off its
-default export. The framework reads them back as the document's bootstrap scripts and stylesheet links —
-per-page code splitting with no asset manifest. The build finds the pages to mark by reading `routes.ts` for
+A module marked `'use server-entry'` is built as a page: its default export is wrapped so the page's
+stylesheets render with it and its props — `ctx` included — arrive untouched. The build finds the pages to mark by reading `routes.ts` for
 inline `component: () => import('…')` thunks and prepending the directive to exactly the modules they name.
 It re-scans on every rebuild, so a route added while the dev server is running needs no restart.
 

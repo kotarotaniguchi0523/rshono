@@ -9,36 +9,26 @@ Import a stylesheet from any component:
 import './styles.css';
 ```
 
-Rspack's native CSS pipeline compiles it, and the import **attaches the stylesheet to the importing
+Vite's CSS pipeline compiles it, and the import **attaches the stylesheet to the importing
 page's assets**. CSS is therefore code-split per route and `<link>`ed in the streamed HTML rather than
 fetched after hydration. `*.module.css` gets a class map.
 
 ## No PostCSS in the framework
 
-Not as a dependency, not as an optional one. Native CSS is everything a plain stylesheet needs — but
-that parser reads _finished_ CSS, and `@import 'tailwindcss'`, `@theme` and `@apply` are not that. A
-stylesheet that needs a plugin brings the plugin itself, through the
-[`rspack` hook](/docs/configuration#the-rspack-hook).
+Not as a dependency, not as an optional one. A plain stylesheet needs nothing — but `@import 'tailwindcss'`,
+`@theme` and `@apply` are not plain CSS. A stylesheet that needs a plugin brings the plugin itself: add a
+`postcss.config.mjs` to the project and Vite runs it, with nothing to add to `rsvhono.config.ts`.
 
 ## Tailwind
 
-Four things, and `npx @rshono/create@latest --tailwind` writes all of them:
+Three things, and `npx @rsvhono/create@latest --tailwind` writes all of them:
 
 ```bash
-npm i -D tailwindcss @tailwindcss/postcss postcss postcss-loader
-```
-
-```ts
-// rshono.config.ts — the hook is called once per compiler, so this reaches both graphs
-export default defineConfig({
-  rspack(config) {
-    config.module!.rules!.push({ test: /\.css$/i, use: ['postcss-loader'], type: 'css/auto' });
-  },
-});
+npm i -D tailwindcss @tailwindcss/postcss postcss
 ```
 
 ```js
-// postcss.config.mjs — the plugin list, which postcss-loader finds on its own
+// postcss.config.mjs — the plugin list, which Vite finds on its own
 export default { plugins: { '@tailwindcss/postcss': {} } };
 ```
 

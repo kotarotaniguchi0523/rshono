@@ -1,6 +1,11 @@
 import { expect, test } from '@playwright/test';
 
-test('a completed server action cancels automatic preparation of an older snapshot', async ({ page }) => {
+/*
+ * A navigation is on the wire, its payload rendered before the mutation, when an action from the page being
+ * left completes. The action must not take the navigation away — the visitor asked to go there — and the
+ * destination must not stay on the older snapshot either: it commits, and is then re-read.
+ */
+test('a server action leaves a navigation under way alone, and its destination is re-read', async ({ page }) => {
   await page.goto('/users');
   let release;
   const held = new Promise((resolve) => {
@@ -38,8 +43,9 @@ test('a completed server action cancels automatic preparation of an older snapsh
     expect(await (await actionResponse).text()).toContain(email);
     release();
     await expect.poll(() => page.evaluate(() => window.__auditNativeFinished)).toBe(true);
-    expect(await page.evaluate(() => window.__auditPreparationRejected)).toBe(true);
-    await expect(page).toHaveURL('/users');
+    expect(await page.evaluate(() => window.__auditPreparationRejected)).toBe(false);
+    await expect(page).toHaveURL('/users?audit=snapshot');
+    // Not in the payload the navigation committed — that one was rendered before the action ran.
     await expect(page.getByText(email, { exact: true })).toBeVisible();
     await page.reload();
     await expect(page.getByText(email, { exact: true })).toBeVisible();

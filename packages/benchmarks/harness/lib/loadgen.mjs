@@ -7,7 +7,7 @@ const WORKER = fileURLToPath(new URL('./load-worker.mjs', import.meta.url));
 
 /**
  * A Node driver rather than a shell-out to oha/bombardier, on purpose: it is always present, it
- * behaves identically on every machine, and — the part that matters — it handicaps all three targets
+ * behaves identically on every machine, and — the part that matters — it handicaps all four targets
  * in exactly the same way. Absolute rps from this driver is a lower bound on what the server can do;
  * the *ratio* between targets is the number worth reading.
  */

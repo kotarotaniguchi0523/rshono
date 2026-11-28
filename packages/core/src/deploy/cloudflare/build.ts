@@ -27,7 +27,7 @@ function workerName(rootDir: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9-]+/g, '-')
     .replace(/^-+|-+$/g, '');
-  return name || 'rshono-app';
+  return name || 'rsvhono-app';
 }
 
 // Fixed, not the day the build ran: wrangler's bundled workerd refuses a date newer than its own, so a config

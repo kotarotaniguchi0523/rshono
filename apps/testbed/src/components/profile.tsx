@@ -1,5 +1,5 @@
-import type { PageProps } from '@rshono/core';
-import { notFound } from '@rshono/core/server';
+import type { PageProps } from '@rsvhono/core';
+import { notFound } from '@rsvhono/core/server';
 import { fakeDB } from '../db';
 import { Layout } from './layout';
 import { NavInfo } from './nav-info';
@@ -12,7 +12,7 @@ export default async function Profile({ params }: PageProps<'/profile/:id'>) {
   const posts = await fakeDB.getUserPosts(user.id);
 
   return (
-    <Layout title={`${user.name} — rshono`}>
+    <Layout title={`${user.name} — rsvhono`}>
       <div className="page">
         <h1>
           <span className="emoji">{user.avatar}</span> {user.name}

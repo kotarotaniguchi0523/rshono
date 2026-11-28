@@ -1,13 +1,18 @@
+// eslint-disable-next-line @typescript-eslint/triple-slash-reference
+/// <reference path="../types/rsvhono-config.d.ts" />
 import React from 'react';
 import type { ReactFormState } from 'react-dom/client';
 import { renderToReadableStream } from 'react-dom/server';
-import { createFromReadableStream } from 'react-server-dom-rspack/client';
+import { createFromReadableStream, getClientEntryUrl } from '@vitejs/plugin-rsc/ssr';
+import { buildIdPreamble } from './build-id.js';
+import { chunkRecoveryPreamble } from './chunk-recovery.js';
 import { cameFromPayload, isControlDigest } from './control.js';
 import { injectFlightPayload } from './flight-inject.js';
 import type { RscPayload } from './entry.rsc.js';
 
+const isDev = typeof __RSVHONO_CONFIG__ !== 'undefined' && __RSVHONO_CONFIG__.isDev;
+
 export interface RenderHTMLOptions {
-  bootstrapScripts?: string[];
   formState?: ReactFormState;
   signal?: AbortSignal;
   nonce?: string;
@@ -15,7 +20,7 @@ export interface RenderHTMLOptions {
    * Called when SSR fails before the shell is sent with an error nothing else has seen, just before
    * {@link renderHTML} re-throws. Reporting is the RSC layer's job: this module is compiled into the SSR
    * layer, which gets its own instance of every module it imports, so a handler registered through
-   * `@rshono/core/server` is not reachable from here.
+   * `@rsvhono/core/server` is not reachable from here.
    *
    * **A defensive floor, and expected to stay quiet.** Every failure React announces reaches
    * {@link RenderHTMLOptions.onError} first, and both of the shapes that then abort the shell are already
@@ -90,10 +95,17 @@ async function renderHTMLInternal(
     options.onError?.(error);
   };
 
+  const clientEntry = getClientEntryUrl();
   let htmlStream: ReadableStream<Uint8Array>;
   try {
     htmlStream = await renderToReadableStream(<SsrRoot />, {
-      bootstrapScripts: options.bootstrapScripts,
+      // One module entry for every page; route code is reached from it lazily through client references.
+      // Ahead of the entry, inline: what to do if the entry — or a chunk it imports later — will not load.
+      // React writes this before the module script below and gives it the nonce. A build only: the dev
+      // server's modules are not hashed files that a deploy can take away. The build id rides the same
+      // script: the browser bundle has no copy of its own (`build-id.ts`).
+      bootstrapScriptContent: isDev ? undefined : buildIdPreamble() + chunkRecoveryPreamble(clientEntry),
+      bootstrapModules: [clientEntry],
       formState: options.formState,
       signal: options.signal,
       nonce: options.nonce,

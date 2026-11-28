@@ -7,8 +7,8 @@
 lasse@lassetange.com.
 
 A useful report says what an attacker can do, and how you know. If you have one, a minimal app that
-reproduces it is worth more than anything else — `npx @rshono/create@latest` plus the smallest diff that
-shows the problem. Include the rshono version, the Node version and the deploy target: several of the
+reproduces it is worth more than anything else — `npx @rsvhono/create@latest` plus the smallest diff that
+shows the problem. Include the rsvhono version, the Node version and the deploy target: several of the
 framework's boundaries are implemented per platform, so `cloudflare` and `node` can differ.
 
 You will get an acknowledgement within **3 working days** and an assessment within **7**. If a report is
@@ -17,8 +17,8 @@ advisory and the changelog unless you would rather not be.
 
 ## Supported versions
 
-The latest published release of `@rshono/core` gets security fixes. There are no long-term support
-branches: rshono pins `@rspack/core` and `react-server-dom-rspack` to exact versions and a release is what
+The latest published release of `@rsvhono/core` gets security fixes. There are no long-term support
+branches: rsvhono pins `vite`, `@vitejs/plugin-rsc` and `react-server-dom-webpack` to exact versions and a release is what
 moves them, so a fix backported onto an older pin has not been tested against anything.
 
 ## What is in scope
@@ -44,23 +44,34 @@ The framework owns four boundaries, and a defect in any of them is a vulnerabili
 ## What is not in scope
 
 - **An app's own middleware, or its absence.** Per-request security is Hono middleware in `src/server.ts` —
-  `csrf()`, `bodyLimit()`, `secureHeaders()` — and `create-rshono` scaffolds it. An app that removed it is
-  not a framework vulnerability. (The one exception the framework does enforce is a form post to a **page
-  route** from another origin — a sibling subdomain included, since `Sec-Fetch-Site: same-site` is what a
-  browser labels that — which it refuses whether or not `csrf()` is registered. All of them, in every
-  `enctype` a browser form can send: a form post to a page is how a server action is called, and which posts
-  carry one cannot be known without reading the body.)
+  `csrf()`, `bodyLimit()`, `secureHeaders()` — and `create-rsvhono` scaffolds it. An app that removed it is
+  not a framework vulnerability.
 
-  The _other_ action shape has no such rule and needs none, which is worth writing down because it is
-  load-bearing: a client-initiated action call is selected by the `x-rsc-action` request header, and that is
-  not a CORS-safelisted header. A page on another origin cannot send one without a successful preflight, and
-  the framework answers no preflight, so that shape cannot be forged from a browser at all. An app that adds
-  `cors()` middleware permissive enough to allow `x-rsc-action` from another origin has taken that defence
-  away and is asking for exactly what it asked for; `csrf()` is what should still be standing behind it.
+  The one thing the framework enforces itself is **where a server function may be called from**, because
+  that is its own mechanism and not the app's. Both ways a function is called — a form post to a page route,
+  and a call from client code carrying `x-rsc-action` — are held to one rule, before anything in the body is
+  read and whether or not `csrf()` or `cors()` is registered: an `Origin` that is present has to be the
+  app's own, unless the browser itself says `Sec-Fetch-Site: same-origin`, or the app named that origin with
+  `trustServerFunctionOrigins()`. A sibling subdomain is another origin (`same-site` is what a browser labels
+  it). A request with no `Origin` at all is not a browser and is let through. For a form this applies to
+  every post in an `enctype` a browser form can send, since which posts carry a function cannot be known
+  without reading the body.
+
+  The call from client code used to rest on CORS alone: `x-rsc-action` is not a safelisted header, so
+  another origin needs a preflight the framework never answers. That still holds and is no longer the only
+  thing holding — a `cors()` middleware permissive enough to answer that preflight does not open the
+  functions up. A bypass of the origin rule is in scope.
+
+  What is **not** enforced: _which_ function a caller may run. (`rsvhono build` writes
+  `dist/server/route-functions.json`, saying which functions each route's page reaches, and nothing checks a
+  request against it. It is a report.) Every `'use server'` export in the build can
+  be called from any page URL by anyone the origin rule lets through. Authorization is the app's —
+  `beforeServerFunction()` is the one place that sees every call, and each function still has to check what
+  it is asked to do.
 
 - **Anything reachable only with `trustProxy: true` and no proxy stripping the headers.** That setting is
   documented as "only behind a proxy you control".
-- **Dev-server behaviour.** `rshono dev` binds `127.0.0.1`, serves unminified source and widens `script-src`
+- **Dev-server behaviour.** `rsvhono dev` binds `127.0.0.1`, serves unminified source and widens `script-src`
   with `'unsafe-eval'` for React Refresh. It is not a production server and is not hardened as one.
-- **Upstream defects in React, Rspack, Hono or `react-server-dom-rspack`.** Report those to their projects;
+- **Upstream defects in React, Vite, `@vitejs/plugin-rsc`, Hono or `react-server-dom-webpack`.** Report those to their projects;
   tell us too, and the pin will move once a fix is out.

@@ -11,7 +11,7 @@ import {
   ESLINT_TYPESCRIPT,
   FRAMEWORK_DEPS,
   QUALITY_PRESETS,
-  RSHONO_RANGE,
+  RSVHONO_RANGE,
   detectPackageManager,
   isValidPackageName,
   packageManager,
@@ -43,7 +43,7 @@ function* matrix() {
 const REQUIRED = [
   'package.json',
   'tsconfig.json',
-  'rshono.config.ts',
+  'rsvhono.config.ts',
   '.gitignore',
   '.env',
   'README.md',
@@ -66,7 +66,7 @@ test('every combination produces a complete, parseable project', () => {
     assert.equal(manifest.name, 'my-app', label);
     assert.equal(manifest.private, true, label);
     assert.equal(manifest.type, 'module', label);
-    assert.equal(manifest.dependencies['@rshono/core'], RSHONO_RANGE, label);
+    assert.equal(manifest.dependencies['@rsvhono/core'], RSVHONO_RANGE, label);
     assert.ok(manifest.scripts.dev && manifest.scripts.build && manifest.scripts.typecheck, `${label} is missing a base script`);
 
     // A stray `{{TOKEN}}` in any file means a template referenced something `tokensFor` does not supply.
@@ -121,7 +121,7 @@ test('the plan is deterministic — same answers, byte-identical files', () => {
 test('the deploy target reaches the config, the scripts and the README', () => {
   for (const deploy of DEPLOY_TARGET_NAMES) {
     const result = plan(answers({ deploy }), pm);
-    assert.match(result.files.get('rshono.config.ts'), new RegExp(`deploy: '${deploy}'`), deploy);
+    assert.match(result.files.get('rsvhono.config.ts'), new RegExp(`deploy: '${deploy}'`), deploy);
     assert.match(result.files.get('README.md'), new RegExp(`built for \`${deploy}\``), deploy);
   }
 });
@@ -137,9 +137,9 @@ function scriptsFor(deploy, manager = pm) {
  */
 test('every deploy target keeps the start / preview / deploy contract', () => {
   // `start` runs a build that already exists, so only the target whose build *is* a server has one:
-  // `rshono start` refuses a bundle made for anywhere else, and a script that always failed would be
+  // `rsvhono start` refuses a bundle made for anywhere else, and a script that always failed would be
   // worse than no script. (Bun and Deno had a target each and so a `start`; they run the `node` build now.)
-  assert.equal(scriptsFor('node').start, 'rshono start');
+  assert.equal(scriptsFor('node').start, 'rsvhono start');
   for (const deploy of ['cloudflare', 'vercel', 'aws-lambda']) {
     assert.equal(scriptsFor(deploy).start, undefined, `${deploy} cannot run its own build`);
   }
@@ -149,17 +149,17 @@ test('every deploy target keeps the start / preview / deploy contract', () => {
   assert.equal(scriptsFor('node').preview, undefined, 'build then start is already the preview');
   for (const deploy of ['cloudflare', 'vercel', 'aws-lambda']) {
     const { preview } = scriptsFor(deploy);
-    assert.ok(preview?.startsWith('rshono build'), `${deploy}: preview should build first — got ${preview}`);
+    assert.ok(preview?.startsWith('rsvhono build'), `${deploy}: preview should build first — got ${preview}`);
     // A target with no local runtime of its own previews the Node build, and has to ask for it explicitly:
-    // `rshono start` refuses the platform bundle, so without the flag the script would never have worked.
-    if (preview.includes('rshono start')) {
-      assert.match(preview, /^rshono build --deploy node &&/, `${deploy}: previewing with rshono start needs the Node build`);
+    // `rsvhono start` refuses the platform bundle, so without the flag the script would never have worked.
+    if (preview.includes('rsvhono start')) {
+      assert.match(preview, /^rsvhono build --deploy node &&/, `${deploy}: previewing with rsvhono start needs the Node build`);
     }
   }
 
   // `deploy` where the platform has one command that ships a build, and only there. The Vercel CLI is not
   // a dependency, so its script names the runner that fetches it — one per package manager.
-  assert.equal(scriptsFor('cloudflare').deploy, 'rshono build && wrangler deploy', 'wrangler is installed, so it is called directly');
+  assert.equal(scriptsFor('cloudflare').deploy, 'rsvhono build && wrangler deploy', 'wrangler is installed, so it is called directly');
   assert.equal(scriptsFor('aws-lambda').deploy, undefined, 'nothing there is one command this could guess at');
   for (const [name, dlx] of [
     ['npm', 'npx'],
@@ -168,7 +168,7 @@ test('every deploy target keeps the start / preview / deploy contract', () => {
     ['bun', 'bunx'],
   ]) {
     const script = scriptsFor('vercel', packageManager(name)).deploy;
-    assert.equal(script, `rshono build && ${dlx} vercel deploy --prebuilt --prod`, `${name}: the deploy script has to be runnable`);
+    assert.equal(script, `rsvhono build && ${dlx} vercel deploy --prebuilt --prod`, `${name}: the deploy script has to be runnable`);
   }
 });
 
@@ -250,29 +250,15 @@ test('Tailwind brings its own PostCSS pass — the framework has none', () => {
   assert.ok(tailwind.files.has('postcss.config.mjs'));
   assert.match(tailwind.files.get('src/styles.css'), /@import 'tailwindcss'/);
 
-  // The rule in the `rspack` hook is what puts postcss-loader in front of Rspack's native CSS parser.
-  assert.doesNotMatch(plain.files.get('rshono.config.ts'), /postcss-loader/);
-  assert.match(tailwind.files.get('rshono.config.ts'), /rules!\.push\(\{ test: \/\\\.css\$\/i, use: \['postcss-loader'\], type: 'css\/auto' \}\)/);
+  // Nothing in the build config: Vite picks `postcss.config.mjs` up by itself, so both apps share one.
+  assert.equal(tailwind.files.get('rsvhono.config.ts'), plain.files.get('rsvhono.config.ts'));
 
-  // Including the loader itself: rshono does not depend on postcss, so the app has to.
+  // rsvhono does not depend on postcss, so the app has to.
   const dev = JSON.parse(tailwind.files.get('package.json')).devDependencies;
-  for (const name of ['tailwindcss', '@tailwindcss/postcss', 'postcss', 'postcss-loader']) {
+  for (const name of ['tailwindcss', '@tailwindcss/postcss', 'postcss']) {
     assert.ok(dev[name], `Tailwind needs ${name}`);
   }
   assert.ok(!JSON.parse(plain.files.get('package.json')).devDependencies.postcss, 'a plain-CSS app should install none of it');
-});
-
-test('the Tailwind rshono.config.ts is the base config plus the PostCSS hook', () => {
-  // The Tailwind variant is a copy of the base config with an `rspack` hook added, so what can drift is a
-  // setting written into one of them and not the other.
-  const base = plan(answers({ styling: 'css' }), pm).files.get('rshono.config.ts');
-  const tailwind = plan(answers({ styling: 'tailwind' }), pm).files.get('rshono.config.ts');
-
-  const lines = base.split('\n').filter((line) => line.trim() && line.trim() !== '});');
-  assert.ok(lines.length >= 3, 'the base config should still be an import and a `defineConfig` call');
-  for (const line of lines) {
-    assert.ok(tailwind.includes(line), `the Tailwind config has drifted — it is missing ${line.trim()}`);
-  }
 });
 
 test('Biome answers both slots once, and steps around Tailwind CSS when both are chosen', () => {
@@ -355,7 +341,7 @@ test('a linter that also formats still contributes its format script', () => {
 test('the Node floor is the framework’s, not a copy of it', () => {
   const framework = JSON.parse(readFileSync(join(PACKAGE_DIR, '..', 'core', 'package.json'), 'utf8'));
   const manifest = JSON.parse(plan(answers(), pm).files.get('package.json'));
-  assert.equal(manifest.engines.node, framework.engines.node, 'run `pnpm --filter @rshono/create codegen`');
+  assert.equal(manifest.engines.node, framework.engines.node, 'run `pnpm --filter @rsvhono/create codegen`');
 });
 
 test('a feature contributing gitignore lines gets them, under a heading naming it', () => {
@@ -377,9 +363,9 @@ test('every overlay a feature names exists on disk', () => {
 test('the React pins are the ones the framework is tested against, not a copy that can drift', () => {
   const framework = JSON.parse(readFileSync(join(PACKAGE_DIR, '..', 'core', 'package.json'), 'utf8'));
   for (const [name, range] of Object.entries(FRAMEWORK_DEPS)) {
-    assert.equal(range, framework.devDependencies[name], `${name} has drifted from packages/core — run \`pnpm --filter @rshono/create codegen\``);
+    assert.equal(range, framework.devDependencies[name], `${name} has drifted from packages/core — run \`pnpm --filter @rsvhono/create codegen\``);
   }
-  // Exact, not caret: rshono's RSC internals are coupled across builds, and a generated app has no
+  // Exact, not caret: rsvhono's RSC internals are coupled across builds, and a generated app has no
   // workspace overrides to keep a single copy of React.
   assert.match(FRAMEWORK_DEPS.react, /^\d+\.\d+\.\d+$/);
   assert.match(FRAMEWORK_DEPS['react-dom'], /^\d+\.\d+\.\d+$/);
@@ -388,7 +374,7 @@ test('the React pins are the ones the framework is tested against, not a copy th
 test('a pnpm app answers for the install scripts its deploy target brings, and says nothing otherwise', () => {
   // Unanswered, they fail `pnpm install` and every `pnpm dev` after it — a scaffold that cannot start.
   // wrangler is the only dependency a scaffold can pick up that has any: esbuild and workerd, both of
-  // which merely unpack a binary an optional dependency already carries. Nothing rshono itself installs
+  // which merely unpack a binary an optional dependency already carries. Nothing rsvhono itself installs
   // has one, so an app that never chose Cloudflare has no question to answer and gets no file for it.
   const settings = (combination) => plan(answers(combination), packageManager('pnpm', '11.9.0')).files.get('pnpm-workspace.yaml');
 
@@ -425,7 +411,7 @@ test('the package manager is read off npm_config_user_agent', () => {
   assert.equal(detectPackageManager('yarn/4.1.0').run, 'yarn');
   // Empty, not `undefined`: omitting the argument is what reads the real environment, so passing
   // `undefined` here would assert against whichever package manager happens to be running the tests.
-  assert.equal(detectPackageManager('').name, 'npm', 'a bare `node bin/create-rshono.mjs` is an npm project');
+  assert.equal(detectPackageManager('').name, 'npm', 'a bare `node bin/create-rsvhono.mjs` is an npm project');
   assert.equal(detectPackageManager('some-other-tool/1.0.0').name, 'npm', 'an unknown agent is not a package manager we can drive');
   assert.equal(detectPackageManager('pnpm/latest').version, undefined, 'a non-version is not a version');
 });
@@ -483,13 +469,12 @@ test('every name toPackageName returns is one npm accepts', () => {
 });
 
 /*
- * `dist/` is what `rshono build` writes and `.rshono/` is what `rshono dev` writes, and both hold generated
- * bundles: a linter that reads them reports on code nobody wrote, and `format` rewrites it. Prettier, oxfmt
- * and oxlint all honour `.gitignore`, which every scaffold carries — Biome does not, unless `vcs.enabled` and
- * `vcs.useIgnoreFile` are both set, and neither is. So its own config has to list them, and `.rshono` was
- * missing from it: after anyone ran `pnpm dev`, that app's `format:check` and `lint` failed.
+ * `dist/` is what `rsvhono build` writes, and it holds generated bundles: a linter that reads them reports on
+ * code nobody wrote, and `format` rewrites it. Prettier, oxfmt and oxlint all honour `.gitignore`, which every
+ * scaffold carries — Biome does not, unless `vcs.enabled` and `vcs.useIgnoreFile` are both set, and neither
+ * is. So its own config has to list it too. (`rsvhono dev` writes nothing: it serves from memory.)
  */
-test('the generated output directories are out of every quality preset’s reach', () => {
+test('the generated output directory is out of every quality preset’s reach', () => {
   for (const combination of matrix()) {
     const label = `${combination.deploy}/${combination.styling}/${combination.preset}`;
     const result = plan(answers(combination), pm);
@@ -503,15 +488,11 @@ test('the generated output directories are out of every quality preset’s reach
         .split(/\r?\n/)
         .map((line) => line.trim()),
     );
-    for (const dir of ['dist/', '.rshono/']) {
-      assert.ok(ignored.has(dir), `${label}: .gitignore should list ${dir}`);
-    }
+    assert.ok(ignored.has('dist/'), `${label}: .gitignore should list dist/`);
 
     const biome = result.files.get('biome.json');
     if (!biome) continue;
     const { includes } = JSON.parse(biome).files;
-    for (const dir of ['dist', '.rshono']) {
-      assert.ok(includes.includes(`!${dir}`), `${label}: biome.json does not read .gitignore, so it must exclude ${dir} itself`);
-    }
+    assert.ok(includes.includes('!dist'), `${label}: biome.json does not read .gitignore, so it must exclude dist itself`);
   }
 });

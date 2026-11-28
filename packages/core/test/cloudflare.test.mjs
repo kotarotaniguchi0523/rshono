@@ -4,10 +4,10 @@
 // reads through a binding, and compression being the edge's job — without needing wrangler installed.
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { after, before, describe, test } from 'node:test';
-import { APP_ENV, buildApp, MINIMAL_APP_DIR, TESTBED_DIR, TESTBED_DIST, importAppBundle, importServerBundle } from './helpers.mjs';
+import { APP_ENV, buildApp, hiddenFields, MINIMAL_APP_DIR, TESTBED_DIR, TESTBED_DIST, importAppBundle, importServerBundle } from './helpers.mjs';
 
 /**
  * Every specifier the bundle imports *statically*, whether or not it was minified.
@@ -21,7 +21,7 @@ const STATIC_IMPORTS = /(?:^|[;}])\s*import\s*(?:[^'"]*?\bfrom\s*)?['"]([^'"]+)[
 
 const ASSETS_ROOT = join(TESTBED_DIST, 'cloudflare', 'assets');
 const WRANGLER_CONFIG = join(TESTBED_DIR, 'wrangler.jsonc');
-const ORIGIN = 'https://rshono.example';
+const ORIGIN = 'https://rsvhono.example';
 
 /** Whether the project had a Wrangler config before the build, so the test only removes its own. */
 let hadWranglerConfig = false;
@@ -71,8 +71,19 @@ after(() => {
 });
 
 describe('the Workers build output', () => {
-  test('is a single module — Wrangler cannot follow the computed specifier a split bundle imports by', () => {
-    assert.equal(existsSync(join(TESTBED_DIST, 'server', 'chunks')), false, 'async chunks must be inlined for this target');
+  test('has no lazily loaded chunk — a Worker is a fixed set of modules', () => {
+    const scripts = readdirSync(join(TESTBED_DIST, 'server'), { recursive: true }).filter((file) => /\.m?js$/.test(file));
+    // Each environment's entry and the asset manifest it imports statically — and no lazily loaded chunk.
+    // The encryption key is the one module reached through `import()`: the plugin writes it beside the entry
+    // once an inline server function captures a closure (`/inline-action`), under a fixed name the bundler
+    // can follow, so it is part of the set rather than a chunk.
+    assert.deepEqual(scripts.map((file) => file.replaceAll('\\', '/')).sort(), [
+      '__vite_rsc_assets_manifest.js',
+      '__vite_rsc_encryption_key.js',
+      'main.mjs',
+      'ssr/__vite_rsc_assets_manifest.js',
+      'ssr/index.js',
+    ]);
   });
 
   test('leaves nothing external that workerd does not provide', () => {
@@ -90,7 +101,7 @@ describe('the Workers build output', () => {
   });
 
   test('assembles one assets directory: the hashed bundle, public/ at the root, and the prerender tree', () => {
-    assert.ok(existsSync(join(ASSETS_ROOT, '_static', 'chunks')), '/_static/* is served straight from the CDN');
+    assert.ok(existsSync(join(ASSETS_ROOT, '_static', 'assets')), '/_static/* is served straight from the CDN');
     assert.ok(existsSync(join(ASSETS_ROOT, 'robots.txt')), 'public/ files keep their web-root paths');
     assert.ok(existsSync(join(ASSETS_ROOT, '__ssg', 'docs', 'getting-started', 'index.html')), 'prerendered document');
     assert.ok(existsSync(join(ASSETS_ROOT, '__ssg', 'docs', 'getting-started', 'index.rsc')), 'prerendered flight payload');
@@ -152,6 +163,18 @@ describe('serving from a Worker', () => {
     const body = await res.text();
     assert.equal(res.status, 200);
     assert.match(body, /from-a-workers-binding/, 'a Workers binding must be readable as ctx.env');
+  });
+
+  test('runs an inline server function, whose key is the one module the bundle imports lazily', async () => {
+    // Encrypting the closure on the way out and decrypting it on the way in both read
+    // `__vite_rsc_encryption_key.js` through `import()` — the only such import a Worker build has.
+    const html = await (await fetchWorker('/inline-action')).text();
+    const form = new FormData();
+    for (const [name, value] of Object.entries({ ...hiddenFields(html), note: 'worker' })) form.set(name, value);
+    const res = await fetchWorker('/inline-action', { method: 'POST', headers: { Origin: ORIGIN }, body: form });
+    assert.equal(res.status, 200);
+    const cookie = res.headers.getSetCookie().find((each) => each.startsWith('stamped='));
+    assert.match(decodeURIComponent(cookie ?? ''), /inline-closure-7f3a91:\/inline-action:worker/);
   });
 
   test('serves a prerendered document out of the assets binding', async () => {
@@ -247,7 +270,7 @@ describe('serving from a Worker', () => {
     ]) {
       // The testbed, because it *has* a `notFound` page: an app without one answers the plain 404 either
       // way, so it could not tell the fix from the bug.
-      const res = await fetchWorker('/_static/chunks/main.deadbeefdeadbeef.js', { headers });
+      const res = await fetchWorker('/_static/assets/index-deadbeef.js', { headers });
       const body = await res.text();
       assert.equal(res.status, 404, `${name}: a missing chunk is a 404`);
       assert.match(res.headers.get('content-type') ?? '', /text\/plain/, `${name}: and a plain one — no route below the mount runs`);
@@ -288,7 +311,7 @@ describe('serving from a Worker', () => {
  *
  * On Workers, because `@hono/node-server` replaces the global `Response` with a lightweight class whose
  * headers are always mutable — `Response.redirect()` included. So `node` and `vercel`, which is dev,
- * `rshono start` and most of this suite, cannot see this bug; `cloudflare` and `aws-lambda` get the
+ * `rsvhono start` and most of this suite, cannot see this bug; `cloudflare` and `aws-lambda` get the
  * platform's own `Response`, whose bag is guarded `immutable`.
  */
 describe('serving an app that has no middleware of its own', () => {

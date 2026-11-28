@@ -9,10 +9,10 @@
 ## Layout
 
 ```
-rshono.config.ts   deploy target, security and build settings
+rsvhono.config.ts   deploy target, security and build settings
 public/            served verbatim at the web root (favicon.svg → /favicon.svg)
 src/
-  routes.ts        the route table — the one file rshono requires
+  routes.ts        the route table — the one file rsvhono requires
   server.ts        a Hono app: middleware, API routes, redirects, error reporting
   components/      pages and components
   styles.css       imported by the layout, so it loads with the page
@@ -29,7 +29,7 @@ compiles to `undefined` rather than shipping. `src/components/layout.tsx` reads 
 
 Both are read **once, at startup**, and the `PUBLIC_` view of them is compiled into the bundle — so editing
 either while `pnpm dev` is running changes nothing until you restart it. The dev server says so when it
-happens; the same is true of `rshono.config.ts`.
+happens; the same is true of `rsvhono.config.ts`.
 
 ## Deploying
 
@@ -37,8 +37,8 @@ This app is built for `{{DEPLOY_TARGET}}`. {{DEPLOY_STEP}}
 
 {{PLATFORM_SETUP}}
 
-Change `deploy` in `rshono.config.ts` to target somewhere else, or build for one place without editing the
-file: `rshono build --deploy vercel`, or `RSHONO_DEPLOY=vercel` in CI. `dev` always runs the Node dev
+Change `deploy` in `rsvhono.config.ts` to target somewhere else, or build for one place without editing the
+file: `rsvhono build --deploy vercel`, or `RSVHONO_DEPLOY=vercel` in CI. `dev` always runs the Node dev
 server, whatever the target — it is a property of the build, not of developing.
 
 Every deployment target, and what each one needs: <https://www.rshono.com/docs/deployment>

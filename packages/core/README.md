@@ -2,12 +2,12 @@
   <img src="https://raw.githubusercontent.com/rshono/rshono/main/logo.svg" alt="" width="72" height="72" />
 </p>
 
-<h1 align="center">@rshono/core</h1>
+<h1 align="center">@rsvhono/core</h1>
 
 <p align="center">
   Minimalist web framework —
   <a href="https://hono.dev">Hono</a> +
-  <a href="https://rspack.rs">Rspack</a> +
+  <a href="https://vite.dev">Vite</a> +
   <a href="https://react.dev/reference/rsc/server-components">React Server Components</a>.
 </p>
 
@@ -16,23 +16,23 @@ streaming SSR with RSC hydration, server actions with progressive enhancement, s
 prerendering, and hard env/secret safety.
 
 > **Release candidate.** The framework itself is covered end to end (see [Testing](#testing)) and its API is
-> settled. What is not settled underneath it: Rspack's RSC support is an experimental API
-> (`rspack.experiments.rsc`) and `react-server-dom-rspack` has not reached 1.0, so its own minor bumps are
-> breaking by convention. Both are pinned to exact versions — in the manifests and in workspace overrides —
-> and a release of rshono is what moves them, so an upstream change reaches you as a tested release rather
+> settled. What is not settled underneath it: the RSC build is `@vitejs/plugin-rsc`, which has not reached 1.0,
+> so its own minor bumps are breaking by convention, and the React RSC runtime (`react-server-dom-webpack`)
+> has to match `react` to the patch. All of them are pinned to exact versions — in the manifests and in workspace overrides —
+> and a release of rsvhono is what moves them, so an upstream change reaches you as a tested release rather
 > than as a broken install. That is the whole of the caveat, and it is the reason to read the
 > [changelog](../../CHANGELOG.md) before upgrading.
 
 **Full documentation: [rshono.com/docs](https://www.rshono.com/docs).**
 
 ```bash
-npx @rshono/create@latest my-app   # scaffold one, with a deploy target and tooling of your choosing
+npx @rsvhono/create@latest my-app   # scaffold one, with a deploy target and tooling of your choosing
 ```
 
 ```bash
-rshono dev     # dev server with HMR (default port 3000)
-rshono build   # production build: client + server bundles + prerendered pages
-rshono start   # run the production build
+rsvhono dev     # dev server with HMR (default port 3000)
+rsvhono build   # production build: client + server bundles + prerendered pages
+rsvhono start   # run the production build
 ```
 
 `--port` / `PORT` sets the port for `dev` and `start`. **`HOST` applies to `start` only** — `dev` always binds
@@ -42,7 +42,7 @@ you set one. `--config <path>` points `build` at another config file.
 ## Project layout
 
 ```
-rshono.config.ts   optional — every field has a default
+rsvhono.config.ts   optional — every field has a default
 public/            optional — served verbatim at the web root
 src/
   routes.ts        required — the route table
@@ -61,7 +61,7 @@ you use it — relative, and with no `baseUrl`, which TypeScript 7 removed:
 ## The one required file: src/routes.ts
 
 ```ts
-import { defineRoutes } from '@rshono/core';
+import { defineRoutes } from '@rsvhono/core';
 
 export const routes = defineRoutes({
   routes: [
@@ -91,7 +91,7 @@ Every page module default-exports a server component — nothing else. It render
 components the page imports; only those ship JavaScript.
 
 ```tsx
-import type { PageProps } from '@rshono/core';
+import type { PageProps } from '@rsvhono/core';
 import { db } from '../db';
 
 export default async function Profile({ params, ctx }: PageProps<'/profile/:id'>) {
@@ -108,15 +108,15 @@ export default async function Profile({ params, ctx }: PageProps<'/profile/:id'>
   URL. The fragment is the one part a browser never sends to the server: it is never in `PageProps.url`,
   only in the hook's `url.hash` after hydration.
 - **`ctx` is the request context** — `ctx.req`, cookies, env, middleware variables, the proxy-aware URL. It is
-  the same object `getRequestContext()` returns from `@rshono/core/server`, handed over so a page needs no
+  the same object `getRequestContext()` returns from `@rsvhono/core/server`, handed over so a page needs no
   import. Reading it on a `render: 'static'` page throws: a page rendered once at build time has no request.
   A page can only _read_ it — `cookies.set` and `setHeader` throw there, because a page streams and its
   response head is already committed; set them from a `'use server'` action or from middleware instead.
 - Page props are server-only and never serialized, and `ctx` cannot cross into a client component. Read what
   you need on the server and pass plain values down (`url.href`, not `url`).
-- The framework injects Rspack's `'use server-entry'` directive for every component referenced with the
-  inline `component: () => import('…')` thunk — that is what attaches the page's JS and CSS to it, so code
-  splitting needs no asset manifest. Wire a component up some other way and you write the directive
+- The framework treats every component referenced with the inline `component: () => import('…')` thunk as
+  a page — that is what attaches the page's CSS to it and hands it its props untouched. Wire a component up
+  some other way and you write the `'use server-entry'` directive
   yourself; the framework throws a descriptive error when neither happened.
 
 [Pages docs](https://www.rshono.com/docs/pages).
@@ -137,10 +137,9 @@ carries a fresh page payload, so server-rendered UI updates after a mutation.
 action. [Server actions docs](https://www.rshono.com/docs/pages#server-actions), and
 [how to use them](https://www.rshono.com/docs/usage).
 
-Rspack compiles an app's whole `'use server'` graph into **one** server module, and calling any action loads
-it — so a module that throws while it evaluates takes every action in the app with it, not just its own.
-Nothing on the server imports these modules until an action is called, which used to make that a green build
-followed by a 500 on the first click. `rshono build` now loads them and warns if one will not, and at run
+Calling an action loads the `'use server'` module it lives in — so a module that throws while it evaluates
+takes every action it exports with it. Nothing on the server imports these modules until an action is called, which used to make that a green build
+followed by a 500 on the first click. `rsvhono build` now loads them and warns if one will not, and at run
 time a failure to load is reported as an action fault, not answered as a bad request.
 
 ## Full Hono underneath
@@ -155,13 +154,13 @@ time a failure to load is reported as an action fault, not answered as a bad req
 
 ## Styling
 
-`import './styles.css'` from any component. Rspack's native CSS pipeline compiles it, and the import
+`import './styles.css'` from any component. Vite's CSS pipeline compiles it, and the import
 attaches the stylesheet to the importing page — so CSS is code-split per route and `<link>`ed in the streamed
 HTML rather than fetched after hydration. `*.module.css` gets a class map.
 
-**There is no PostCSS in the framework**, so a stylesheet that needs a plugin brings one, through the
-[`rspack` hook](#configuration-rshonoconfigts). Tailwind is exactly that and nothing else — four packages, a
-`postcss.config.mjs` and one rule; `npx @rshono/create@latest --tailwind` writes all of it.
+**The framework has no PostCSS dependency**, so a stylesheet that needs a plugin brings one: add a
+`postcss.config.mjs` and Vite runs it. Tailwind is exactly that and nothing else — three packages and that
+file; `npx @rsvhono/create@latest --tailwind` writes all of it.
 [Styling docs](https://www.rshono.com/docs/styling).
 
 ## Env & secret safety
@@ -181,20 +180,18 @@ follows it.
 
 [Environment and secrets](https://www.rshono.com/docs/configuration#environment-and-secrets).
 
-## Configuration: rshono.config.ts
+## Configuration: rsvhono.config.ts
 
 Optional (`.js` / `.mjs` also work). Every field is optional; delete the file to accept all defaults.
 
 ```ts
-import { defineConfig } from '@rshono/core';
+import { defineConfig } from '@rsvhono/core';
 
 export default defineConfig({
-  deploy: 'node', // hosting platform to build for (--deploy or RSHONO_DEPLOY override)
+  deploy: 'node', // hosting platform to build for (--deploy or RSVHONO_DEPLOY override)
   siteUrl: 'https://example.com', // public origin, baked into prerendered pages' absolute URLs
   trustProxy: false, // honour X-Forwarded-Host/-Proto — only behind a proxy you control
-  rspack(config, { isServer, isDev }) {
-    return config; // escape hatch: mutate the generated Rspack config
-  },
+  vite: { plugins: [] }, // escape hatch: Vite config merged over the generated one
 });
 ```
 
@@ -203,7 +200,7 @@ That is the whole file. It holds what the **build** decides; per-request securit
 
 ```ts
 // src/server.ts
-import { publicUrl } from '@rshono/core/server';
+import { publicUrl } from '@rsvhono/core/server';
 import { bodyLimit } from 'hono/body-limit'; // https://hono.dev/docs/middleware/builtin/body-limit
 import { csrf } from 'hono/csrf'; // https://hono.dev/docs/middleware/builtin/csrf
 import { NONCE, secureHeaders } from 'hono/secure-headers'; // https://hono.dev/docs/middleware/builtin/secure-headers
@@ -217,20 +214,20 @@ server.use(bodyLimit({ maxSize: 1024 * 1024 }));
 server.use(csrf({ origin: (origin, c) => origin === publicUrl(c).origin }));
 
 // HSTS, COOP, CORP and the rest. `NONCE` in `scriptSrc` makes the CSP per-request: Hono mints the
-// nonce, rshono stamps it onto the bootstrap scripts and the inlined flight payload.
+// nonce, rsvhono stamps it onto the bootstrap scripts and the inlined flight payload.
 server.use(secureHeaders({ contentSecurityPolicy: { scriptSrc: ["'self'", NONCE] } }));
 ```
 
-`create-rshono` scaffolds the first two. Under `rshono dev` the framework widens `script-src` with
+`create-rsvhono` scaffolds the first two. Under `rsvhono dev` the framework widens `script-src` with
 `'unsafe-eval'` for React Refresh — never in a build — so one policy serves both, and a route with a
 nonce in play falls back to rendering its _document_ per request: fixed bytes cannot carry a fresh nonce.
-Its flight payload has no nonce to go stale and is still served from disk, so `rshono build` marks such a
+Its flight payload has no nonce to go stale and is still served from disk, so `rsvhono build` marks such a
 page `(flight only)` rather than counting it as fully prerendered. Everything else Hono ships works the same way:
 `cors`, `basicAuth`, `jwt`, `timeout`, `requestId`, `ipRestriction`. A middleware that rejects by
 throwing an `HTTPException` keeps its own status rather than becoming the 500 page.
 [Middleware docs](https://www.rshono.com/docs/hono#security-middleware) · [Hono](https://hono.dev/docs).
 
-`deploy` and `rspack` are consumed by the CLI; `trustProxy` is **compiled into the server bundle** at build
+`deploy` and `vite` are consumed by the CLI; `trustProxy` is **compiled into the server bundle** at build
 time, so changing it means a rebuild and there is no parallel env-var interface for it (environment
 variables are for secrets). The port and bind address are deliberately not config fields — on every host
 that runs this, the environment is what sets them. [Configuration docs](https://www.rshono.com/docs/configuration).
@@ -253,13 +250,13 @@ request. [Static rendering docs](https://www.rshono.com/docs/routing#static-rend
 
 ## Deployment
 
-`rshono build` targets one platform. Pick it with `deploy` in the config, `--deploy <name>` or
-`RSHONO_DEPLOY`, in that precedence order; the default is `node`. `rshono dev` always runs the Node dev
+`rsvhono build` targets one platform. Pick it with `deploy` in the config, `--deploy <name>` or
+`RSVHONO_DEPLOY`, in that precedence order; the default is `node`. `rsvhono dev` always runs the Node dev
 server whatever you choose — the target is a property of the build, not of developing.
 
 | `deploy`     | Handoff                          | Assets & prerendered pages                                      | After `build`                               |
 | ------------ | -------------------------------- | --------------------------------------------------------------- | ------------------------------------------- |
-| `node`       | binds a port                     | from `dist/` on disk                                            | `rshono start`                              |
+| `node`       | binds a port                     | from `dist/` on disk                                            | `rsvhono start`                             |
 | `cloudflare` | `{ fetch }` default export       | Workers Assets; prerendered pages read via the `ASSETS` binding | `wrangler deploy`                           |
 | `vercel`     | web handler in a Node function   | CDN for assets; prerendered pages inside the function           | `vercel deploy --prebuilt`                  |
 | `aws-lambda` | streaming handler (Function URL) | from the deployment package                                     | zip `dist/`, handler `dist/server/main.mjs` |
@@ -274,7 +271,7 @@ Every target streams, which is the bar a new one has to clear.
   export. The suite runs on Node, so treat those two as an expectation rather than a guarantee.
 - **Don't build a handler out of the `app` export.** The entry calls `runtime.serveApp(app)` at module scope,
   so importing a `node` build binds a port as a side effect. Build for the target you deploy to, and
-  `rshono start` will refuse a build made for another platform.
+  `rsvhono start` will refuse a build made for another platform.
 - **Streaming is the fragile part of a serverless target, and it fails silently** — `supportsResponseStreaming`
   on Vercel, `streamifyResponse` plus a `RESPONSE_STREAM` Function URL on Lambda. Getting those right is what
   the presets are for.
@@ -291,13 +288,13 @@ Every target streams, which is the bar a new one has to clear.
   the app owns the whole surface, `public/` is mounted after every route and answers only what none of them
   claimed. Where a CDN sits in front it is part of the static output, so the platform answers from it before
   the app is invoked — the framework cannot reorder either one. So `public/index.html` beside a page route at
-  `/` serves the file on two targets and renders the page on the other two. `rshono build` warns when a
+  `/` serves the file on two targets and renders the page on the other two. `rsvhono build` warns when a
   `public/` file lands on a route's path, on the targets where it matters.
 - **The serverless targets bundle your dependencies**; `node` bundles only the ones a `'use client'` component
   pulls in. A function is an uploaded directory with no `node_modules` to resolve against, so `vercel`,
   `aws-lambda` and `cloudflare` compile everything in. The cost is that a native addon — or a package that
   reads its own files off disk — fails the build on those targets rather than the deploy; reach for the
-  `rspack` hook, or deploy to `node`.
+  `vite` option, or deploy to `node`.
 
   On `node` a server component's dependencies stay external and resolve from `node_modules`, but anything
   reachable from a `'use client'` component is compiled in on every target. It has to be: the `PUBLIC_`-only
@@ -309,11 +306,11 @@ Every target streams, which is the bar a new one has to clear.
 
 ## Requirements & limitations
 
-- **Node ≥ 22.18** (worker threads, `process.loadEnvFile`, `Promise.withResolvers`, `URL.parse`, and native
+- **Node ≥ 22.18** (`process.loadEnvFile`, `Promise.withResolvers`, `URL.parse`, and native
   TypeScript stripping, so a `.ts` config needs no loader) and **React ≥ 19.1** (the floor
-  `react-server-dom-rspack` requires).
+  the RSC runtime requires).
 - **ESM only.** The package declares `import` and `types` conditions and no `require` one, so
-  `require('@rshono/core')` is `ERR_PACKAGE_PATH_NOT_EXPORTED` rather than a working call — deliberately,
+  `require('@rsvhono/core')` is `ERR_PACKAGE_PATH_NOT_EXPORTED` rather than a working call — deliberately,
   since the framework's own graph is ESM throughout. Use `import`, or `await import()` from CommonJS.
 - No response compression, no base path (`siteUrl` is a bare origin), and wildcard, optional and regex
   params cannot be prerendered.
@@ -322,10 +319,10 @@ Every target streams, which is the bar a new one has to clear.
   round trip that Next.js and TanStack Start have usually already paid.
 - No incremental static regeneration: `render: 'static'` is decided at build time, and a static page changes
   when you rebuild.
-- **Soft navigation needs the [Navigation API](https://developer.mozilla.org/en-US/docs/Web/API/Navigation_API)**
+- **The client runtime needs the [Navigation API](https://developer.mozilla.org/en-US/docs/Web/API/Navigation_API)**
   — Chrome/Edge 135, Firefox 147, Safari 26.2, [Baseline](https://web.dev/blog/baseline-navigation-api) since
-  January 2026. Where it is missing there is no interception at all and every link is a real browser load,
-  which a server-rendered app answers correctly; only the soft part is gone. On a soft navigation the runtime
+  January 2026. Where it is missing the page is not hydrated: it stays the document the server rendered,
+  with real links and forms and no client components running. On a soft navigation the runtime
   owns the scroll: a push reaches the top or its fragment, a traversal returns to where the entry was left,
   and focus resets — `history.scrollRestoration` is `manual` for the document and positions are kept per
   entry, in `sessionStorage` too, so a reload lands where the last document was left. A same-page fragment
@@ -338,7 +335,7 @@ Every target streams, which is the bar a new one has to clear.
   for the page once more and then paints a plain "Page not found" panel, since a second identical response is
   proof that reloading will not help. A visitor without JavaScript is left on the fallback under a 200, and a
   crawler indexes that 200 as a soft 404. The fix is app-side: decide in Hono
-  middleware, or in the page component body above the boundary. `rshono dev` warns when it happens.
+  middleware, or in the page component body above the boundary. `rsvhono dev` warns when it happens.
 
   **On a soft navigation there is no shell to beat, so every `notFound()` degrades.** A flight fetch is
   committed as `200 text/x-component` the moment the render hands its stream back — before anything has been
@@ -373,7 +370,7 @@ Every target streams, which is the bar a new one has to clear.
   not widen it — this is the framework declining to run its own action mechanism, ahead of any app policy.
   **Receive them on an `{ type: 'endpoint' }` route**, which calls your Hono handler directly and never
   reaches the page renderer, then redirect to the page.
-- **`/_static` is reserved**, on every deploy target and under `rshono dev`: it is where the hashed client
+- **`/_static` is reserved**, on every deploy target and under `rsvhono dev`: it is where the hashed client
   bundle is served from, mounted ahead of the route table and answering its whole subtree. A route whose path
   is `/_static` or sits below it is refused by name — it could never have answered a request. A parameterised
   route that happens to overlap the prefix (`/:section/thing`) is left alone; it loses those paths and
@@ -383,27 +380,26 @@ Every target streams, which is the bar a new one has to clear.
   It cannot be otherwise: an enumerable `ctx` would put `ctx.hono.env`, every binding and secret, into
   React's dev-only serialization of a server component's props. Nested server components are meant to call
   `getRequestContext()` rather than be handed the context.
-- **`rshono build` does not type-check.** swc strips types and `tsc` is never invoked, so the build is as fast
+- **`rsvhono build` does not type-check.** Vite strips types and `tsc` is never invoked, so the build is as fast
   as it is and no faster because it skipped something. Several of the framework's guarantees are types alone —
   the `handler` an endpoint module owes, and `defineRoutes`' path ↔ props and `staticPaths` ↔ path checks — so
   run `tsc --noEmit` (`npm run typecheck` in a scaffolded app) in CI beside the build. The mistakes that make
   a route unservable are checked at build time whether or not you do.
-- **`.env` and `rshono.config.ts` are read once, at startup**, and what a build needs from them is compiled
-  in — so `rshono dev` does not pick up an edit to either, and a rebuild that serves the old value looks like
+- **`.env` and `rsvhono.config.ts` are read once, at startup**, and what a build needs from them is compiled
+  in — so `rsvhono dev` does not pick up an edit to either, and a rebuild that serves the old value looks like
   nothing happened. Restart it; it watches both and says so when one changes.
-- The dev proxy doesn't forward WebSocket upgrades to a custom sub-app; production is unaffected.
-- **`rshono dev` answers `/_static` itself, so your middleware does not run for an asset** — where a build
-  serves assets through the app and they carry HSTS, your CSP and everything else it sets. The dev front-end
-  owns the prefix on purpose: every request it proxies waits on the server rebuild, and the client bundle is
-  built by a separate compiler, so proxying assets would stall the browser's JS and CSS on a save that only
-  touched a server component. The cost is that a policy is developed against files it does not apply to;
-  check a header that has to be on an asset against `rshono build` and `rshono start`.
-- Dev source maps embed the original source of `'use server'` modules (dev binds 127.0.0.1 only, and
-  production ships no client source maps).
+- `rsvhono dev` doesn't forward WebSocket upgrades to a custom sub-app; production is unaffected.
+- **`rsvhono dev` answers `/_static` itself, so your middleware does not run for an asset** — where a build
+  serves assets through the app and they carry HSTS, your CSP and everything else it sets. In dev that prefix
+  is Vite's: client modules and the HMR socket are served from it directly. The cost is that a policy is
+  developed against files it does not apply to;
+  check a header that has to be on an asset against `rsvhono build` and `rsvhono start`.
+- The dev server serves your source modules, `'use server'` ones included, to the browser that asks (dev
+  binds 127.0.0.1 only, and production ships no client source maps).
 
 ## Testing
 
-`pnpm --filter @rshono/core test` builds the package and runs everything that needs no browser:
+`pnpm --filter @rsvhono/core test` builds the package and runs everything that needs no browser:
 
 - **unit** — the parsers and path maths, against the built `dist/`, which also proves the published output
   loads in plain Node.
@@ -414,12 +410,12 @@ Every target streams, which is the bar a new one has to clear.
   under a different environment; `trustProxy` is baked in and gets a fixture config.
 - **the other deploy targets** — the `cloudflare` bundle driven as `fetch(request, env, ctx)` against a
   stand-in `ASSETS` binding, a real build per serverless target checked against the handoff its platform
-  expects, and `rshono start`'s refusal to run a build made for another one.
+  expects, and `rsvhono start`'s refusal to run a build made for another one.
 - **minimal app**, a fixture with `src/routes.ts` and nothing else (everything the docs call optional, left
   out); **postcss**, the documented Tailwind wiring actually run; **dev**, a smoke test through the dev
   server's worker and proxy.
 
-`pnpm --filter @rshono/core test:browser` runs the Playwright suite against a production build: hydration,
+`pnpm --filter @rsvhono/core test:browser` runs the Playwright suite against a production build: hydration,
 soft navigation, `useNavigation`, client-initiated actions, boundary fallbacks and the fatal overlay — the
 client runtime, which no amount of asserting on HTML can reach.
 
@@ -453,17 +449,16 @@ than tightened: the code it cannot see is not the code that is thin.
 
 ## How it works
 
-Two coordinated Rspack compilers, using native RSC support (`rspack.experiments.rsc`):
+One Vite build with three environments, compiled by `@vitejs/plugin-rsc`:
 
-- **client** (`target: web`) → `dist/static`: hydration runtime, `'use client'` chunks, CSS.
-- **server** (`target: node`) → `dist/server/main.mjs`: a Hono app assembled from your routes, rendered
-  through two layers — the RSC layer, with the `react-server` condition, produces the flight payload; the SSR
-  layer turns it into an HTML stream with the payload inlined for hydration.
+- **client** → `dist/static`, served at `/_static/`: hydration runtime, `'use client'` chunks, CSS.
+- **rsc** → `dist/server/main.mjs`: a Hono app assembled from your routes. Built with the `react-server`
+  condition, it produces the flight payload.
+- **ssr** → `dist/server/ssr/`: turns that payload into an HTML stream with the payload inlined for hydration.
 
-In dev the CLI watches both bundles, runs the server bundle in a worker thread (restarted per rebuild,
-requests gated on readiness so nothing drops), and fronts everything on one port with static serving and an
-SSE channel: client edits hot-apply via react-refresh, server component edits re-fetch the payload in place,
-and browser state survives both. In production `dist/server/main.mjs` has React, Hono and the framework
-bundled in. On `node` your server-side dependencies still resolve from `node_modules` beside it; on the
+`rsvhono dev` is one Vite dev server on one port: it serves client modules and HMR under `/_static/`, runs
+the two server environments in-process, and hands every other request to the app. Client edits hot-apply
+through Fast Refresh, server component edits re-fetch the payload in place, and browser state survives both. In production `dist/server/` has React and the framework
+bundled in. On `node` Hono and your server-side dependencies still resolve from `node_modules` beside it; on the
 serverless targets they are bundled too, because nothing installs them there. Whatever a `'use client'`
 component reaches is bundled on every target, which is what lets the env shadow cover it.

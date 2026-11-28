@@ -1,16 +1,19 @@
-import { onServerError, publicUrl } from '@rshono/core/server';
+import { beforeServerFunction, onServerError, publicUrl, setServerFunctionRefresh, trustServerFunctionOrigins } from '@rsvhono/core/server';
 // A dependency outside the set the framework bundles unconditionally — so the serverless targets, which
 // upload a directory rather than install one, have something real to prove they bundled. See the endpoint
 // at the bottom of this file and `assertSelfContained` in packages/core/test/deploy-targets.test.mjs.
-// Unscoped on purpose: the externals policy bundles anything under `@rshono/` unconditionally, so a
+// Unscoped on purpose: the externals policy bundles anything under `@rsvhono/` unconditionally, so a
 // scoped name here would be bundled whatever the preset decided and prove nothing.
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
+import { getCookie } from 'hono/cookie';
+import { cors } from 'hono/cors';
 import { csrf } from 'hono/csrf';
+import { HTTPException } from 'hono/http-exception';
 import { requestId } from 'hono/request-id';
 import { NONCE, secureHeaders } from 'hono/secure-headers';
 import { trimTrailingSlash } from 'hono/trailing-slash';
-import { EXTERNAL_DEP_MARKER } from 'rshono-test-external-dep';
+import { EXTERNAL_DEP_MARKER } from 'rsvhono-test-external-dep';
 import { fakeDB } from './db';
 
 /**
@@ -74,18 +77,43 @@ if (maxBodyBytes > 0) {
 // `publicUrl(c)` rather than Hono's default same-origin comparison, which reads `c.req.url` — the
 // address the server was *reached* on. Behind a proxy that terminates TLS or rewrites `Host` that is
 // the internal one, and a legitimate post would be refused whenever the browser did not also send a
-// `Sec-Fetch-Site` to settle it. `rshono dev` is exactly such a proxy, so this is not a
+// `Sec-Fetch-Site` to settle it. `rsvhono dev` is exactly such a proxy, so this is not a
 // production-only concern. Honours `trustProxy`, so it is still `c.req.url` where no proxy is declared.
 if (csrfEnabled) {
   server.use(csrf({ origin: (origin, c) => origin === publicUrl(c).origin || allowedOrigins.includes(origin) }));
 }
+// The framework's own origin check for server functions is separate from `csrf()` and does not read its
+// options, so an origin allowed there has to be named here as well to call a function.
+if (allowedOrigins.length > 0) trustServerFunctionOrigins(allowedOrigins);
+
+// A permissive `cors()` over everything, the way one gets mounted for an API and ends up matching the pages
+// too: it answers the preflight for `x-rsc-action` that the framework itself never answers. Off by default;
+// the test that turns it on is about what still stands between another origin and a server function then.
+if (process.env.TESTBED_CORS === '1') {
+  server.use(cors({ origin: (origin) => origin, allowHeaders: ['x-rsc-action', 'rsc', 'content-type'], credentials: true }));
+}
+
+// `'explicit'`: a server function called from client code is answered with its result alone, and the page is
+// rendered only when the function calls `requestRefresh()`.
+if (process.env.TESTBED_ACTION_REFRESH === 'explicit') setServerFunctionRefresh('explicit');
+
+// One check in front of every server function, however it was called. The log line is how a test sees which
+// function the guard was asked about — for a form post that is read off the function React decoded.
+if (process.env.TESTBED_ACTION_GUARD === '1') {
+  beforeServerFunction<AppEnv>(({ kind, id, hono }) => {
+    console.log(`[guard] ${kind} ${id}`);
+    const pass = getCookie(hono, 'guard');
+    if (!pass) throw new HTTPException(401, { message: 'Sign in to call a server function' });
+    if (pass !== 'admin' && id.endsWith('#raiseSignal')) throw new HTTPException(403, { message: 'Not allowed to raise signals' });
+  });
+}
 
 // A strict nonce-based CSP. `NONCE` is what makes it per-request: Hono mints a nonce, puts it on the
-// context, and rshono stamps that value onto the bootstrap scripts and the `<meta>` React hydrates
+// context, and rsvhono stamps that value onto the bootstrap scripts and the `<meta>` React hydrates
 // from. A `render: 'static'` route falls back to rendering per request while this is on, because a
 // prerendered file is fixed bytes and cannot carry a fresh nonce.
 //
-// Nothing here mentions `'unsafe-eval'`: rshono widens `script-src` with it under `rshono dev`, where
+// Nothing here mentions `'unsafe-eval'`: rsvhono widens `script-src` with it under `rsvhono dev`, where
 // React Refresh needs it, and never in a build.
 if (hardened) {
   server.use(

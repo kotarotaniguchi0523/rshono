@@ -1,36 +1,18 @@
 packages:
   - 'packages/*'
   - 'apps/*'
-  # Test fixture apps. Real workspace members so they resolve `@rshono/core` through node_modules exactly
+  # Test fixture apps. Real workspace members so they resolve `@rsvhono/core` through node_modules exactly
   # the way an installed app does — which is half of what they are there to check.
   - 'packages/*/test/fixtures/*'
-# RSC internals are coupled across builds: react-server-dom-rspack reaches into
+# RSC internals are coupled across builds: react-server-dom-webpack reaches into
 # ReactSharedInternals and emits a flight payload the matching react-dom must parse.
 # A single resolution of each is enforced here so no transitive dep can split them.
 overrides:
-  react: 19.2.8
-  react-dom: 19.2.8
-  react-server-dom-rspack: 0.1.0
-  '@rspack/core': 2.2.8
+  react: 19.3.1
+  react-dom: 19.3.1
+  react-server-dom-webpack: 19.3.1
 allowBuilds:
   esbuild: false
   # wrangler brings workerd, whose install script only picks the platform binary out of the optional
   # dependency that already carries it — `workerd --version` answers without it having run.
   workerd: false
-minimumReleaseAgeExclude:
-  - '@rspack/binding-darwin-arm64@2.2.8'
-  - '@rspack/binding-darwin-x64@2.2.8'
-  - '@rspack/binding-linux-arm64-gnu@2.2.8'
-  - '@rspack/binding-linux-arm64-musl@2.2.8'
-  - '@rspack/binding-linux-ppc64-gnu@2.2.8'
-  - '@rspack/binding-linux-riscv64-gnu@2.2.8'
-  - '@rspack/binding-linux-riscv64-musl@2.2.8'
-  - '@rspack/binding-linux-s390x-gnu@2.2.8'
-  - '@rspack/binding-linux-x64-gnu@2.2.8'
-  - '@rspack/binding-linux-x64-musl@2.2.8'
-  - '@rspack/binding-wasm32-wasi@2.2.8'
-  - '@rspack/binding-win32-arm64-msvc@2.2.8'
-  - '@rspack/binding-win32-ia32-msvc@2.2.8'
-  - '@rspack/binding-win32-x64-msvc@2.2.8'
-  - '@rspack/binding@2.2.8'
-  - '@rspack/core@2.2.8'

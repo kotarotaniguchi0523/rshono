@@ -4,22 +4,23 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "rshono dev",
-    "build": "rshono build",
-    "start": "rshono start",
+    "dev": "rsvhono dev",
+    "build": "rsvhono build",
+    "start": "rsvhono start",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@rsvhono/core": "workspace:*",
     "hono": "^4.13.17",
-    "react": "19.2.8",
-    "react-dom": "19.2.8",
-    "@rshono/core": "workspace:*",
-    "rshono-test-external-dep": "workspace:*",
-    "rshono-test-external-client-dep": "workspace:*"
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "rsvhono-test-external-client-dep": "workspace:*",
+    "rsvhono-test-external-dep": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
     "@types/react": "^19.2.18",
+    "@vitejs/plugin-rsc": "0.5.39",
     "typescript": "^7.0.2"
   }
 }

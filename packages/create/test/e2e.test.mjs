@@ -3,7 +3,7 @@
 // this has caught was of that kind — a `baseUrl` TypeScript 7 had removed, a peer range no package
 // manager would resolve — and none of them are visible in the file contents.
 //
-// Opt-in: it packs the framework, then installs from the registry twice. Set CREATE_RSHONO_E2E=1.
+// Opt-in: it packs the framework, then installs from the registry twice. Set CREATE_RSVHONO_E2E=1.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -14,10 +14,10 @@ import { fileURLToPath } from 'node:url';
 
 const PACKAGE_DIR = join(fileURLToPath(import.meta.url), '..', '..');
 const REPO_ROOT = join(PACKAGE_DIR, '..', '..');
-const CLI = join(PACKAGE_DIR, 'bin', 'create-rshono.mjs');
+const CLI = join(PACKAGE_DIR, 'bin', 'create-rsvhono.mjs');
 
-const enabled = process.env.CREATE_RSHONO_E2E === '1';
-const workspace = enabled ? mkdtempSync(join(tmpdir(), 'create-rshono-')) : '';
+const enabled = process.env.CREATE_RSVHONO_E2E === '1';
+const workspace = enabled ? mkdtempSync(join(tmpdir(), 'create-rsvhono-')) : '';
 after(() => {
   if (workspace) rmSync(workspace, { recursive: true, force: true });
 });
@@ -63,13 +63,13 @@ let packed;
  *
  * Packed on first use and reused, rather than produced by the first test for the rest to find on disk. That
  * arrangement made every test after the first silently depend on it having run: with
- * `--test-name-pattern`, they resolved the tarball to the empty string, installed a `@rshono/core` that was
+ * `--test-name-pattern`, they resolved the tarball to the empty string, installed a `@rsvhono/core` that was
  * not the framework, and failed with a type error in the scaffolded app that had nothing to do with the case
  * under test. Any one of these can now be run on its own.
  */
 function frameworkTarball() {
   if (packed) return packed;
-  run('pnpm', ['--filter', '@rshono/core', 'pack', '--pack-destination', workspace], REPO_ROOT, 'pnpm pack');
+  run('pnpm', ['--filter', '@rsvhono/core', 'pack', '--pack-destination', workspace], REPO_ROOT, 'pnpm pack');
   const tarball = readdirSync(workspace).find((entry) => entry.endsWith('.tgz'));
   assert.ok(tarball, 'pnpm pack produced no tarball');
   packed = join(workspace, tarball);
@@ -80,10 +80,10 @@ function scaffold(name, flags, tarball) {
   run(process.execPath, [CLI, name, '-y', '--pm', 'npm', '--no-install', '--no-git', ...flags], workspace, `scaffold ${name}`);
   const dir = join(workspace, name);
 
-  // The one edit a user would not make: point `@rshono/core` at the packed tarball.
+  // The one edit a user would not make: point `@rsvhono/core` at the packed tarball.
   const manifestPath = join(dir, 'package.json');
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
-  manifest.dependencies['@rshono/core'] = `file:${tarball}`;
+  manifest.dependencies['@rsvhono/core'] = `file:${tarball}`;
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 
   install('npm', ['install', '--no-audit', '--no-fund'], dir, `npm install (${name})`);
@@ -94,7 +94,7 @@ function scaffold(name, flags, tarball) {
   return dir;
 }
 
-test('a scaffolded app installs, typechecks and builds', { skip: enabled ? false : 'set CREATE_RSHONO_E2E=1' }, () => {
+test('a scaffolded app installs, typechecks and builds', { skip: enabled ? false : 'set CREATE_RSVHONO_E2E=1' }, () => {
   const tarball = frameworkTarball();
   const dir = scaffold('plain-app', [], tarball);
 
@@ -112,11 +112,11 @@ test('a scaffolded app installs, typechecks and builds', { skip: enabled ? false
  * directory with its dependencies *beside* it. Anything the framework relies on being resolvable from
  * app source — the RSC runtime the transform injects into pages, client components and actions — is
  * reachable by accident under the first layout and only on purpose under the second, so a build that
- * passes above can still fail here with `Can't resolve 'react-server-dom-rspack/client'`.
+ * passes above can still fail here with a failure to resolve `@vitejs/plugin-rsc` or `react-server-dom-webpack`.
  */
 test(
   "and installs and builds on pnpm, whose layout hides the framework's own dependencies",
-  { skip: enabled ? false : 'set CREATE_RSHONO_E2E=1' },
+  { skip: enabled ? false : 'set CREATE_RSVHONO_E2E=1' },
   () => {
     const tarball = frameworkTarball();
     const name = 'pnpm-app';
@@ -125,7 +125,7 @@ test(
 
     const manifestPath = join(dir, 'package.json');
     const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
-    manifest.dependencies['@rshono/core'] = `file:${tarball}`;
+    manifest.dependencies['@rsvhono/core'] = `file:${tarball}`;
     writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 
     // Exactly what a user runs, with no flags to smooth anything over. `pnpm install` fails on an install
@@ -149,7 +149,7 @@ test(
  */
 test(
   'the ESLint preset installs on the TypeScript it pins, and the scaffold passes its own rules',
-  { skip: enabled ? false : 'set CREATE_RSHONO_E2E=1' },
+  { skip: enabled ? false : 'set CREATE_RSVHONO_E2E=1' },
   () => {
     const tarball = frameworkTarball();
     const dir = scaffold('eslint-app', ['--quality', 'prettier-eslint'], tarball);
@@ -171,7 +171,7 @@ test(
  * config — which keeps this to a few seconds per preset. ESLint is not among them: type-aware rules need
  * the real dependency graph, so it gets the full install above.
  */
-test('every quality preset produces configs its own tools accept', { skip: enabled ? false : 'set CREATE_RSHONO_E2E=1' }, () => {
+test('every quality preset produces configs its own tools accept', { skip: enabled ? false : 'set CREATE_RSVHONO_E2E=1' }, () => {
   for (const preset of ['prettier-oxlint', 'biome', 'oxc']) {
     const name = `quality-${preset}`;
     run(process.execPath, [CLI, name, '-y', '--pm', 'npm', '--quality', preset, '--no-install', '--no-git'], workspace, `scaffold ${name}`);
@@ -192,14 +192,14 @@ test('every quality preset produces configs its own tools accept', { skip: enabl
   }
 });
 
-test('Tailwind compiles through its own PostCSS pass, on a real install', { skip: enabled ? false : 'set CREATE_RSHONO_E2E=1' }, () => {
+test('Tailwind compiles through its own PostCSS pass, on a real install', { skip: enabled ? false : 'set CREATE_RSVHONO_E2E=1' }, () => {
   const tarball = frameworkTarball();
   const dir = scaffold('tw-app', ['--tailwind', '--quality', 'biome', '--deploy', 'cloudflare'], tarball);
 
   run('npm', ['run', 'typecheck'], dir, 'typecheck');
   assert.match(run('npm', ['run', 'build'], dir, 'build'), /build complete/);
 
-  const chunks = join(dir, 'dist', 'static', 'chunks');
+  const chunks = join(dir, 'dist', 'static', 'assets');
   const css = readdirSync(chunks)
     .filter((file) => file.endsWith('.css'))
     .map((file) => readFileSync(join(chunks, file), 'utf8'))
@@ -225,7 +225,7 @@ test('Tailwind compiles through its own PostCSS pass, on a real install', { skip
  * `--no-install` plus one shared install per target keeps this to a build each. `cloudflare` is skipped: the
  * Tailwind test above already builds it, and it is the one target that installs a CLI with platform binaries.
  */
-test('every deploy target scaffolds an app that installs, typechecks and builds', { skip: enabled ? false : 'set CREATE_RSHONO_E2E=1' }, () => {
+test('every deploy target scaffolds an app that installs, typechecks and builds', { skip: enabled ? false : 'set CREATE_RSVHONO_E2E=1' }, () => {
   const tarball = frameworkTarball();
 
   /** What each target has to leave on disk for its platform to be deployable, beyond `dist/server`. */

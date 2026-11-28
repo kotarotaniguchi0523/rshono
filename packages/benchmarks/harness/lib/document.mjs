@@ -29,7 +29,7 @@ export function parseDocument(html) {
     if (a.src) {
       external.push({ url: a.src, as: 'script', hint: 'script' });
     } else if (m[2].trim()) {
-      // Where the inlined flight payload lives in all three frameworks. It ships on every request and is not a
+      // Where the inlined flight payload lives in all four frameworks. It ships on every request and is not a
       // file, so counting only external assets would hide it entirely.
       inlineScriptBytes += Buffer.byteLength(m[2], 'utf8');
       inlineScripts += 1;
@@ -73,7 +73,7 @@ const DEV_MARKERS = [
   ['__webpack_require__.$Refresh$', 'webpack refresh hooks'],
   ['/@vite/client', 'Vite dev client'],
   ['__vite_plugin_react', 'Vite React plugin dev runtime'],
-  ['__rshono_dev', 'rshono dev channel'],
+  ['__rsvhono_dev', 'rsvhono dev channel'],
 ];
 
 export function detectDevBuild(html) {

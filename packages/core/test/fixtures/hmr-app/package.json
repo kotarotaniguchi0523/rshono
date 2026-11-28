@@ -1,0 +1,18 @@
+{
+  "name": "rsvhono-fixture-hmr",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Test fixture: a page with a stylesheet, a client component and server actions \u2014 what the dev server's HMR and the page wrapper are checked against.",
+  "scripts": {
+    "dev": "rsvhono dev",
+    "build": "rsvhono build",
+    "start": "rsvhono start"
+  },
+  "dependencies": {
+    "@rsvhono/core": "workspace:*",
+    "hono": "^4.13.17",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  }
+}

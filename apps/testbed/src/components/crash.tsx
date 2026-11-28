@@ -1,4 +1,4 @@
-import type { PageProps } from '@rshono/core';
+import type { PageProps } from '@rsvhono/core';
 import { CrashForm } from './crash-form';
 import { Layout } from './layout';
 import { SsrCrash } from './ssr-crash';
@@ -13,7 +13,7 @@ export default function Crash({ url }: PageProps) {
   }
 
   return (
-    <Layout title="Error handling — rshono">
+    <Layout title="Error handling — rsvhono">
       <div className="page">
         <h1>Progressive-enhancement error handling</h1>
         <p className="description">

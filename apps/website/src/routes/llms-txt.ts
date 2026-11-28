@@ -15,7 +15,7 @@ export const handler: Handler = (c) => {
   }).join('\n\n');
 
   const body =
-    `# rshono\n\n` +
+    `# rsvhono\n\n` +
     `> ${SUMMARY}\n\n` +
     `Every documentation page is available as Markdown by appending \`.md\` to its URL.\n` +
     `The whole corpus in one file: ${base}/llms-full.txt\n\n` +

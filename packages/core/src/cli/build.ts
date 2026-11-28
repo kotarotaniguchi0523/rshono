@@ -1,30 +1,68 @@
-import { rspack, type MultiStats } from '@rspack/core';
 import type { Hono } from 'hono';
-import { cpSync, existsSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { cpSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { BUILD_OUT_DIR, createConfigs } from '../builder/rspack-config.js';
-import type { RshonoConfig } from '../config.js';
+import { createBuilder } from 'vite';
+import { BUILD_OUT_DIR, createViteConfig, PAGE_FUNCTIONS_FILE } from '../builder/vite-config.js';
+import type { RsvhonoConfig } from '../config.js';
 import { writeBuildMarker } from '../deploy/build-marker.js';
 import type { DeployPreset } from '../deploy/presets.js';
 import type { Route } from '../router.js';
+import { joinRouteFunctions, type RouteFunctionManifest } from '../runtime/route-functions.js';
 import { prerenderStaticRoutes } from '../server/ssg.js';
 import { exit } from './exit.js';
 
 interface BuildOptions {
   rootDir: string;
-  config: RshonoConfig;
+  config: RsvhonoConfig;
   /** The platform to build for, already resolved from the flag, the environment and the config. */
   preset: DeployPreset;
 }
 
-/** What `rshono build` uses the app's own server bundle for, once it has compiled it. */
+/** What `rsvhono build` uses the app's own server bundle for, once it has compiled it. */
 interface ServerBundle {
   app: Hono;
   routes: readonly Route[];
   /** Resolves every route's own module, and the app's server actions, and checks them — see `checkAppModules`. */
   checkAppModules: () => Promise<void>;
+  /** Route pattern → the key of the page module it renders — see `routePages` in `entry.rsc.tsx`. */
+  routePages: () => Promise<Record<string, string | undefined>>;
+}
+
+/** Where the route → server functions manifest is written, beside the server bundle. */
+const ROUTE_FUNCTIONS_FILE = 'route-functions.json';
+
+/**
+ * Joins the build's per-page record with the route table and writes the manifest, then says what it found.
+ * A report and a file: nothing at runtime reads it yet — see `runtime/route-functions.ts`.
+ */
+async function writeRouteFunctions(distDir: string, bundle: ServerBundle): Promise<void> {
+  const serverDir = join(distDir, 'server');
+  let built: { pages: Record<string, string[]>; all: string[] };
+  try {
+    built = JSON.parse(readFileSync(join(serverDir, PAGE_FUNCTIONS_FILE), 'utf8')) as typeof built;
+  } catch {
+    console.warn('  ⚠ the build left no record of which server functions each page reaches, so no route-functions manifest was written.');
+    return;
+  }
+  const manifest: RouteFunctionManifest = joinRouteFunctions(built.pages, await bundle.routePages(), built.all);
+  writeFileSync(join(serverDir, ROUTE_FUNCTIONS_FILE), JSON.stringify(manifest, null, 2));
+
+  if (built.all.length === 0) return;
+  const routes = Object.keys(manifest.routes).length;
+  console.log(`  • ${built.all.length} server function(s), traced across ${routes} route(s) → dist/server/${ROUTE_FUNCTIONS_FILE}`);
+  // Said out loud, because the two silent readings of a route missing from the list are both wrong: that it
+  // reaches no function, and that it reaches all of them.
+  if (manifest.unresolved.length > 0) {
+    console.warn(`  ⚠ could not trace which server functions these routes reach: ${manifest.unresolved.join(', ')}`);
+  }
+  if (manifest.unreachable.length > 0) {
+    console.warn(
+      `  ⚠ ${manifest.unreachable.length} server function(s) are in the build but no route reaches them — unused, or reached in a way the module graph does not show: ${manifest.unreachable.join(', ')}`,
+    );
+  }
 }
 
 function importServerBundle(distDir: string): Promise<ServerBundle> {
@@ -36,31 +74,27 @@ export async function buildCommand(options: BuildOptions): Promise<void> {
   const distDir = join(rootDir, BUILD_OUT_DIR);
 
   console.log('  • building client + server bundles…');
-  const configs = createConfigs({ rootDir, isDev: false, config, preset });
-  const compiler = rspack(configs);
-
-  const stats = await new Promise<MultiStats>((resolve, reject) => {
-    compiler.run((err, result) => {
-      compiler.close(() => {
-        if (err) reject(err);
-        else resolve(result!);
-      });
-    });
-  });
-
-  if (stats.hasErrors()) {
-    console.error(stats.toString({ preset: 'errors-warnings', colors: true }));
+  // Emptied here rather than by Vite: the SSR environment's output sits inside the RSC environment's.
+  await rm(join(distDir, 'server'), { recursive: true, force: true });
+  await rm(join(distDir, 'static'), { recursive: true, force: true });
+  // Outside the `try`: what this throws is a one-line `[rsvhono]` message about the app, for the CLI to print.
+  // One id for this build, minted once and handed to all three bundles. Random rather than a hash of the
+  // output: what it has to say is "these were built together", and two builds of the same source on two
+  // machines were not.
+  const buildId = randomUUID().replaceAll('-', '').slice(0, 16);
+  const viteConfig = createViteConfig({ rootDir, isDev: false, config, preset, buildId });
+  try {
+    const builder = await createBuilder(viteConfig);
+    await builder.buildApp();
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : error);
     return exit(1);
   }
-  // Printed rather than left to the summary below, which counts warnings without saying what they are —
-  // and one of them is the env shadow reporting a read it cannot cover. See `env-shadow-loader.cjs`.
-  if (stats.hasWarnings()) console.warn(stats.toString({ preset: 'errors-warnings', colors: true }));
-  console.log(stats.toString({ preset: 'summary', colors: true }));
 
   const publicDir = join(rootDir, 'public');
   // From scratch, and unconditionally, like every other directory this build assembles. `cpSync` only
   // adds, so a file deleted from `public/` used to survive in `dist/public` and go on being served by
-  // `rshono start` for good — and deleting `public/` outright left the whole of the old tree there, since
+  // `rsvhono start` for good — and deleting `public/` outright left the whole of the old tree there, since
   // the copy below is the only thing that touches it. The two CDN presets clear their own output but read
   // *this* directory, so a stale file propagated into their assets as well, past a comment promising it
   // could not.
@@ -75,11 +109,11 @@ export async function buildCommand(options: BuildOptions): Promise<void> {
 
   const ssgDir = join(distDir, 'ssg');
   await rm(ssgDir, { recursive: true, force: true });
-  process.env.RSHONO_PRERENDER = '1';
+  process.env.RSVHONO_PRERENDER = '1';
   // The bundle's module scope is where `src/routes.ts` and `src/server.ts` are validated.
   //
   // This and the two stages below are what the *app* can fail — the two entry modules here, each route's own
-  // module next, and a page that throws while prerendering after that. Each raises a `[rshono]` message
+  // module next, and a page that throws while prerendering after that. Each raises a `[rsvhono]` message
   // written for whoever is running the build, and `main().catch` in `cli/index.ts` is what prints it as the
   // one line it is. These used to be wrapped in a `phase()` helper that did the same thing three times and
   // nowhere else, which left `createConfigs` above — where a missing `src/routes.ts` is found — printing a
@@ -90,6 +124,7 @@ export async function buildCommand(options: BuildOptions): Promise<void> {
   // that skipped them would spend the prerender pass on a route it is about to refuse anyway. Without this
   // they ran on first request instead, which meant a page that could never work shipped behind a green build.
   await bundle.checkAppModules();
+  await writeRouteFunctions(distDir, bundle);
 
   const { written, skipped, flightOnly } = await prerenderStaticRoutes({
     routes: bundle.routes,
@@ -109,7 +144,7 @@ export async function buildCommand(options: BuildOptions): Promise<void> {
   if (skipped.length > 0) console.log(`  • skipped ${skipped.length} (will SSR per request)`);
 
   // Before `finalize`, so a preset that copies `dist/` into a platform layout takes it along.
-  writeBuildMarker(distDir, preset.name);
+  writeBuildMarker(distDir, preset.name, buildId);
 
   // Last, so a preset arranging its output finds every piece of the build on disk.
   await preset.finalize?.({
@@ -123,7 +158,7 @@ export async function buildCommand(options: BuildOptions): Promise<void> {
 
   console.log(`  ✓ build complete — ${preset.deployHint}`);
 
-  // Rspack's worker pool can keep the loop alive after `close()`, so the exit is explicit. {@link exit}
+  // The bundler's worker pool can keep the loop alive after the build, so the exit is explicit. {@link exit}
   // drains first: in CI the tail is the lines saying what was built and where it went.
   await exit(0);
 }

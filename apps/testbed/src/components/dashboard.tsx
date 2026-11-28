@@ -1,5 +1,5 @@
-import type { PageProps } from '@rshono/core';
-import { redirect } from '@rshono/core/server';
+import type { PageProps } from '@rsvhono/core';
+import { redirect } from '@rsvhono/core/server';
 // Type-only, so importing the server sub-app from a page module costs nothing at runtime.
 import type { AppEnv } from '../server';
 import { Layout } from './layout';
@@ -10,7 +10,7 @@ export default function Dashboard({ ctx }: PageProps<'/dashboard', AppEnv>) {
   if (!session) redirect('/login');
 
   return (
-    <Layout title="Dashboard — rshono">
+    <Layout title="Dashboard — rsvhono">
       <div className="page">
         <h1>Dashboard</h1>
         <p className="description">

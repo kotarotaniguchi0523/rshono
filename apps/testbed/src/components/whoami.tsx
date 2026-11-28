@@ -1,4 +1,4 @@
-import { getRequestContext } from '@rshono/core/server';
+import { getRequestContext } from '@rsvhono/core/server';
 import { Layout } from './layout';
 
 export default async function WhoAmI() {
@@ -10,10 +10,10 @@ export default async function WhoAmI() {
   const apiEndpoint = ctx.env.PUBLIC_API_ENDPOINT ?? '(unset)';
 
   return (
-    <Layout title="whoami — rshono">
+    <Layout title="whoami — rsvhono">
       <div className="page">
         <h1>whoami</h1>
-        <p className="description">The rshono request context — one object, read inside an async server component.</p>
+        <p className="description">The rsvhono request context — one object, read inside an async server component.</p>
         <ul className="user-list">
           <li className="feature-card">
             pathname: <code>{ctx.url.pathname}</code>

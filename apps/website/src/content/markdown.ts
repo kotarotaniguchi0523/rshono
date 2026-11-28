@@ -2,7 +2,7 @@
  * Markdown → HTML, a table of contents, and the frontmatter, in one pass.
  *
  * Everything here runs at **build time**: the pages that call it are `render: 'static'`, so the parse
- * and the highlight happen once during `rshono build` and what reaches a browser is finished HTML.
+ * and the highlight happen once during `rsvhono build` and what reaches a browser is finished HTML.
  * That is the whole reason a docs page ships no JavaScript of its own — there is no highlighter in the
  * client bundle because there is no highlighting left to do.
  */

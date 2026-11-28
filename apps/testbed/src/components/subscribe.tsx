@@ -1,4 +1,4 @@
-import type { PageProps } from '@rshono/core';
+import type { PageProps } from '@rsvhono/core';
 import { subscribe } from '../actions';
 import { Layout } from './layout';
 
@@ -11,7 +11,7 @@ export default function Subscribe({ ctx }: PageProps<'/subscribe'>) {
   const subscribed = ctx.cookies.get('subscribed');
 
   return (
-    <Layout title="Subscribe — rshono">
+    <Layout title="Subscribe — rsvhono">
       <div className="page">
         <h1>Subscribe</h1>
         {subscribed && <p className="notice">Subscribed as {subscribed}</p>}

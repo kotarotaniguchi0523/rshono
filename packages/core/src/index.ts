@@ -1,17 +1,17 @@
 /**
- * `@rshono/core` — the build-time surface: route and config declaration, plus the types
+ * `@rsvhono/core` — the build-time surface: route and config declaration, plus the types
  * your pages and endpoints are written against. Nothing here pulls in runtime machinery.
  *
  * Two companion entry points are runtime-only:
- * - `@rshono/core/server` — request context, `redirect`, `notFound`, `onServerError`, `publicUrl`.
- * - `@rshono/core/client` — `useNavigation`, `AsyncBoundary`, `CatchBoundary`.
+ * - `@rsvhono/core/server` — request context, `redirect`, `notFound`, `onServerError`, `publicUrl`.
+ * - `@rsvhono/core/client` — `useNavigation`, `AsyncBoundary`, `CatchBoundary`.
  *
  * ESM only: the `exports` map declares `types` and `import` conditions and no `require` one.
  *
  * @example
  * ```ts
  * // src/routes.ts
- * import { defineRoutes } from '@rshono/core';
+ * import { defineRoutes } from '@rsvhono/core';
  *
  * export const routes = defineRoutes([{ path: '/', component: () => import('./components/home') }]);
  * ```
@@ -37,7 +37,7 @@ export {
   type RouteConfig,
 } from './router.js';
 
-export { defineConfig, type RshonoConfig, type RspackHookContext } from './config.js';
+export { defineConfig, type RsvhonoConfig } from './config.js';
 
 export type { DeployTarget } from './deploy/contract.js';
 

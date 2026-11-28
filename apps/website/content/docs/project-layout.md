@@ -4,7 +4,7 @@ description: The two files the framework knows about — everything else is your
 ---
 
 ```
-rshono.config.ts   optional — every field has a default
+rsvhono.config.ts   optional — every field has a default
 public/            optional — served verbatim at the web root
 src/
   routes.ts        required — the route table

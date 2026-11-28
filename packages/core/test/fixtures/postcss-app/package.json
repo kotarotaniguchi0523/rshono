@@ -1,23 +1,22 @@
 {
-  "name": "rshono-fixture-postcss",
+  "name": "rsvhono-fixture-postcss",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Test fixture: an app whose CSS needs a PostCSS pass — Tailwind, wired up through the rspack hook.",
+  "description": "Test fixture: an app whose CSS needs a PostCSS pass \u2014 Tailwind.",
   "scripts": {
-    "build": "rshono build",
-    "start": "rshono start"
+    "build": "rsvhono build",
+    "start": "rsvhono start"
   },
   "dependencies": {
     "hono": "^4.13.17",
-    "react": "19.2.8",
-    "react-dom": "19.2.8",
-    "@rshono/core": "workspace:*"
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "@rsvhono/core": "workspace:*"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.5",
     "postcss": "^8.5.33",
-    "postcss-loader": "^8.2.1",
     "tailwindcss": "^4.3.5"
   }
 }

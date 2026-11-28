@@ -16,7 +16,7 @@ export async function startCommand(options: StartOptions): Promise<void> {
   const distDir = join(rootDir, 'dist');
   const mainPath = join(distDir, 'server', 'main.mjs');
   if (!existsSync(mainPath)) {
-    console.error('rshono: no production build found — run `rshono build` first.');
+    console.error('rsvhono: no production build found — run `rsvhono build` first.');
     return exit(1);
   }
 
@@ -25,8 +25,8 @@ export async function startCommand(options: StartOptions): Promise<void> {
   const target = readBuildMarker(distDir);
   if (target !== null && target !== 'node') {
     const hint = deployHintFor(target);
-    console.error(`rshono: this build targets ${target}, which \`rshono start\` cannot run${hint ? ` — ${hint}` : '.'}`);
-    console.error('  Rebuild for a server with `rshono build --deploy node` to run it here.');
+    console.error(`rsvhono: this build targets ${target}, which \`rsvhono start\` cannot run${hint ? ` — ${hint}` : '.'}`);
+    console.error('  Rebuild for a server with `rsvhono build --deploy node` to run it here.');
     return exit(1);
   }
 
@@ -35,9 +35,9 @@ export async function startCommand(options: StartOptions): Promise<void> {
   if (host !== undefined) process.env.HOST = host;
 
   // Imported into this process rather than spawned into a child. The child only ever existed to pass
-  // `--enable-source-maps`, and `bin/rshono.mjs` already enables the same thing in-process before the CLI
+  // `--enable-source-maps`, and `bin/rsvhono.mjs` already enables the same thing in-process before the CLI
   // loads — so a supervisor bought a second PID and its own heap in every container, an extra frame in every
   // stack, and signal forwarding for signals the bundle already handles itself through `onShutdown`. `start`
-  // deliberately imports no Rspack, so the process this leaves behind is the server and little else.
+  // deliberately imports no Vite, so the process this leaves behind is the server and little else.
   await import(pathToFileURL(mainPath).href);
 }

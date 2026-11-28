@@ -1,7 +1,8 @@
 'use server';
 
-import { getRequestContext, redirect } from '@rshono/core/server';
+import { getRequestContext, notFound, redirect, requestRefresh } from '@rsvhono/core/server';
 import { fakeDB, type User } from './db';
+import { likes, raceLog } from './race-log';
 
 // Not exported — a 'use server' module may only export async functions.
 /**
@@ -83,4 +84,106 @@ export async function subscribe(formData: FormData): Promise<void> {
   const email = field(formData, 'email');
   if (!email.includes('@')) return;
   getRequestContext().cookies.set('subscribed', email, { path: '/', httpOnly: true });
+}
+
+/**
+ * Applies `label` after `delayMs` — so a test decides the order two overlapping calls land in on the server,
+ * independently of the order the browser made them in. See `/action-race`.
+ */
+export async function recordRace(label: string, delayMs: number): Promise<string> {
+  await new Promise((resolve) => setTimeout(resolve, Math.min(Math.max(Number(delayMs) || 0, 0), 5000)));
+  raceLog.push(String(label).slice(0, 80));
+  return label;
+}
+
+/**
+ * Counts up after `ms` — a `useActionState` action with a server-side delay a test controls. See
+ * `/transition-probe`.
+ */
+export async function probeEcho(previous: number, formData: FormData): Promise<number> {
+  await new Promise((resolve) => setTimeout(resolve, Math.min(Number(formData.get('ms')) || 0, 5000)));
+  return previous + 1;
+}
+
+/**
+ * An action that ends in a route intent instead of a value: `notFound()`, or a `redirect()` to wherever the
+ * form says — another origin included. Posted by the form on `/action-race`, with or without JavaScript.
+ */
+export async function raiseSignal(formData: FormData): Promise<void> {
+  const to = formData.get('to');
+  if (typeof to === 'string' && to !== '') redirect(to);
+  notFound();
+}
+
+/**
+ * `recordRace`, and then asks for the page — twice, which has to be one render. Under the default refresh
+ * mode the page is rendered anyway; under `'explicit'` this is the only thing that renders it.
+ */
+export async function recordRaceAndRefresh(label: string): Promise<string> {
+  raceLog.push(String(label).slice(0, 80));
+  requestRefresh();
+  requestRefresh();
+  return label;
+}
+
+/** Counts a like after a moment, and returns the new total — what an optimistic update settles to. */
+export async function like(): Promise<number> {
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  return ++likes.count;
+}
+
+/** Returns a value part of which is not ready yet: the reply streams it, page or no page. */
+export async function streamed(label: string): Promise<{ now: string; later: Promise<string> }> {
+  return { now: label, later: new Promise((resolve) => setTimeout(() => resolve(`${label}-later`), 200)) };
+}
+
+/** How far each `ticking` run has got, by label — read back by `tickCount`, so a test can see a run stop. */
+const ticks = new Map<string, number>();
+
+/**
+ * Returns an async iterable: `count` values, one every `intervalMs`. The reply streams them as they are
+ * made. If the client goes away the generator has nobody to yield to, and should not go on making values.
+ */
+export async function ticking(label: string, count: number, intervalMs: number): Promise<AsyncIterable<number>> {
+  ticks.set(label, 0);
+  return (async function* () {
+    for (let n = 1; n <= count; n++) {
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+      ticks.set(label, n);
+      yield n;
+    }
+  })();
+}
+
+export async function tickCount(label: string): Promise<number> {
+  return ticks.get(label) ?? -1;
+}
+
+/** A value three promises deep, each ready later than the one around it. */
+export async function nested(label: string): Promise<{ a: Promise<{ b: Promise<{ c: string }> }> }> {
+  const later = <T>(ms: number, value: T) => new Promise<T>((resolve) => setTimeout(() => resolve(value), ms));
+  return { a: later(50, { b: later(100, { c: `${label}-deep` }) }) };
+}
+
+/** Returns a value whose second half fails while the reply is already on the wire. */
+export async function failsLate(label: string): Promise<{ now: string; later: Promise<string> }> {
+  return { now: label, later: new Promise((_, reject) => setTimeout(() => reject(new Error(`late failure ${label}`)), 100)) };
+}
+
+/**
+ * Hands back what it was given. Called with something flight cannot serialize — a function, a class
+ * instance — the argument crosses as a temporary reference, and the reply has to name the same one for the
+ * caller to get its own object back.
+ */
+export async function handBack<T>(value: T): Promise<{ same: T }> {
+  return { same: value };
+}
+
+/**
+ * Takes one argument bound on the server and the form after it — the shape `action.bind(null, value)` gives
+ * a form action. Applies `<bound>:<field>` to the race log, so a test can see both halves arrived.
+ */
+export async function recordBound(bound: string, formData: FormData): Promise<void> {
+  const suffix = formData.get('suffix');
+  raceLog.push(`${bound}:${typeof suffix === 'string' ? suffix : ''}`.slice(0, 80));
 }

@@ -1,5 +1,5 @@
 /**
- * The rshono mark, inline rather than an <img>: it is two paths, so shipping it in the HTML costs less
+ * The rsvhono mark, inline rather than an <img>: it is two paths, so shipping it in the HTML costs less
  * than the request would and it can inherit the layout's sizing. `aria-hidden` keeps it out of the
  * accessible name — the wordmark beside it is what a screen reader should read.
  */

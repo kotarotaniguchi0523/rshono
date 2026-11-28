@@ -19,16 +19,16 @@ import {
 import { plan as buildPlan } from './plan.js';
 import { detectPackageManager, packageManager, runInstall } from './pm.js';
 import { nextSteps, summary, unwrap } from './ui.js';
-import { RSHONO_VERSION } from './versions.js';
+import { RSVHONO_VERSION } from './versions.js';
 import { conflictingEntries, writePlan } from './write.js';
 
-const DEFAULT_DIRECTORY = 'my-rshono-app';
+const DEFAULT_DIRECTORY = 'my-rsvhono-app';
 
 /** Every accepted name comes from `options.ts`, so the help cannot promise one the validation refuses. */
-const HELP = `create-rshono — scaffold a new rshono app
+const HELP = `create-rsvhono — scaffold a new rsvhono app
 
 Usage:
-  npx @rshono/create@latest [directory] [options]
+  npx @rsvhono/create@latest [directory] [options]
 
 Options:
   -y, --yes                accept the default for every question not given as a flag
@@ -48,7 +48,7 @@ Options:
 Every question can be answered by a flag, and a non-interactive terminal implies --yes — so one command
 scaffolds without prompting:
 
-  npx @rshono/create@latest my-app -y --deploy cloudflare --tailwind --quality biome
+  npx @rsvhono/create@latest my-app -y --deploy cloudflare --tailwind --quality biome
 `;
 
 function fail(message: string): never {
@@ -104,7 +104,7 @@ async function main(): Promise<void> {
   const { values, positionals } = parse();
 
   if (values.help) return console.log(HELP);
-  if (values.version) return console.log(__CREATE_RSHONO_VERSION__);
+  if (values.version) return console.log(__CREATE_RSVHONO_VERSION__);
 
   // A pipe, a CI job or an agent gets the defaults rather than a prompt nothing can answer. Both streams have to
   // be a terminal: the prompts draw on stdout but read from stdin.
@@ -126,7 +126,7 @@ async function main(): Promise<void> {
   const gitFlag = tristate(values.git, values['no-git'], 'git');
 
   // The framework version, not this package's: it is the one the app gets pinned to. `--version` reports ours.
-  prompts.intro(`create-rshono  ·  rshono ${RSHONO_VERSION}`);
+  prompts.intro(`create-rsvhono  ·  rsvhono ${RSVHONO_VERSION}`);
 
   // ── Where ───────────────────────────────────────────────────────────────────────────────────────
   let directory = positionals[0];

@@ -3,7 +3,7 @@
 import { useEffect } from 'react';
 
 /** Where the choice is kept. Namespaced, because a docs site shares an origin with nothing else here. */
-const STORAGE_KEY = 'rshono:pm';
+const STORAGE_KEY = 'rsvhono:pm';
 
 /**
  * A package manager id, and never anything else.

@@ -1,3 +1,5 @@
+// eslint-disable-next-line @typescript-eslint/triple-slash-reference
+/// <reference path="../types/rsvhono-config.d.ts" />
 /**
  * The two modules an app hands the framework — `src/routes.ts` and `src/server.ts` — checked before
  * anything is built on them.
@@ -9,14 +11,13 @@
  * The mistakes that produced no error at all were worse: a duplicated `path` whose second entry silently
  * never ran, a `staticPaths` on a route that renders per request.
  *
- * The route *table* is checked at module load — during `rshono build`, which imports the server bundle for
- * the prerender pass; at `rshono dev` startup; and when a deployed server boots. The modules the table points
+ * The route *table* is checked at module load — during `rsvhono build`, which imports the server bundle for
+ * the prerender pass; at `rsvhono dev` startup; and when a deployed server boots. The modules the table points
  * *at* cannot be, because they load lazily: {@link assertPageModule} and {@link assertEndpointModule} run on
- * first request, and {@link assertRouteModules} runs both against every route during `rshono build`.
+ * first request, and {@link assertRouteModules} runs both against every route during `rsvhono build`.
  */
 
 import type { Handler, Hono } from 'hono';
-import type { ServerEntry } from 'react-server-dom-rspack/server';
 import { isPageRoute, type PageComponent, type Route, type RouteConfig } from '../router.js';
 
 /** Every method an endpoint route can name, `'all'` aside — which is also what `'all'` is expanded to below. */
@@ -33,13 +34,13 @@ const RENDER_MODES = ['static', 'dynamic'];
  * (`deploy/filesystem.ts`, `deploy/cloudflare/runtime.ts`) and in `cli/dev.ts`, none of which this module
  * can pull in.
  *
- * It is the only one. `/_rshono/hmr` is dev-only and an exact path rather than a prefix, and Cloudflare's
+ * It is the only one. `/_rsvhono/hmr` is dev-only and an exact path rather than a prefix, and Cloudflare's
  * `__ssg` is an asset path no app would name.
  */
 const RESERVED_PREFIX = '/_static';
 
 function fail(message: string): never {
-  throw new Error(`[rshono] ${message}`);
+  throw new Error(`[rsvhono] ${message}`);
 }
 
 /**
@@ -245,7 +246,7 @@ function assertNothingIsShadowed(routes: readonly Route[]): void {
       fail(
         `src/routes.ts: ${name} would never run — the framework serves the client bundle at ${RESERVED_PREFIX}, ` +
           `mounted ahead of the route table and answering that whole subtree, so ${RESERVED_PREFIX} is reserved on every ` +
-          'deploy target and under `rshono dev`. Give the route a path of its own.',
+          'deploy target and under `rsvhono dev`. Give the route a path of its own.',
       );
     }
     const methods = methodsOf(route);
@@ -317,30 +318,75 @@ export function validateServerApp(exported: unknown): Hono | null {
   return app as Hono;
 }
 
+const CLIENT_REFERENCE = Symbol.for('react.client.reference');
+
+/**
+ * The two exports the build adds to a page module — see `rsvhonoPages` in `builder/vite-config.ts`. The page
+ * itself is not touched: its default export is the function its author wrote.
+ *
+ * `PAGE_MARK` is the page's key, its path under `src/`. It says the build saw this module as a page, and it
+ * ties a route to the build's record of what its page reaches (`route-functions.ts`) without anyone parsing
+ * `routes.ts`. `PAGE_ASSETS` returns the stylesheets the module imports, as elements to render beside it.
+ */
+export const PAGE_MARK = '$$rsvhonoPage';
+export const PAGE_ASSETS = '$$rsvhonoAssets';
+
+/** A page module as the build leaves it. */
+interface PageModule {
+  default?: unknown;
+  [PAGE_MARK]?: unknown;
+  [PAGE_ASSETS]?: unknown;
+}
+
+/** The key of a page module the build recognised, or `undefined` for anything else. */
+export function pageKeyOf(mod: PageModule | null | undefined): string | undefined {
+  const key = mod?.[PAGE_MARK];
+  return typeof key === 'string' ? key : undefined;
+}
+
+/**
+ * Each page's stylesheets, by the page. Beside the component rather than on it: the function is the app's,
+ * and nothing is written to it.
+ */
+const assets = new WeakMap<PageComponent, () => unknown>();
+
+/** The stylesheets `Page`'s module imports, as React elements — or nothing, for a page that imports none. */
+export function pageAssets(Page: PageComponent): unknown {
+  return assets.get(Page)?.();
+}
+
 /**
  * The server component a page module must default-export, checked rather than cast.
  *
- * Two structural mistakes land here, and neither can serve *any* request, which is why they are also checked
+ * Three structural mistakes land here, and none can serve *any* request, which is why they are also checked
  * at build time by {@link assertRouteModules}:
  *
  * - no default export at all — a named `export function Page`, or a file that exports its layout instead;
- * - a `'use client'` page. That module's default export is a client reference, so it carries no
- *   `entryJsFiles` — the list of scripts the document has to boot, recorded only for a *server* entry.
- *   Rendering it anyway would produce a page with no client runtime, which is worse than a message.
+ * - a `'use client'` page. That module's default export is a client reference, not something to render on
+ *   the server with `ctx`;
+ * - a page the build did not recognise as one. Left alone, the RSC plugin's own stylesheet wrapper could
+ *   re-create its element from the enumerable props and silently drop `ctx`.
  */
-export function assertPageModule(mod: { default?: unknown }, label: string): ServerEntry<PageComponent> {
-  const Page = mod.default as ServerEntry<PageComponent> | undefined;
+export function assertPageModule(mod: PageModule, label: string): PageComponent {
+  const Page = mod.default as (PageComponent & { $$typeof?: symbol }) | undefined;
   if (typeof Page !== 'function') {
     fail(`The page module for ${label} must default-export a server component.`);
   }
-  if (!Page.entryJsFiles) {
+  if (Page.$$typeof === CLIENT_REFERENCE) {
     fail(
-      `The page component for ${label} is missing its client-asset info ('use server-entry'). ` +
-        "The directive is added automatically for inline `component: () => import('…')` thunks in routes.ts. " +
-        "If this page is wired up another way, put 'use server-entry' on the first line of the page module yourself — " +
-        "and make sure the page is a server component (a 'use client' page must be wrapped by a server component instead).",
+      `The page component for ${label} is a client component ('use client'). ` +
+        "A page must be a server component — wrap the 'use client' component in one instead.",
     );
   }
+  if (pageKeyOf(mod) === undefined) {
+    fail(
+      `The page component for ${label} was not built as a page ('use server-entry'). ` +
+        "That happens automatically for inline `component: () => import('…')` thunks in routes.ts. " +
+        "If this page is wired up another way, put 'use server-entry' on the first line of the page module yourself.",
+    );
+  }
+  const load = mod[PAGE_ASSETS];
+  if (typeof load === 'function') assets.set(Page, load as () => unknown);
   return Page;
 }
 
@@ -364,7 +410,7 @@ export function assertEndpointModule(mod: { handler?: unknown }, label: string):
 }
 
 /**
- * Resolves every route's own module once and runs the two checks above against it — what `rshono build` does
+ * Resolves every route's own module once and runs the two checks above against it — what `rsvhono build` does
  * once the bundle exists, so a route that cannot serve *any* request fails the build instead of exiting 0 and
  * answering 500 in production for the life of the deployment.
  *
@@ -431,7 +477,7 @@ export async function assertRouteModules(config: RouteConfig): Promise<void> {
   if (failures.length > 1) {
     fail(
       `${failures.length} route modules cannot serve a request:\n` +
-        failures.map((message) => `      • ${message.replace(/^\[rshono\] /, '')}`).join('\n'),
+        failures.map((message) => `      • ${message.replace(/^\[rsvhono\] /, '')}`).join('\n'),
     );
   }
 }

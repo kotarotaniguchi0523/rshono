@@ -54,7 +54,7 @@ export const runtime: DeployRuntime = {
   },
 
   serveApp(app: Hono): unknown {
-    // The same conversion `rshono start` runs on, so a request is built here exactly as it is on the `node`
+    // The same conversion `rsvhono start` runs on, so a request is built here exactly as it is on the `node`
     // target — including a streamed response body, which `supportsResponseStreaming` in `.vc-config.json`
     // then keeps unbuffered on the way out.
     const listener = getRequestListener(app.fetch);

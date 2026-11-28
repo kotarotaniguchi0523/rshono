@@ -1,4 +1,4 @@
-import type { PageProps } from '@rshono/core';
+import type { PageProps } from '@rsvhono/core';
 import { ObservedNavigationRepro } from './navigation-repro';
 
 export default function NavigationSuspense({ url }: PageProps) {

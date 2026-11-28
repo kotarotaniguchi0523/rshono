@@ -1,6 +1,6 @@
 import { Suspense } from 'react';
-import type { PageProps } from '@rshono/core';
-import { notFound, redirect } from '@rshono/core/server';
+import type { PageProps } from '@rsvhono/core';
+import { notFound, redirect } from '@rsvhono/core/server';
 import { Layout } from './layout';
 
 /**
@@ -27,7 +27,7 @@ async function SlowSection() {
 
 export default function LateSignal({ url }: PageProps) {
   return (
-    <Layout title="Late control signal — rshono">
+    <Layout title="Late control signal — rsvhono">
       <div className="page">
         <h1>Late control signal</h1>
         <Suspense fallback={<p data-section="loading">Loading…</p>}>

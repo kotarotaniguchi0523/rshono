@@ -1,14 +1,13 @@
 // Checks that the exactly-pinned dependencies agree everywhere they are written down.
 //
-// RSC internals are coupled across builds — `react-server-dom-rspack` reaches into `ReactSharedInternals`
-// and emits a flight payload the matching `react-dom` has to parse, and its `@rspack/core` peer range moves
-// with it — so the coupled set is pinned in three places at once: the two published manifests, and the
+// RSC internals are coupled across builds — `react-server-dom-webpack` reaches into `ReactSharedInternals`
+// and emits a flight payload the matching `react-dom` has to parse — so the coupled set is pinned in three places at once: the two published manifests, and the
 // `overrides` in `pnpm-workspace.yaml` that force one resolution on every workspace member and fixture.
 // Three copies of one fact, and nothing made them agree.
 //
-// They once did not. `6d8e3e4` moved the manifests to `@rspack/core` 2.2.0 / `react-server-dom-rspack` 0.1.0
-// and left the overrides on 2.1.7 / 0.0.3, so the suite, CI and every fixture ran against one pair while
-// `npm i @rshono/core` would have installed the other — for a month, silently, because a manifest pin is
+// They once did not. Back when the bundler was Rspack, `6d8e3e4` moved the manifests to `@rspack/core` 2.2.0 /
+// `react-server-dom-rspack` 0.1.0 and left the overrides on 2.1.7 / 0.0.3, so the suite, CI and every fixture ran against one pair while
+// `npm i @rsvhono/core` would have installed the other — for a month, silently, because a manifest pin is
 // what a consumer resolves and an override is what this repo resolves, and no check compared them. That is
 // the whole reason this file exists: the version the suite tests has to be the version a consumer gets.
 //

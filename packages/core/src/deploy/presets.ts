@@ -1,4 +1,3 @@
-import type { RspackOptions } from '@rspack/core';
 import { finalizeCloudflareBuild } from './cloudflare/build.js';
 import type { Route } from '../router.js';
 import type { DeployTarget } from './contract.js';
@@ -6,7 +5,7 @@ import { finalizeVercelBuild } from './vercel/build.js';
 
 /** What a preset's {@link DeployPreset.finalize} is told about the build it is arranging. */
 export interface DeployBuildContext {
-  /** The project root — where `rshono build` ran, and what a platform config file is written next to. */
+  /** The project root — where `rsvhono build` ran, and what a platform config file is written next to. */
   rootDir: string;
   /** `<root>/dist`. */
   distDir: string;
@@ -34,7 +33,7 @@ export interface DeployBuildContext {
 export interface DeployPreset {
   readonly name: DeployTarget;
   /**
-   * The module `@rshono/deploy` resolves to, as a path relative to the framework's own `dist/`.
+   * The module `@rsvhono/deploy` resolves to, as a path relative to the framework's own `dist/`.
    * Slash-separated and split on use, so it stays a valid path on Windows too.
    */
   readonly runtimeModule: string;
@@ -49,18 +48,24 @@ export interface DeployPreset {
    */
   readonly envBindings?: boolean;
   /**
-   * Extra resolve conditions for the server bundle, most specific first — what picks the right build of React
-   * and the RSC runtime, both of which ship one per runtime. Omit to accept whatever the Rspack target
-   * implies, which is correct for Node.
+   * Extra resolve conditions for the two server environments, most specific first — what picks the right
+   * build of a dependency that ships one per runtime. Omit for Node.
    */
   readonly resolveConditions?: readonly string[];
-  /** browserslist-style targets for the server bundle's swc pass. Defaults to Node. */
-  readonly syntaxTargets?: readonly string[];
   /**
-   * Adjusts the generated server Rspack config for this platform — target, externals policy, output shape.
-   * Mutates in place, and runs before the user's `rspack` hook so that hook keeps the last word.
+   * Bundle the app's dependencies into the server output instead of importing them from `node_modules`.
+   *
+   * Externalizing is right where the bundle runs *inside* the project — but a serverless function is uploaded
+   * as a directory rather than installed into one, so nothing resolves `node_modules` at request time and an
+   * externalized `import 'some-package'` is a cold start that dies on `ERR_MODULE_NOT_FOUND`. `node:` builtins
+   * stay external either way.
+   *
+   * The cost is a dependency that cannot be bundled — a native addon, or one that reads its own files off
+   * disk. Those fail the build rather than the deploy; the `vite` option in `rsvhono.config.ts` is the way out.
    */
-  configureServer?(config: RspackOptions): void;
+  readonly bundleDependencies?: boolean;
+  /** Emit each server environment as one file, with dynamic imports inlined — for a host that cannot load chunks lazily. */
+  readonly singleFile?: boolean;
   /**
    * Arranges the finished build for the platform: assembles the directory layout it expects, emits its config
    * file, and prints how to deploy. Runs last, so everything it needs to move is already on disk.
@@ -75,7 +80,7 @@ export interface DeployPreset {
 export const NODE_PRESET: DeployPreset = {
   name: 'node',
   runtimeModule: 'deploy/node/runtime.js',
-  deployHint: 'run `rshono start`',
+  deployHint: 'run `rsvhono start`',
 };
 
 /**
@@ -83,8 +88,7 @@ export const NODE_PRESET: DeployPreset = {
  *
  * Every setting here follows from `workerd` not being Node. Dependencies are bundled because nothing resolves
  * `node_modules` at runtime; `node:` and `cloudflare:` imports stay external because the runtime provides
- * them under `nodejs_compat`; and async chunks are inlined because Wrangler's bundler cannot follow the
- * computed specifier Rspack's ESM chunk loader emits — a split bundle deploys and then fails on first render.
+ * them under `nodejs_compat`; and dynamic imports are inlined so the Worker is a fixed set of modules.
  */
 const CLOUDFLARE_PRESET: DeployPreset = {
   name: 'cloudflare',
@@ -92,32 +96,10 @@ const CLOUDFLARE_PRESET: DeployPreset = {
   deployHint: 'deploy with `wrangler deploy`',
   envBindings: true,
   resolveConditions: ['workerd'],
-  syntaxTargets: ['chrome 120'],
-  configureServer(config) {
-    config.target = 'webworker';
-    config.externalsType = 'module-import';
-    config.externals = [/^(?:node|cloudflare):/];
-    config.output = { ...config.output, asyncChunks: false };
-  },
+  bundleDependencies: true,
+  singleFile: true,
   finalize: finalizeCloudflareBuild,
 };
-
-/**
- * Bundles the app's dependencies into the server output instead of importing them from `node_modules`.
- *
- * The generated config externalizes them, which is right where the bundle runs *inside* the project — but a
- * serverless function is uploaded as a directory rather than installed into one, so nothing resolves
- * `node_modules` at request time and an externalized `import 'some-package'` is a cold start that dies on
- * `ERR_MODULE_NOT_FOUND`. Node's own builtins stay external either way, through the `node` externals preset
- * that `target: 'node'` already enables.
- *
- * The cost is a dependency that cannot be bundled — a native addon, or one that reads its own files off disk
- * relative to `__dirname`. Those now fail the build rather than the deploy, which is the same constraint
- * `cloudflare` has always had; the `rspack` hook in `rshono.config.ts` is the way out.
- */
-function bundleDependencies(config: RspackOptions): void {
-  config.externals = [];
-}
 
 /**
  * Vercel: one Node function behind the platform's CDN, which serves the assets and reaches the function only
@@ -126,13 +108,13 @@ function bundleDependencies(config: RspackOptions): void {
  * streamed SSR.
  *
  * Only `dist/server` is uploaded with the function, which is why dependencies are bundled: see
- * {@link bundleDependencies}.
+ * {@link DeployPreset.bundleDependencies}.
  */
 const VERCEL_PRESET: DeployPreset = {
   name: 'vercel',
   runtimeModule: 'deploy/vercel/runtime.js',
   deployHint: 'deploy with `vercel deploy --prebuilt`',
-  configureServer: bundleDependencies,
+  bundleDependencies: true,
   finalize: finalizeVercelBuild,
 };
 
@@ -142,13 +124,13 @@ const VERCEL_PRESET: DeployPreset = {
  * hold every page until its last byte rendered.
  *
  * The deployment package is `dist/` and nothing else, which is why dependencies are bundled: see
- * {@link bundleDependencies}.
+ * {@link DeployPreset.bundleDependencies}.
  */
 const AWS_LAMBDA_PRESET: DeployPreset = {
   name: 'aws-lambda',
   runtimeModule: 'deploy/aws-lambda/runtime.js',
   deployHint: 'zip dist/ with the handler at dist/server/main.mjs',
-  configureServer: bundleDependencies,
+  bundleDependencies: true,
 };
 
 const PRESETS: Record<DeployTarget, DeployPreset> = {
@@ -174,7 +156,7 @@ function presetFor(target: string): DeployPreset | undefined {
 }
 
 /**
- * How to deploy what a given target built, or `null` for a name this rshono does not know — which a `dist/`
+ * How to deploy what a given target built, or `null` for a name this rsvhono does not know — which a `dist/`
  * from a newer version can legitimately carry.
  */
 export function deployHintFor(target: string): string | null {
@@ -185,16 +167,16 @@ export function deployHintFor(target: string): string | null {
 export interface DeploySources {
   /** The `--deploy` flag. */
   flag?: string;
-  /** The `RSHONO_DEPLOY` env var — for a CI job that deploys the same app to more than one place. */
+  /** The `RSVHONO_DEPLOY` env var — for a CI job that deploys the same app to more than one place. */
   env?: string;
-  /** The `deploy` field in `rshono.config.ts`. */
+  /** The `deploy` field in `rsvhono.config.ts`. */
   config?: string;
 }
 
 /**
  * Resolves the preset to build with: the flag wins over the environment, which wins over the config file,
  * which wins over the `node` default. Blank values are ignored at every level, so an unset-but-present
- * `RSHONO_DEPLOY=` in CI falls through rather than failing the build.
+ * `RSVHONO_DEPLOY=` in CI falls through rather than failing the build.
  */
 export function resolveDeployPreset(sources: DeploySources = {}): DeployPreset {
   const target = sources.flag?.trim() || sources.env?.trim() || sources.config?.trim();
@@ -202,7 +184,7 @@ export function resolveDeployPreset(sources: DeploySources = {}): DeployPreset {
 
   const preset = presetFor(target);
   if (!preset) {
-    throw new Error(`[rshono] unknown deploy target ${JSON.stringify(target)} — expected one of: ${DEPLOY_TARGETS.join(', ')}.`);
+    throw new Error(`[rsvhono] unknown deploy target ${JSON.stringify(target)} — expected one of: ${DEPLOY_TARGETS.join(', ')}.`);
   }
   return preset;
 }

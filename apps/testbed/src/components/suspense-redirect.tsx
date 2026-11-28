@@ -1,6 +1,6 @@
 import { Suspense } from 'react';
-import type { PageProps } from '@rshono/core';
-import { redirect } from '@rshono/core/server';
+import type { PageProps } from '@rsvhono/core';
+import { redirect } from '@rsvhono/core/server';
 import { Layout } from './layout';
 
 /**
@@ -21,7 +21,7 @@ async function RedirectingSection() {
 
 export default function SuspenseRedirect(_props: PageProps) {
   return (
-    <Layout title="Suspense redirect — rshono">
+    <Layout title="Suspense redirect — rsvhono">
       <div className="page">
         <h1>Suspense redirect</h1>
         <p className="description">

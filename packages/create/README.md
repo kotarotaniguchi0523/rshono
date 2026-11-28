@@ -2,17 +2,17 @@
   <img src="https://raw.githubusercontent.com/rshono/rshono/main/logo.svg" alt="" width="72" height="72" />
 </p>
 
-<h1 align="center">@rshono/create</h1>
+<h1 align="center">@rsvhono/create</h1>
 
 <p align="center">
-  Scaffolds a new <a href="https://github.com/rshono/rshono">rshono</a> app — Hono + Rspack + React Server Components.
+  Scaffolds a new <a href="https://github.com/rshono/rshono">rsvhono</a> app — Hono + Vite + React Server Components.
 </p>
 
 ```bash
-npx  @rshono/create@latest my-app
-pnx  @rshono/create my-app
-bunx @rshono/create my-app
-yarn create @rshono my-app
+npx  @rsvhono/create@latest my-app
+pnx  @rsvhono/create my-app
+bunx @rsvhono/create my-app
+yarn create @rsvhono my-app
 ```
 
 The package manager that ran it is the one the project gets: it is read from `npm_config_user_agent`, which
@@ -28,7 +28,7 @@ Six, each with a default, and each answerable by a flag instead:
 
 | Question              | Default            | Flag                                                           |
 | --------------------- | ------------------ | -------------------------------------------------------------- |
-| Where should it go?   | `my-rshono-app`    | first positional argument, or `.`                              |
+| Where should it go?   | `my-rsvhono-app`   | first positional argument, or `.`                              |
 | Where is it deployed? | `node`             | `-d, --deploy node\|cloudflare\|vercel\|aws-lambda`            |
 | Styling               | plain CSS          | `--tailwind` / `--no-tailwind`                                 |
 | Formatting & linting  | Prettier + oxlint  | `--quality prettier-oxlint\|prettier-eslint\|biome\|oxc\|none` |
@@ -42,17 +42,17 @@ nothing, and `-y` to take the defaults for everything not given. **A non-interac
 so this is one command in CI or from an agent:
 
 ```bash
-npx @rshono/create@latest my-app -y --deploy cloudflare --tailwind --quality biome
+npx @rsvhono/create@latest my-app -y --deploy cloudflare --tailwind --quality biome
 ```
 
 The deploy targets, and the deploy command each one prints, are generated from the framework's own presets —
-a target added to rshono appears here with no edit.
+a target added to rsvhono appears here with no edit.
 
 ## What you get
 
 ```
-package.json            scripts, including the target's own, and the exact pins rshono is tested against
-rshono.config.ts        the chosen deploy target; every other setting takes its default
+package.json            scripts, including the target's own, and the exact pins rsvhono is tested against
+rsvhono.config.ts        the chosen deploy target; every other setting takes its default
 tsconfig.json           strict, with @/* → ./src/*
 .env                    committed defaults; secrets go in .env.local
 .gitignore              plus whatever each chosen feature adds, under a heading naming it
@@ -87,14 +87,14 @@ two fields on a settings page, where a `deploy` script would build twice. So eac
 commands its own platform asks for, in the scaffolded README's Deploying section.
 
 `react` and `react-dom` are pinned **exactly**, at the versions the framework is tested against, and those
-pins are generated from rshono's own manifest. That is not tidiness: the RSC runtime reaches into React's
+pins are generated from rsvhono's own manifest. That is not tidiness: the RSC runtime reaches into React's
 internals, and an app installed with npm or bun has no workspace overrides to keep a single copy of it.
 
 ## Two things worth knowing
 
 **The ESLint preset pins TypeScript 6.** Linting TypeScript with ESLint means `typescript-eslint`, which reads
 the compiler API directly rather than through a stable interface, so its peer range is
-`typescript >=4.8.4 <6.1.0` — below the TypeScript rshono is built and tested against. An app that chooses
+`typescript >=4.8.4 <6.1.0` — below the TypeScript rsvhono is built and tested against. An app that chooses
 ESLint therefore gets `typescript ~6.0.3`, the newest that range allows: `npm install` would otherwise fail
 outright on the conflict, and forcing past it hands you a linter running against a compiler API it was never
 built for. The framework's declarations compile identically under either version, which is what makes this the
@@ -103,10 +103,10 @@ rules is a compiler one major behind, and the JavaScript implementation rather t
 `typecheck` on a large app is several times slower. When upstream widens the range, the pin in
 `features/quality.ts` is the only thing to delete.
 
-**Tailwind is four packages, a `postcss.config.mjs` and one rule in `rshono.config.ts`.** rshono compiles CSS
-natively and has no PostCSS in it — that is deliberate, and it means an app that wants a plugin chain brings
-its own, through the `rspack` hook. The overlay writes all of it, with a comment saying what to delete to go
-back to plain CSS.
+**Tailwind is three packages and a `postcss.config.mjs`.** rsvhono has no PostCSS dependency of its own — that
+is deliberate, and it means an app that wants a plugin chain brings its own. Vite runs PostCSS whenever that
+config file is there, so there is nothing to add to `rsvhono.config.ts`; delete the file and the three
+packages to go back to plain CSS.
 
 ## Adding an option
 
@@ -126,15 +126,15 @@ makes the whole matrix of options testable in milliseconds (`test/plan.test.mjs`
 also exported, for a tool that wants to scaffold without the prompts:
 
 ```ts
-import { plan, writePlan } from '@rshono/create';
+import { plan, writePlan } from '@rsvhono/create';
 ```
 
 ## Development
 
 ```bash
-pnpm --filter @rshono/create build       # codegen, then one bundled dist/cli.mjs with no runtime deps
-pnpm --filter @rshono/create test        # builds, then the plan matrix and the CLI — seconds, no installs
-CREATE_RSHONO_E2E=1 pnpm --filter @rshono/create test   # also: pack, install and build real apps
+pnpm --filter @rsvhono/create build       # codegen, then one bundled dist/cli.mjs with no runtime deps
+pnpm --filter @rsvhono/create test        # builds, then the plan matrix and the CLI — seconds, no installs
+CREATE_RSVHONO_E2E=1 pnpm --filter @rsvhono/create test   # also: pack, install and build real apps
 ```
 
 `plan.test.mjs` is the fast one — the whole matrix of answers in memory, no directory touched.
@@ -142,9 +142,9 @@ CREATE_RSHONO_E2E=1 pnpm --filter @rshono/create test   # also: pack, install an
 to overwrite somebody's files are checked. `e2e.test.mjs` is the opt-in one, and the only one that installs
 anything.
 
-`src/generated/framework.ts` — the rshono version, the Node range, the dependency pins and the deploy target
-list — is written by `scripts/codegen.mjs` from `packages/core`, so `pnpm --filter @rshono/create codegen` is
+`src/generated/framework.ts` — the rsvhono version, the Node range, the dependency pins and the deploy target
+list — is written by `scripts/codegen.mjs` from `packages/core`, so `pnpm --filter @rsvhono/create codegen` is
 what picks up a change there.
 
-`@clack/prompts` (MIT) is bundled rather than depended on, so `npx @rshono/create` downloads one tarball
+`@clack/prompts` (MIT) is bundled rather than depended on, so `npx @rsvhono/create` downloads one tarball
 before it can ask its first question.

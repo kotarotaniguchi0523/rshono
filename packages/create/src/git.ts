@@ -29,5 +29,5 @@ export function initRepo(cwd: string): GitResult {
   const init = git(['init', '-b', 'main'], cwd).ok || git(['init'], cwd).ok;
   if (!init) return 'failed';
   if (!git(['add', '-A'], cwd).ok) return 'initialized';
-  return git(['commit', '-m', 'Initial commit from create-rshono'], cwd).ok ? 'committed' : 'initialized';
+  return git(['commit', '-m', 'Initial commit from create-rsvhono'], cwd).ok ? 'committed' : 'initialized';
 }

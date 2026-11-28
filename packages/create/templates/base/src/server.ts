@@ -1,4 +1,4 @@
-import { onServerError, publicUrl } from '@rshono/core/server';
+import { onServerError, publicUrl } from '@rsvhono/core/server';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { csrf } from 'hono/csrf';

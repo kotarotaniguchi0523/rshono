@@ -5,7 +5,7 @@ import type { User } from '../server-fns';
  *
  * In its own module, reached only through a dynamic import inside the route's server function, so it
  * never enters the client graph. Rendered through `renderServerComponent`, which puts React's flight
- * encode (here) and decode (in the SSR pass) on the request path — matching what rshono and Next do
+ * encode (here) and decode (in the SSR pass) on the request path — matching what rsvhono and Next do
  * for every page.
  */
 export function UsersTable({ users, summary }: { users: User[]; summary: { count: number; totalScore: number; admins: number } }) {

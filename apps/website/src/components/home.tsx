@@ -1,4 +1,4 @@
-import type { PageProps } from '@rshono/core';
+import type { PageProps } from '@rsvhono/core';
 import type { ReactNode } from 'react';
 import summary from '../../content/benchmarks-summary.json';
 import { highlightCode } from '../content/markdown';
@@ -7,7 +7,7 @@ import { Layout } from './layout';
 import { Logo } from './logo';
 
 const ROUTES_SAMPLE = `
-import { defineRoutes } from '@rshono/core';
+import { defineRoutes } from '@rsvhono/core';
 
 export const routes = defineRoutes({
   routes: [
@@ -20,7 +20,7 @@ export const routes = defineRoutes({
 `;
 
 const PAGE_SAMPLE = `
-import type { PageProps } from '@rshono/core';
+import type { PageProps } from '@rsvhono/core';
 import { db } from '../db';
 
 export default async function Post({ params, ctx }: PageProps<'/posts/:id'>) {
@@ -32,7 +32,7 @@ export default async function Post({ params, ctx }: PageProps<'/posts/:id'>) {
 
 const CLIENT_SAMPLE = `
 'use client';
-import { useNavigation } from '@rshono/core/client';
+import { useNavigation } from '@rsvhono/core/client';
 
 export function Pager() {
   const { url, router } = useNavigation();
@@ -76,9 +76,9 @@ const FEATURES = [
     href: '/docs/hono',
   },
   {
-    title: 'The Rspack config too',
-    body: 'One hook, called once per compiler, hands you the generated config before it compiles. That is how Tailwind is wired up, and any other loader.',
-    href: '/docs/configuration#the-rspack-hook',
+    title: 'The Vite config too',
+    body: 'One option merges your Vite config over the generated one — plugins, aliases, CSS options. PostCSS needs nothing: add a config file and it runs.',
+    href: '/docs/configuration#the-vite-option',
   },
 ];
 
@@ -102,7 +102,7 @@ export default async function Home({ url }: PageProps<'/'>) {
   ]);
 
   return (
-    <Layout description="Minimal web framework — Hono + Rspack + React Server Components." canonical={url.href} wide>
+    <Layout description="Minimal web framework — Hono + Vite + React Server Components." canonical={url.href} wide>
       <Hero />
       <Samples routesHtml={routesHtml} pageHtml={pageHtml} clientHtml={clientHtml} />
       <Features />
@@ -125,8 +125,8 @@ function Hero() {
           Hono
         </a>{' '}
         for the server,{' '}
-        <a href="https://rspack.rs" data-native>
-          Rspack
+        <a href="https://vite.dev" data-native>
+          Vite
         </a>{' '}
         for the build,{' '}
         <a href="https://react.dev/reference/rsc/server-components" data-native>
@@ -211,9 +211,9 @@ function SectionHeading({ title, children }: { title: string; children: ReactNod
 function Features() {
   return (
     <section className="mx-auto w-full max-w-7xl px-6 py-12">
-      <SectionHeading title="Why choose rshono?">
+      <SectionHeading title="Why choose rsvhono?">
         Because there is so little of it. Nine exported values across three import paths, five direct dependencies, and no framework-owned replacement
-        for an HTML element you already know. Hono and Rspack stay reachable underneath, unrenamed.
+        for an HTML element you already know. Hono and Vite stay reachable underneath, unrenamed.
       </SectionHeading>
 
       <ul className="grid gap-px overflow-hidden rounded-xl border border-zinc-200 bg-zinc-200 sm:grid-cols-2 lg:grid-cols-3 dark:border-zinc-800 dark:bg-zinc-800">
@@ -240,11 +240,10 @@ function Toolchain() {
         <div>
           <h2 className="mb-3 text-2xl font-semibold tracking-tight text-zinc-900 dark:text-white">One toolchain, three commands</h2>
           <p className="mb-4 text-zinc-600 dark:text-zinc-400">
-            The same pair of Rspack configs builds dev and production. <code>dev</code> runs the real production server bundle in a worker thread,
-            with HMR that keeps browser state.
+            One Vite config builds dev and production. <code>dev</code> is a single dev server on one port, with HMR that keeps browser state.
           </p>
           <pre className="overflow-x-auto rounded-lg border border-zinc-200 bg-zinc-50 p-4 text-sm dark:border-zinc-800 dark:bg-zinc-900">
-            <code>{'rshono dev\nrshono build\nrshono start'}</code>
+            <code>{'rsvhono dev\nrsvhono build\nrsvhono start'}</code>
           </pre>
         </div>
 
@@ -276,7 +275,7 @@ function Toolchain() {
 /**
  * Three measured numbers, read out of the generated benchmark summary rather than typed in.
  *
- * The full result set — including the row rshono loses — is on `/benchmarks`, which is what the link is
+ * The full result set — including the row rsvhono loses — is on `/benchmarks`, which is what the link is
  * for. A headline that cannot be traced to the run that produced it is worth less than no headline.
  */
 function Measured() {
@@ -285,18 +284,18 @@ function Measured() {
       <div className="mb-6 flex flex-wrap items-baseline justify-between gap-3">
         <h2 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-white">Measured, not claimed</h2>
         <p className="text-sm text-zinc-500 dark:text-zinc-400">
-          One app built three ways, on {summary.machine}. <a href="/benchmarks">Every metric →</a>
+          One app built four ways, on {summary.machine}. <a href="/benchmarks">Every metric →</a>
         </p>
       </div>
 
       <ul className="grid gap-px overflow-hidden rounded-xl border border-zinc-200 bg-zinc-200 sm:grid-cols-3 dark:border-zinc-800 dark:bg-zinc-800">
         {summary.headline.map((metric) => {
-          const rshono = metric.values.find((value) => value.target === 'rshono');
-          if (!rshono) return null;
+          const rsvhono = metric.values.find((value) => value.target === 'rsvhono');
+          if (!rsvhono) return null;
           return (
             <li key={metric.id} className="bg-white p-6 dark:bg-zinc-950">
               <p className="text-sm text-zinc-500 dark:text-zinc-400">{metric.label}</p>
-              <p className="mt-2 text-3xl font-semibold tracking-tight text-zinc-900 dark:text-white">{rshono.display}</p>
+              <p className="mt-2 text-3xl font-semibold tracking-tight text-zinc-900 dark:text-white">{rsvhono.display}</p>
               <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
                 {metric.gap.factor}× {metric.comparative} than {metric.gap.worstLabel}
               </p>

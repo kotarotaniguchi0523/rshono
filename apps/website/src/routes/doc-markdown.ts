@@ -7,7 +7,7 @@ import { getDoc } from '../content/docs';
  * Frontmatter included: the point is to hand over exactly what the site was built from, so a page
  * pasted into an issue or a model carries its own title and description with it.
  *
- * The content is bundled (see the `asset/source` rule in `rshono.config.ts`) rather than read off disk,
+ * The content is bundled (see the `asset/source` rule in `rsvhono.config.ts`) rather than read off disk,
  * so this works unchanged on a deploy target with no filesystem — and it is the same string the
  * prerender parsed into HTML, which is what keeps the two representations honest.
  */

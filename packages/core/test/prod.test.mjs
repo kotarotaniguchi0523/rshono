@@ -1,4 +1,4 @@
-// The production build of the testbed, served by `rshono start` and driven over HTTP. Everything the
+// The production build of the testbed, served by `rsvhono start` and driven over HTTP. Everything the
 // framework does that a browser is not required to observe is asserted here; what only exists once
 // the client runtime is running lives in test/browser, and the hardened permutations — a CSP, a CSRF
 // allowlist, a small body cap, trustProxy — in prod-config.test.mjs.
@@ -7,10 +7,11 @@ import { spawn } from 'node:child_process';
 import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { Agent, request } from 'node:http';
 import { join } from 'node:path';
-import { after, test } from 'node:test';
+import { after, describe, test } from 'node:test';
 import { pathToFileURL } from 'node:url';
 import {
   actionFormData,
+  hiddenFields,
   APP_ENV,
   buildTestbed,
   clientChunks,
@@ -90,10 +91,10 @@ test('home page renders a full SSR document with flight payload and hashed asset
   assert.match(res.headers.get('content-type'), /text\/html/);
   const html = await res.text();
   assert.match(html, /^<!DOCTYPE html>/);
-  assert.match(html, /rshono/);
+  assert.match(html, /rsvhono/);
   assert.match(html, /__FLIGHT_DATA/);
-  assert.match(html, /\/_static\/chunks\/main\.[0-9a-f]+\.js/);
-  assert.match(html, /<link rel="stylesheet" href="\/_static\/chunks\/[^"]+\.css"/);
+  assert.match(html, /\/_static\/assets\/index-[\w-]+\.js/);
+  assert.match(html, /<link rel="stylesheet"[^>]*href="\/_static\/assets\/[^"]+\.css"/);
 });
 
 test('async server components read the database directly, on a plain and a parameterised route', async () => {
@@ -176,7 +177,7 @@ test('redirect() in a server component: an HTTP 3xx on hard navigation, a digest
   assert.equal(hard.headers.get('cache-control'), 'private, no-cache', 'a request-dependent redirect is not shared-cacheable');
 
   const soft = await fetch(`${base}/dashboard`, { headers: { RSC: '1' } });
-  assert.match(await soft.text(), /RSHONO_REDIRECT/, 'the client needs the digest to follow the redirect itself');
+  assert.match(await soft.text(), /RSVHONO_REDIRECT/, 'the client needs the digest to follow the redirect itself');
 });
 
 test('redirect() from a bare Suspense that settles just before the shell is ready is still a real 3xx', async () => {
@@ -196,7 +197,7 @@ test('redirect() from a bare Suspense that settles just before the shell is read
 
   const soft = await fetch(`${base}/suspense-redirect`, { headers: { RSC: '1' } });
   assert.equal(soft.status, 200, 'a flight fetch never reaches the SSR half, so the signal rides the payload');
-  assert.match(await soft.text(), /RSHONO_REDIRECT/);
+  assert.match(await soft.text(), /RSVHONO_REDIRECT/);
 });
 
 // The documented limitation, and the two things the framework still owes a request that hits it: the digest
@@ -204,8 +205,8 @@ test('redirect() from a bare Suspense that settles just before the shell is read
 // `/late-signal` waits 50ms before signalling — long past shell-ready — beside a second boundary that takes
 // 2s, which is what makes "the render was wound down" observable from outside.
 for (const { signal, digest, name } of [
-  { signal: null, digest: /RSHONO_REDIRECT;303;%2Flogin/, name: 'redirect()' },
-  { signal: 'notfound', digest: /RSHONO_NOT_FOUND/, name: 'notFound()' },
+  { signal: null, digest: /RSVHONO_REDIRECT;303;%2Flogin/, name: 'redirect()' },
+  { signal: 'notfound', digest: /RSVHONO_NOT_FOUND/, name: 'notFound()' },
 ]) {
   test(`${name} from a boundary that resolves after the shell degrades to a 200 carrying the digest`, async () => {
     const logsBefore = getOutput().length;
@@ -285,7 +286,7 @@ test('notFound() in a server component renders the 404 page', async () => {
   // load, which is the 404 above. Same signal, same page, two ways of getting there.
   const flight = await fetch(`${base}/profile/9999`, { headers: { RSC: '1' } });
   assert.equal(flight.status, 200);
-  assert.match(await flight.text(), /RSHONO_NOT_FOUND/, 'the digest is what reaches the client, not a 404 payload');
+  assert.match(await flight.text(), /RSVHONO_NOT_FOUND/, 'the digest is what reaches the client, not a 404 payload');
 });
 
 test('an unmatched path renders the notFound page from routes.ts, as a document and as flight', async () => {
@@ -392,7 +393,7 @@ test('the client runtime ships whole, with its dev-only detail compiled out', ()
   // the bundle, and the dev-only branches did not. `sourceElement` is the Navigation API feature test the
   // whole router is gated on, so its absence would mean a bundle that never soft-navigates at all.
   const sources = clientChunks();
-  for (const marker of ['useNavigation() must be called', 'data-native', 'sourceElement', 'data-rshono-fatal']) {
+  for (const marker of ['useNavigation() must be called', 'data-native', 'sourceElement', 'data-rsvhono-fatal']) {
     assert.ok(
       sources.some((source) => source.includes(marker)),
       `the client bundle is missing "${marker}"`,
@@ -447,12 +448,221 @@ test('progressive-enhancement form action works without JavaScript', async () =>
   assert.match(await res.text(), /Welcome aboard, NoScript Nancy/);
 });
 
+// One render, one route intent. A page can raise several — two sections redirecting to different places, or
+// the abort that follows the first signal re-raising it through every boundary still open — and the browser
+// reads each as a digest in the payload. They have to agree, or which one wins is decided by which boundary
+// React happens to render first on the client.
+test('a render that raises two different redirects reports the first one everywhere, tagged with its render', async () => {
+  const one = `one-${crypto.randomUUID()}`;
+  const two = `two-${crypto.randomUUID()}`;
+  const openGate = (id) => fetch(`${base}/api/gate?id=${id}`, { method: 'POST', headers: { Origin: base } });
+  const res = await fetch(`${base}/gated-intent?gate=${one}&to=/users&gate2=${two}&to2=/login`, { headers: { rsc: '1' } });
+  assert.equal(res.status, 200);
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  // The root first: both sections are parked, and the payload says which render it is.
+  let body = decoder.decode((await reader.read()).value, { stream: true });
+  const renderToken = /"renderToken":"([0-9a-f-]{36})"/.exec(body)?.[1];
+  assert.ok(renderToken, 'a dynamic payload names its render');
+
+  assert.equal((await openGate(one)).status, 200);
+  assert.equal((await openGate(two)).status, 200);
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    body += decoder.decode(value, { stream: true });
+  }
+
+  const digests = [...new Set(body.match(/RSVHONO_REDIRECT;[^"]+/g))];
+  assert.deepEqual(
+    digests,
+    [`RSVHONO_REDIRECT;303;%2Fusers#${renderToken}`],
+    'every signal in the payload is the first intent, with the token of this render',
+  );
+});
+
+// A prerendered payload is cached and served to everyone, so it names no render: its bytes must not vary by one.
+test('a prerendered payload carries no render token', async () => {
+  const res = await fetch(`${base}/docs/getting-started`, { headers: { rsc: '1' } });
+  assert.equal(res.status, 200);
+  assert.ok(res.headers.get('etag'), 'this is the cached payload');
+  assert.doesNotMatch(await res.text(), /renderToken/);
+});
+
+// An action finishing and the page rendering after it are two events. `/action-race?after=<label>` stops
+// rendering once the server has applied that label — it redirects, or calls `notFound()` — so the action that
+// applies it succeeds and it is the *render* that ends in a route intent. The result is still the caller's.
+describe('an action that succeeded, on a page that then redirects or stops existing', () => {
+  const recordRace = () => {
+    const sibling = serverActionId('Add user');
+    return `${sibling.slice(0, sibling.lastIndexOf('#'))}#recordRace`;
+  };
+  const call = (label, then) =>
+    fetch(`${base}/action-race?after=${label}&then=${then}`, {
+      method: 'POST',
+      headers: { Origin: base, rsc: '1', 'x-rsc-action': recordRace(), 'content-type': 'text/plain;charset=UTF-8' },
+      body: JSON.stringify([label, 0]),
+    });
+
+  // A flight reply is on the wire before the page renders, so the page's intent cannot replace it: the root
+  // goes out with the result, and the intent follows inside the same payload as a digest.
+  for (const [then, digest] of [
+    ['redirect', /RSVHONO_REDIRECT;303;%2Fusers#/],
+    ['notfound', /RSVHONO_NOT_FOUND#/],
+  ]) {
+    test(`the reply carries the action’s result ahead of the page’s ${then}`, async () => {
+      const label = `then-${then}-${crypto.randomUUID()}`;
+      const res = await call(label, then);
+      const payload = await res.text();
+      assert.equal(res.status, 200);
+      assert.match(payload, new RegExp(`"returnValue":\\{"ok":true,"value":"${label}"\\}`));
+      assert.match(payload, digest);
+    });
+  }
+
+  test('an action that itself redirects has no result to carry', async () => {
+    const sibling = serverActionId('Logging out');
+    const res = await fetch(`${base}/dashboard`, {
+      method: 'POST',
+      headers: { Origin: base, rsc: '1', 'x-rsc-action': sibling, 'content-type': 'text/plain;charset=UTF-8' },
+      body: '[]',
+    });
+    const payload = await res.text();
+    assert.match(payload, /"redirect":/);
+    assert.doesNotMatch(payload, /"returnValue"/);
+  });
+});
+
+// An action called from the `notFound` page is posted to a URL no route matches. It is still an action call:
+// it runs behind the same checks as one posted to a page, and the page it re-renders is the 404 page.
+describe('a server action posted to a URL that only the notFound page answers', () => {
+  const recordRace = () => {
+    const sibling = serverActionId('Add user');
+    return `${sibling.slice(0, sibling.lastIndexOf('#'))}#recordRace`;
+  };
+  const call = (label, headers = {}) =>
+    fetch(`${base}/no-such-page`, {
+      method: 'POST',
+      headers: { Origin: base, rsc: '1', 'x-rsc-action': recordRace(), 'content-type': 'text/plain;charset=UTF-8', ...headers },
+      body: JSON.stringify([label, 0]),
+    });
+
+  test('runs, and answers with its return value and the 404 page', async () => {
+    const label = `from-404-${crypto.randomUUID()}`;
+    const res = await call(label);
+    const payload = await res.text();
+    assert.equal(res.status, 404, 'the page that answered is still the 404');
+    assert.match(payload, /"notFound":true/);
+    assert.match(payload, new RegExp(`"returnValue":\\{"ok":true,"value":"${label}"\\}`), 'and the action’s result rides it like any other');
+    // It ran: the list the action appends to has the label.
+    assert.match(await (await fetch(`${base}/action-race`)).text(), new RegExp(label));
+  });
+
+  test('is refused like any other action call when the id is unknown or the origin is not this one', async () => {
+    const unknown = await call('x', { 'x-rsc-action': 'no-such-action' });
+    assert.equal(unknown.status, 400);
+    await unknown.text();
+
+    const label = `cross-site-${crypto.randomUUID()}`;
+    const crossSite = await call(label, { Origin: 'https://evil.example' });
+    assert.equal(crossSite.status, 403);
+    await crossSite.text();
+    assert.doesNotMatch(await (await fetch(`${base}/action-race`)).text(), new RegExp(label), 'and it did not run');
+  });
+});
+
+// A form's action that ends in a route intent rather than a value, posted with no JavaScript. Nothing is on
+// the wire when the action throws, so both intents can still be the response itself — a real status, and for
+// the redirect a 303, which is what stops the browser replaying the POST at the target.
+describe('a no-JavaScript form whose action raises a route intent', () => {
+  const submit = async (to) => {
+    const html = await (await fetch(`${base}/action-race`)).text();
+    const form = /<form[^>]*data-raise-signal[^>]*>(.*?)<\/form>/s.exec(html)?.[1] ?? '';
+    const body = new FormData();
+    for (const [name, value] of Object.entries(hiddenFields(form))) body.set(name, value);
+    body.set('to', to);
+    return fetch(`${base}/action-race`, { method: 'POST', headers: { Origin: base }, body, redirect: 'manual' });
+  };
+
+  test('notFound() answers 404 with the app’s page, at the URL that was posted to', async () => {
+    const res = await submit('');
+    assert.equal(res.status, 404);
+    assert.match(await res.text(), /404 — nothing here/);
+  });
+
+  test('redirect() answers 303, to another origin as readily as to this one', async () => {
+    for (const to of ['/users', 'https://example.test/elsewhere']) {
+      const res = await submit(to);
+      assert.equal(res.status, 303, `${to}: a 303, so the browser fetches the target with GET and the POST is not replayed`);
+      assert.equal(res.headers.get('location'), to);
+      await res.body?.cancel();
+    }
+  });
+});
+
+// A server function declared inside a component: the bundler hoists it, and what it closed over rides the
+// form as an *encrypted* bound argument. Three things meet in that one POST and none of the forms above
+// exercises them together — the closure's encryption, the no-JavaScript submission, and the server-reference
+// allowlist, which has to know a function nobody exported by name.
+describe('an inline server function with a closure', () => {
+  const MARK = 'inline-closure-7f3a91';
+
+  const post = (fields) => {
+    const form = new FormData();
+    for (const [name, value] of Object.entries(fields)) form.set(name, value);
+    return fetch(`${base}/inline-action`, { method: 'POST', headers: { Origin: base }, body: form });
+  };
+
+  const stampedCookie = (res) => res.headers.getSetCookie().find((each) => each.startsWith('stamped='));
+
+  test('its closure reaches the browser encrypted, and the form works without JavaScript', async () => {
+    const html = await (await fetch(`${base}/inline-action`)).text();
+    const fields = hiddenFields(html);
+    assert.match(fields['$ACTION_1:0'] ?? '', /"id":"[0-9a-f]+#\$\$hoist_\w+"/, 'a hoisted function is what this is about');
+    assert.doesNotMatch(html, new RegExp(MARK), 'the captured value must not be readable in the document');
+
+    const res = await post({ ...fields, note: 'no-js' });
+    assert.equal(res.status, 200);
+    const cookie = stampedCookie(res);
+    assert.ok(cookie, 'the action ran');
+    assert.match(
+      decodeURIComponent(cookie),
+      new RegExp(`${MARK}:/inline-action:no-js`),
+      'with the closure it was rendered with, decrypted on the server',
+    );
+  });
+
+  test('a closure that was tampered with does not run the action', async () => {
+    const fields = hiddenFields(await (await fetch(`${base}/inline-action`)).text());
+    const encrypted = Object.keys(fields).find((name) => /^\$ACTION_1:\d+$/.test(name) && /^"[A-Za-z0-9+/=]{40,}"$/.test(fields[name]));
+    assert.ok(encrypted, 'the encrypted bound argument is one of the form\u2019s fields');
+    // One character of the ciphertext, flipped.
+    const value = fields[encrypted];
+    const flipped = value.slice(0, 20) + (value[20] === 'A' ? 'B' : 'A') + value.slice(21);
+
+    const res = await post({ ...fields, [encrypted]: flipped, note: 'tampered' });
+    assert.ok(res.status >= 400, `a forged closure must be refused, not run — got ${res.status}`);
+    assert.equal(stampedCookie(res), undefined, 'and the action must not have written anything');
+  });
+
+  test('a form naming an export the module never had is a 400, before anything loads', async () => {
+    const fields = hiddenFields(await (await fetch(`${base}/inline-action`)).text());
+    const forged = fields['$ACTION_1:0'].replace(/#\$\$hoist_\w+/, '#$$$$hoist_9_neverDeclared');
+    assert.notEqual(forged, fields['$ACTION_1:0']);
+
+    const res = await post({ ...fields, '$ACTION_1:0': forged, note: 'forged' });
+    assert.equal(res.status, 400);
+    assert.match(await res.text(), /Bad Request: malformed server action request/);
+    assert.equal(stampedCookie(res), undefined);
+  });
+});
+
 // The other shape React emits, and the one the three `useActionState` forms above never produce: a server
 // component renders `<form action={subscribe}>`, so the body is a single `$ACTION_ID_<id>` field and there is
 // no form state to decode at all.
 test('a form a server component wired straight to an action posts as a bare $ACTION_ID', async () => {
   const html = await (await fetch(`${base}/subscribe`)).text();
-  assert.match(html, /name="\$ACTION_ID_[0-9a-f]+"/, 'this shape is what the test is about — without it, it proves nothing');
+  assert.match(html, /name="\$ACTION_ID_[0-9a-f]+#\w+"/, 'this shape is what the test is about — without it, it proves nothing');
   assert.doesNotMatch(html, /\$ACTION_KEY/, 'and it carries no useActionState metadata');
 
   const res = await fetch(`${base}/subscribe`, {
@@ -477,7 +687,7 @@ test('a form a server component wired straight to an action posts as a bare $ACT
 // and an `[error-reporter] request` line, mintable by anyone, since action ids are public.
 test('a form post carrying form-state fields React never wrote renders the page instead of 500ing', async () => {
   const html = await (await fetch(`${base}/subscribe`)).text();
-  const actionField = html.match(/name="(\$ACTION_ID_[0-9a-f]+)"/)[1];
+  const actionField = html.match(/name="(\$ACTION_ID_[0-9a-f]+#\w+)"/)[1];
 
   const body = new FormData();
   // Order matters: `decodeAction` takes the *last* `$ACTION_` key it sees, `decodeFormState` only ever looks
@@ -616,7 +826,7 @@ test("a HEAD on a method: 'get' endpoint is answered by that handler, bodiless",
 
   // The framework's own mounts have to hold the same way, now that they register `GET` alone.
   const html = await (await fetch(`${base}/`)).text();
-  const chunk = html.match(/src="(\/_static\/chunks\/main\.[0-9a-f]+\.js)"/)[1];
+  const chunk = html.match(/src="(\/_static\/assets\/index-[\w-]+\.js)"/)[1];
   for (const path of ['/robots.txt', chunk]) {
     const asset = await fetch(`${base}${path}`, { method: 'HEAD' });
     assert.equal(asset.status, 200, `${path} must answer a HEAD`);
@@ -663,7 +873,7 @@ test('a thrown non-Error is answered exactly as a thrown Error is', async () => 
   // the wrapper's own stack starts inside the framework. The value itself rides along as `cause`.
   assert.match(
     getOutput().slice(logsBefore),
-    /\[error-reporter\] request \/api\/boom #[^:]+: \[rshono\] a non-Error value was thrown: "a plain string"/,
+    /\[error-reporter\] request \/api\/boom #[^:]+: \[rsvhono\] a non-Error value was thrown: "a plain string"/,
     'a converted throw is reported like any other request fault',
   );
 });
@@ -683,7 +893,7 @@ test('a non-Error thrown from middleware reaches the error page, at the cost of 
   await new Promise((resolve) => setTimeout(resolve, 200));
   assert.match(
     getOutput().slice(logsBefore),
-    /\[error-reporter\] request \/api\/health #[^:]+: \[rshono\] a non-Error value was thrown: "a plain string thrown from middleware"/,
+    /\[error-reporter\] request \/api\/health #[^:]+: \[rsvhono\] a non-Error value was thrown: "a plain string thrown from middleware"/,
     'and it is reported, with the value named',
   );
 });
@@ -793,8 +1003,8 @@ test('an action request that fails before the action runs is refused outright, n
 //
 // Reached by breaking a copy of the build the way a partial deploy does — the manifest entry for one action
 // is pointed at a module id the bundle does not hold, which is what React's own "older or newer deployment"
-// message is about. It cannot be done with a fixture: Rspack concatenates every `'use server'` module in the
-// app into one server module, so an action module that throws as it evaluates takes *all* of them with it.
+// message is about. A copy is broken rather than a fixture written because the fault is in the *deployment*,
+// not in any source file: every module here is fine, and one of them is simply not where the manifest says.
 //
 // Both action shapes, because the split that gets this right was made twice. The client-initiated branch has
 // had it since F3; the form branch answered the very same fault with the silent 400 below — `decodeAction`
@@ -812,19 +1022,23 @@ test('an action whose module cannot be loaded is a reported 500, not a silent 40
     const mainFile = join(sandbox, 'dist', 'server', 'main.mjs');
     const actionId = serverActionId('Logging out');
     const original = readFileSync(mainFile, 'utf8');
-    // `"<id>":{"id":"3860","name":…}` — the module the manifest sends `loadServerAction` to.
-    const patched = original.replaceAll(new RegExp(`("${actionId}":\\{"id":")[^"]+"`, 'g'), '$1chunk-that-went-missing"');
+    // `"<key>":async()=>{let{…}=await import(`./assets/actions-….js`)` — the module `loadServerAction` imports.
+    const moduleKey = actionId.split('#')[0];
+    const patched = original.replace(
+      new RegExp(`("${moduleKey}":async\\(\\)=>\\{[\\s\\S]*?await import\\(\`)[^\`]+`),
+      '$1./assets/chunk-that-went-missing.js',
+    );
     assert.notEqual(patched, original, 'the server manifest is not in the shape this test breaks — update the patch');
     writeFileSync(mainFile, patched);
 
     // The node runtime binds a port as the bundle evaluates, and nothing exported can close it again; this is
     // the flag it checks for the prerender pass, which drives `app.fetch` directly for the same reason.
-    process.env.RSHONO_PRERENDER = '1';
+    process.env.RSVHONO_PRERENDER = '1';
     let bundle;
     try {
       bundle = await import(pathToFileURL(mainFile).href);
     } finally {
-      delete process.env.RSHONO_PRERENDER;
+      delete process.env.RSVHONO_PRERENDER;
     }
 
     // In-process, so the app's own `onServerError` reports through this console rather than a child's stdout.
@@ -841,9 +1055,9 @@ test('an action whose module cannot be loaded is a reported 500, not a silent 40
     };
 
     const client = await call(
-      new Request('https://rshono.example/dashboard', {
+      new Request('https://rsvhono.example/dashboard', {
         method: 'POST',
-        headers: { Origin: 'https://rshono.example', 'x-rsc-action': actionId, RSC: '1', 'content-type': 'text/plain;charset=UTF-8' },
+        headers: { Origin: 'https://rsvhono.example', 'x-rsc-action': actionId, RSC: '1', 'content-type': 'text/plain;charset=UTF-8' },
         body: '[]',
       }),
     );
@@ -866,9 +1080,9 @@ test('an action whose module cannot be loaded is a reported 500, not a silent 40
     // manifest entry — and the answer has to be the same one, since the request was no less valid for
     // having no JavaScript behind it.
     const form = await call(
-      new Request('https://rshono.example/dashboard', {
+      new Request('https://rsvhono.example/dashboard', {
         method: 'POST',
-        headers: { Origin: 'https://rshono.example', Accept: 'text/html', 'content-type': 'application/x-www-form-urlencoded' },
+        headers: { Origin: 'https://rsvhono.example', Accept: 'text/html', 'content-type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({ [`$ACTION_ID_${actionId}`]: '' }).toString(),
       }),
     );
@@ -902,7 +1116,7 @@ test('onServerError sees the errors the framework catches, tagged by source, wit
   assert.match(logged, /\[error-reporter\] render \/crash/, 'a failed render is reported as a render');
   assert.doesNotMatch(logged, /\[error-reporter\] ssr \/crash/, 'and once: the SSR layer must not report the payload’s stand-in for it');
   assert.doesNotMatch(logged, /\[error-reporter\] request \/crash/, 'nor must the top-level handler it is re-thrown to');
-  assert.match(logged, /\[rshono\] request error:/, 'stderr stays the fallback signal even with a reporter wired up');
+  assert.match(logged, /\[rsvhono\] request error:/, 'stderr stays the fallback signal even with a reporter wired up');
   // The handler logs from inside `waitUntil` and reads `hono.var.requestId`, so both assertions above also
   // prove the two reach a handler at all — and the `request` one proves it for the source reported outside
   // the ambient context, where `getRequestContext()` throws. That was the whole gap: reporting is what this
@@ -943,7 +1157,7 @@ test('an error page that redirects is honoured, not reported as a failure', asyn
   // mechanisms for the same redirect is the kind of thing that reads like a bug in six months.
   const flight = await fetch(`${base}/unloadable?boom=redirect`, { headers: { RSC: '1' } });
   assert.equal(flight.status, 500, 'the payload keeps the error page’s status — it is already committed');
-  assert.match(await flight.text(), /RSHONO_REDIRECT;303;%2Fusers/, 'and carries the redirect as a digest for the client to act on');
+  assert.match(await flight.text(), /RSVHONO_REDIRECT;303;%2Fusers/, 'and carries the redirect as a digest for the client to act on');
 
   await new Promise((resolve) => setTimeout(resolve, 200)); // the child's stderr reaches us asynchronously
   assert.doesNotMatch(getOutput().slice(logsBefore), /the error page failed to render/, 'and not a render failure in the app’s error tracker');
@@ -985,7 +1199,7 @@ test('an error page that throws is a reported render failure, and the framework 
   assert.match(logged, /\[error-reporter\] render \/crash[^\n]*Intentional render failure/, 'the page’s own fault');
   assert.match(logged, /\[error-reporter\] render \/crash[^\n]*Intentional error-page failure/, 'and the error page’s, each once');
   assert.doesNotMatch(logged, /\[error-reporter\] request \/crash/, 'and nothing reported a third time');
-  assert.match(logged, /\[rshono\] the error page failed to render:/, 'with a line saying which render was the fallback');
+  assert.match(logged, /\[rsvhono\] the error page failed to render:/, 'with a line saying which render was the fallback');
 });
 
 test('an SSR-only failure is reported as `ssr`, once, and the error page answers it', async () => {
@@ -1030,7 +1244,7 @@ test('<AsyncBoundary> contains a thrown error locally instead of failing the who
   // request that went fine, with none of the detail needed to act on it.
   await new Promise((resolve) => setTimeout(resolve, 200)); // the child's stderr reaches us asynchronously
   const logged = getOutput().slice(logsBefore);
-  assert.match(logged, /\[rshono\] render error: Error: the section blew up on purpose/, 'a contained failure must still be reported, in full');
+  assert.match(logged, /\[rsvhono\] render error: Error: the section blew up on purpose/, 'a contained failure must still be reported, in full');
   assert.doesNotMatch(logged, /An error occurred in the Server Components render/, "React's redacted duplicate must not be logged as well");
 });
 
@@ -1085,11 +1299,11 @@ test('prerendered pages build absolute URLs from siteUrl; a dynamic page uses th
   // A prerendered file is handed to everyone, so its absolute URLs are decided at build time.
   // Without siteUrl they would say http://localhost — in the canonical tag, in og:url, everywhere.
   const html = await (await fetch(`${base}/docs/getting-started`)).text();
-  assert.match(html, /<link rel="canonical" href="https:\/\/rshono\.example\/docs\/getting-started"\/?>/);
+  assert.match(html, /<link rel="canonical" href="https:\/\/rsvhono\.example\/docs\/getting-started"\/?>/);
   assert.doesNotMatch(html, /http:\/\/localhost/, 'the build-time origin must not survive into a shipped page');
 
   const flight = await (await fetch(`${base}/docs/getting-started`, { headers: { RSC: '1' } })).text();
-  assert.match(flight, /https:\/\/rshono\.example\/docs\/getting-started/, 'useNavigation() reads the URL from this payload');
+  assert.match(flight, /https:\/\/rsvhono\.example\/docs\/getting-started/, 'useNavigation() reads the URL from this payload');
   assert.doesNotMatch(flight, /http:\/\/localhost/);
 
   // And the query is frozen out of it with everything else — the same bytes answer every caller, whatever
@@ -1101,7 +1315,7 @@ test('prerendered pages build absolute URLs from siteUrl; a dynamic page uses th
   assert.equal(withQuery, flight, 'it is byte-identical to the query-less one — one file, handed to everyone');
 
   const dynamic = await (await fetch(`${base}/whoami`)).text();
-  assert.doesNotMatch(dynamic, /rshono\.example/, 'siteUrl is a build-time concern only');
+  assert.doesNotMatch(dynamic, /rsvhono\.example/, 'siteUrl is a build-time concern only');
   assert.match(dynamic, /localhost/, 'a dynamic page reflects the request it actually received');
 });
 
@@ -1159,7 +1373,7 @@ test('unknown root paths fall through to a 404 — the public fallback never sha
 
 test('hashed static assets are served immutable, and a miss under /_static is not cacheable at all', async () => {
   const html = await (await fetch(`${base}/`)).text();
-  const src = html.match(/src="(\/_static\/chunks\/main\.[0-9a-f]+\.js)"/)[1];
+  const src = html.match(/src="(\/_static\/assets\/index-[\w-]+\.js)"/)[1];
   const res = await fetch(base + src);
   assert.equal(res.status, 200);
   assert.equal(res.headers.get('cache-control'), 'public, max-age=31536000, immutable');
@@ -1168,7 +1382,7 @@ test('hashed static assets are served immutable, and a miss under /_static is no
   // the new one has. A 404 is heuristically cacheable under RFC 9111, so with no header of its own a shared
   // cache may store that answer against a content-hashed URL that is about to become valid — and then serve
   // it to everyone. The same reasoning is why the framework's own plain 404 carries one.
-  const miss = await fetch(`${base}/_static/chunks/main.deadbeefdeadbeef.js`);
+  const miss = await fetch(`${base}/_static/assets/index-deadbeef.js`);
   assert.equal(miss.status, 404);
   assert.equal(miss.headers.get('cache-control'), 'private, no-cache', 'a 404 for a hashed URL must not be stored');
 });
@@ -1256,11 +1470,14 @@ test('no development build of React reaches the server bundle', () => {
   // own source — `require('./cjs/…development.js')` inside a dead `else` — is in `sourcesContent` either way.
   // It was size and cold start rather than behaviour: the prelude's env says `production`, so the right build
   // always ran. On `cloudflare` it was half the Worker size budget.
-  const map = JSON.parse(readFileSync(join(TESTBED_DIST, 'server', 'main.mjs.map'), 'utf8'));
-  const development = map.sources.filter((source) => /\/cjs\/.*\.development\.js$/.test(source));
+  const serverDir = join(TESTBED_DIST, 'server');
+  const sources = readdirSync(serverDir, { recursive: true })
+    .filter((file) => file.endsWith('.map'))
+    .flatMap((file) => JSON.parse(readFileSync(join(serverDir, file), 'utf8')).sources);
+  const development = sources.filter((source) => /\/cjs\/.*\.development\.js$/.test(source));
   assert.deepEqual(development, [], 'a development React build cannot run in a production bundle — it is dead weight');
   assert.ok(
-    map.sources.some((source) => /\/cjs\/react-dom-server\.node\.production\.js$/.test(source)),
+    sources.some((source) => /\/cjs\/react-dom-server\.\w+\.production\.js$/.test(source)),
     'the production renderer still has to be there — an empty match would pass the assertion above for the wrong reason',
   );
 });
@@ -1274,7 +1491,7 @@ test('the server bundle ships a source map and the client bundle does not', () =
   assert.match(bundle, /\/\/# sourceMappingURL=main\.mjs\.map\s*$/, 'the minified bundle has to point at its map');
   assert.ok(readFileSync(join(TESTBED_DIST, 'server', 'main.mjs.map'), 'utf8').length > 0, 'and the map has to be emitted beside it');
 
-  const clientMaps = readdirSync(join(TESTBED_DIST, 'static', 'chunks')).filter((file) => file.endsWith('.map'));
+  const clientMaps = readdirSync(join(TESTBED_DIST, 'static', 'assets')).filter((file) => file.endsWith('.map'));
   assert.deepEqual(clientMaps, [], 'a client source map would publish the app’s own source');
 });
 
@@ -1420,6 +1637,20 @@ test('an action body that will not decode is a 400, and never pages the error tr
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ $ACTION_REF_1: '', '$ACTION_1:0': 'not-a-flight-row', $ACTION_KEY: 'k1' }).toString(),
     },
+    // A reference *inside the arguments*: the action called is real, and one of its arguments claims to be
+    // a server function the build does not hold — an export that module never had. The id in the header is
+    // checked before anything is decoded; this one only exists once `decodeReply` reads the body, so the
+    // same allowlist has to be asked there.
+    {
+      what: 'an unknown server reference among the arguments',
+      headers: { 'x-rsc-action': id },
+      body: (() => {
+        const form = new FormData();
+        form.set('0', '["$h1"]');
+        form.set('1', JSON.stringify({ id: `${id.slice(0, id.lastIndexOf('#'))}#neverExported`, bound: null }));
+        return form;
+      })(),
+    },
   ];
 
   for (const { what, headers, body } of shapes) {
@@ -1442,4 +1673,243 @@ test('the body-size cap covers endpoint routes and the server sub-app, not just 
   // small cap in prod-config.test.mjs.
   const status = await postDeclaringBodyOf('/api/users', 2 * 1024 * 1024);
   assert.equal(status, 413, 'a 2MB body declared to a sub-app route should be refused by the 1MiB default cap');
+});
+
+// ── Which server functions each route reaches ────────────────────────────────────────────────────────────
+//
+// `rsvhono build` writes `dist/server/route-functions.json` from Vite's module graph, in both bundles. The
+// testbed's `/reachability` reaches one function by each kind of edge, each in a module of its own, so every
+// claim below is about one function. Nothing at runtime reads this file yet: these are about what the build
+// knows, not about what a request is refused for.
+describe('the route-functions manifest', () => {
+  const manifest = JSON.parse(readFileSync(join(TESTBED_DIST, 'server', 'route-functions.json'), 'utf8'));
+  const names = (route) => (manifest.routes[route] ?? []).map((id) => id.slice(id.lastIndexOf('#') + 1));
+
+  test('follows every kind of edge from a page to a function', () => {
+    assert.deepEqual(names('/reachability').sort(), ['reachBarrel', 'reachDirect', 'reachLazyClient', 'reachLazyServer']);
+    // `reachDirect`: a server component refers to it — the RSC graph.
+    // `reachBarrel`: a client component imports it through a re-export — the browser graph, one hop further.
+    // `reachLazyClient`: a client component loaded with `import()` imports it.
+    // `reachLazyServer`: a server component loaded with `import()` refers to it.
+  });
+
+  test('keeps a function declared inside a component to the page that declares it', () => {
+    assert.match(names('/inline-action').join(), /^\$\$hoist_\w+$/);
+    for (const route of ['/reachability', '/users', '/action-race']) {
+      assert.ok(!names(route).some((name) => name.startsWith('$$hoist')), `${route} does not reach another page’s inline function`);
+    }
+  });
+
+  test('is keyed by the route pattern, a parameter and all, and lists a page that reaches nothing as that', () => {
+    assert.ok(Object.hasOwn(manifest.routes, '/profile/:id'), 'the pattern from routes.ts, not a URL');
+    assert.deepEqual(manifest.routes['/profile/:id'], []);
+    assert.ok(!names('/profile/:id').includes('reachDirect'));
+  });
+
+  test('gives the notFound page its functions, reached through a component it shares with another page', () => {
+    // `ActionRaceControls` is rendered by `/action-race` and by the 404 page; both reach what it imports.
+    assert.ok(names('(notFound)').includes('recordRace'));
+    assert.ok(names('/action-race').includes('recordRace'));
+    assert.ok(Object.hasOwn(manifest.routes, '(error)'));
+  });
+
+  test('says which routes it could not trace instead of giving them a list', () => {
+    // `/unloadable` throws as its module evaluates. It is neither "reaches nothing" nor "reaches everything".
+    assert.deepEqual(manifest.unresolved, ['/unloadable']);
+    assert.ok(!Object.hasOwn(manifest.routes, '/unloadable'));
+  });
+
+  test('every id is one the reference allowlist knows', async () => {
+    const all = new Set(Object.values(manifest.routes).flat());
+    assert.ok(all.size > 0);
+    // The same string React puts on the wire, so the two can be compared directly.
+    assert.ok(all.has(serverActionId('Add user')));
+  });
+});
+
+// ── One id per build, and what each side does about a different one ──────────────────────────────────────
+describe('the build id', () => {
+  const { buildId } = JSON.parse(readFileSync(join(TESTBED_DIST, 'rsvhono-build.json'), 'utf8'));
+  const recordRace = () => {
+    const sibling = serverActionId('Add user');
+    return `${sibling.slice(0, sibling.lastIndexOf('#'))}#recordRace`;
+  };
+  const call = (label, headers = {}) =>
+    fetch(`${base}/action-race`, {
+      method: 'POST',
+      headers: { Origin: base, rsc: '1', 'x-rsc-action': recordRace(), 'content-type': 'text/plain;charset=UTF-8', ...headers },
+      body: JSON.stringify([label, 0]),
+    });
+  const applied = async (label) => (await (await fetch(`${base}/action-race`)).text()).includes(label);
+
+  test('is one value: in the marker, in the server bundle, and in the document that boots the browser', async () => {
+    assert.match(buildId, /^[0-9a-f]{16}$/);
+    const inDir = (dir, extension) =>
+      readdirSync(join(TESTBED_DIST, dir), { recursive: true }).some(
+        (file) => extension.test(file) && readFileSync(join(TESTBED_DIST, dir, file), 'utf8').includes(buildId),
+      );
+    assert.ok(inDir('server', /\.m?js$/), 'the server bundle carries it');
+    // Not in the browser's files: a literal of a value that is new every build would rename every chunk on
+    // every deploy (build-stability.test.mjs). The document hands it over instead.
+    assert.ok(!inDir('static', /\.m?js$/), 'no browser chunk has a copy');
+    assert.ok((await (await fetch(`${base}/users`)).text()).includes(`self.__rsvhonoBuild="${buildId}";`), 'a rendered document sets it');
+    assert.ok(
+      (await (await fetch(`${base}/docs/getting-started`)).text()).includes(`self.__rsvhonoBuild="${buildId}";`),
+      'and so does a prerendered one',
+    );
+  });
+
+  test('rides every response: a document, a payload, a prerendered page in both forms, a refusal', async () => {
+    const responses = {
+      document: await fetch(`${base}/users`),
+      payload: await fetch(`${base}/users`, { headers: { rsc: '1' } }),
+      'prerendered document': await fetch(`${base}/docs/getting-started`),
+      'prerendered payload': await fetch(`${base}/docs/getting-started`, { headers: { rsc: '1' } }),
+      refusal: await call('x', { 'x-rsc-action': 'no-such-action' }),
+    };
+    for (const [name, res] of Object.entries(responses)) {
+      await res.text();
+      assert.equal(res.headers.get('x-rsvhono-build'), buildId, name);
+    }
+    // Named on the response and not asked for on a GET, so nothing varies by it and no cache key grows.
+    assert.doesNotMatch(responses['prerendered payload'].headers.get('vary') ?? '', /build/i);
+  });
+
+  test('a call from a page another build rendered is refused before it runs', async () => {
+    const label = `other-build-${crypto.randomUUID()}`;
+    const res = await call(label, { 'x-rsvhono-build': '0000000000000000' });
+    assert.equal(res.status, 409);
+    assert.equal(res.headers.get('x-rsvhono-build'), buildId, 'the reply says which build refused');
+    assert.match(await res.text(), /different deployment/);
+    assert.equal(await applied(label), false, 'the function did not run');
+
+    // Even for an id this build has never heard of: the 409 comes first, so the caller is told the real reason.
+    const unknown = await call(label, { 'x-rsvhono-build': '0000000000000000', 'x-rsc-action': 'no-such-action' });
+    assert.equal(unknown.status, 409);
+    await unknown.text();
+  });
+
+  test('a call from this build, or from a client that names none, runs', async () => {
+    for (const headers of [{ 'x-rsvhono-build': buildId }, {}]) {
+      const label = `same-build-${crypto.randomUUID()}`;
+      const res = await call(label, headers);
+      assert.equal(res.status, 200);
+      await res.text();
+      assert.equal(await applied(label), true);
+    }
+  });
+});
+
+// ── What is in the files, not what the server answers ────────────────────────────────────────────────────
+//
+// After `@vitejs/plugin-rsc`'s own `basic` example, which reads its build output for strings that must not be
+// there. A page working says nothing about what else was shipped with it.
+describe('what the build put where', () => {
+  const read = (dir) =>
+    readdirSync(join(TESTBED_DIST, dir), { recursive: true })
+      .filter((file) => /\.(?:m?js|css|html|rsc|json)$/.test(file))
+      .map((file) => readFileSync(join(TESTBED_DIST, dir, file), 'utf8'))
+      .join('\n');
+  const browser = read('static');
+  const server = read('server');
+
+  test('a client component nothing renders is not in the browser bundle', () => {
+    assert.ok(server.includes('reachBarrel') || browser.includes('reachBarrel'), 'the module it shares with a rendered component is built');
+    assert.ok(!browser.includes('__unused_client_reference__'), 'client references are per export, and this export has none');
+  });
+
+  test('a server function’s body and a server component’s constants stay on the server', () => {
+    assert.ok(server.includes('__server_function_body__'), 'the function is in the server bundle');
+    assert.ok(!browser.includes('__server_function_body__'), 'and only its reference is in the browser’s');
+    // The constant itself is folded away in the server bundle; what matters is where it is not.
+    assert.ok(!browser.includes('__server_component_only__'));
+  });
+
+  test('a page is in the server bundle as its author wrote it, with no wrapper around it', () => {
+    assert.ok(!server.includes('__rsvhono_wrap_page__'));
+    assert.match(server, /\$\$rsvhonoAssets/, 'its stylesheets are an export beside it');
+  });
+
+  test('the development-only timing track is not in a production bundle', () => {
+    // `browser/timing.ts` measures behind a condition on `process.env.NODE_ENV`, a literal in this bundle.
+    assert.ok(!browser.includes('track-entry'), 'the measure call was dropped with its condition');
+    assert.ok(!browser.includes('stream ended'));
+  });
+
+  test('the public process the SSR pass reads is one module, not a copy per client component', () => {
+    const ssr = read(join('server', 'ssr'));
+    assert.equal(ssr.split('Object.create(globalThis.process').length - 1, 1);
+  });
+});
+
+// ── React's own APIs, on this renderer ───────────────────────────────────────────────────────────────────
+//
+// `cache()`, `cacheSignal()` and `browser()` are React's. The framework adds nothing to them and must not get
+// in their way: these say they behave here as React documents them.
+describe('React standard APIs', () => {
+  const read = async () => {
+    const html = await (await fetch(`${base}/react-standard`)).text();
+    const attr = (name) => new RegExp(`${name}="([^"]*)"`).exec(html)?.[1];
+    return {
+      html,
+      loads: [...html.matchAll(/data-load="(\d+)"/g)].map((match) => Number(match[1])),
+      previous: attr('data-previous-signal'),
+      current: attr('data-this-signal'),
+    };
+  };
+
+  test('cache() is one call per render, shared by its components, and not shared between requests', async () => {
+    const first = await read();
+    const second = await read();
+    assert.equal(first.loads.length, 2, 'two components asked');
+    assert.equal(first.loads[0], first.loads[1], 'and got the same call');
+    assert.equal(second.loads[0], second.loads[1]);
+    assert.equal(second.loads[0], first.loads[0] + 1, 'the next request ran the loader again, once');
+  });
+
+  test('cacheSignal() is given to a render and aborts when that render is over', async () => {
+    await read();
+    const next = await read();
+    assert.equal(next.current, 'given');
+    assert.equal(next.previous, 'aborted', 'the render before this one has finished, and its signal says so');
+  });
+
+  test('browser() leaves a component to the browser without that being reported as a server error', async () => {
+    const before = getOutput().length;
+    const { html } = await read();
+    assert.match(html, /data-browser-only-fallback/, 'the server rendered the fallback');
+    assert.doesNotMatch(html, /data-browser-only=/, 'and not the component');
+    await new Promise((resolve) => setTimeout(resolve, 200)); // the child's stderr reaches us asynchronously
+    assert.doesNotMatch(getOutput().slice(before), /SSR error|render error|error-reporter/, 'a deliberate bailout is not a fault');
+  });
+});
+
+// An experiment, not a feature: `/flight-replay` renders a fragment to flight once and decodes it back into
+// the tree on every later request, after `@vitejs/plugin-rsc`'s `cache-replay` example. What makes it more
+// than a string cache is the server function inside it, which has to survive the round trip as a reference.
+describe('replaying stored flight (experiment)', () => {
+  const get = async () => (await fetch(`${base}/flight-replay`)).text();
+
+  test('the fragment is rendered once, however many requests replay it', async () => {
+    const first = await get();
+    const second = await get();
+    assert.match(first, /data-replay-renders="1"/);
+    assert.match(second, /data-replay-renders="1"/, 'the second request decoded the stored flight instead of rendering');
+  });
+
+  test('a server function inside the replayed fragment is still a form action, and still runs', async () => {
+    const html = await get();
+    const form = /<form[^>]*data-replay-form[^>]*>(.*?)<\/form>/s.exec(html)?.[1] ?? '';
+    const fields = hiddenFields(form);
+    assert.ok(
+      Object.keys(fields).some((name) => name.startsWith('$ACTION_ID_')),
+      'the reference was written out again, not lost in the decode',
+    );
+
+    const body = new FormData();
+    for (const [name, value] of Object.entries(fields)) body.set(name, value);
+    const res = await fetch(`${base}/flight-replay`, { method: 'POST', headers: { Origin: base }, body });
+    assert.equal(res.status, 200);
+    assert.match(await res.text(), /data-replay-renders="1"/);
+  });
 });

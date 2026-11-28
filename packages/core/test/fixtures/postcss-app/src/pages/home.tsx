@@ -1,4 +1,4 @@
-import type { PageProps } from '@rshono/core';
+import type { PageProps } from '@rsvhono/core';
 import '../styles.css';
 
 export default function Home({ url }: PageProps) {
@@ -13,7 +13,7 @@ export default function Home({ url }: PageProps) {
         <h1 data-page="home" className="text-3xl font-bold text-fixture">
           PostCSS app
         </h1>
-        <p data-url={url.href}>Compiled through the rspack hook in rshono.config.ts.</p>
+        <p data-url={url.href}>Compiled by Vite's own PostCSS step, from postcss.config.mjs.</p>
       </body>
     </html>
   );

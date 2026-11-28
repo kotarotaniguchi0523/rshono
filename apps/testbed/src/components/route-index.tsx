@@ -1,4 +1,4 @@
-import type { HTTPMethod, Route } from '@rshono/core';
+import type { HTTPMethod, Route } from '@rsvhono/core';
 import { routes } from '../routes';
 
 /**
@@ -90,6 +90,60 @@ const META: Record<RoutePath, RouteMeta> = {
     group: 'Pages & forms',
     title: 'Users',
     description: 'Async server component reading the server-only `db` module directly, plus a form that calls a server action.',
+  },
+  '/action-race': {
+    group: 'Pages & forms',
+    title: 'Action race',
+    description: 'Server functions racing each other and racing navigations: the list has to end up being what the server applied.',
+  },
+  '/inline-action': {
+    group: 'Pages & forms',
+    title: 'Inline action',
+    description: "A `'use server'` function declared inside a server component, carrying an encrypted closure in the form.",
+  },
+  '/reachability': {
+    group: 'Pages & forms',
+    title: 'Reachability',
+    description: 'Reaches server functions through a re-export, a lazy client component and a dynamically imported server component.',
+  },
+  '/flight-replay': {
+    group: 'Streaming & suspense',
+    title: 'Flight replay',
+    description: 'An experiment: a fragment rendered to flight once and decoded back on later requests, with a server function in it.',
+  },
+  '/react-standard': {
+    group: 'Streaming & suspense',
+    title: 'React standard APIs',
+    description: '`cache()` within one render, `cacheSignal()` ending with it, and a component `browser()` leaves to the browser.',
+  },
+  '/lazy-late': {
+    group: 'Pages & forms',
+    title: 'Lazy, late',
+    description: 'A client component that imports another chunk on a click — the import a deploy can take away.',
+  },
+  '/fragment-redirect/:step': {
+    group: 'Pages & forms',
+    title: 'Fragment redirect',
+    example: '/fragment-redirect/start',
+    description: 'Redirects that add, change or drop the URL fragment, to see where the page scrolls to.',
+  },
+  '/canonical': {
+    group: 'Pages & forms',
+    title: 'Canonical',
+    description: 'Redirects to its own path with `?v=new`: a redirect that changes only the query.',
+  },
+  '/gated-intent': {
+    group: 'Streaming & suspense',
+    title: 'Gated intent',
+    description:
+      'A section that raises `redirect()` or `notFound()` when `POST /api/gate` says so — after the shell, and possibly after the visitor has left.',
+  },
+  '/transition-probe': {
+    group: 'Streaming & suspense',
+    title: 'Transition probe',
+    description:
+      'Client transitions, an async transition, a suspending one and a `useActionState` action, against a navigation held pending inside React.',
+    variants: [{ href: '/transition-probe?body=3000', label: '/transition-probe?body=3000 → three seconds outside any Suspense' }],
   },
   '/whoami': {
     group: 'Pages & forms',
@@ -203,6 +257,11 @@ const META: Record<RoutePath, RouteMeta> = {
       'Deliberately broken: the page module throws as it evaluates, which is what a missing chunk after a deploy looks like. It answers with the `error` page.',
   },
 
+  '/api/gate': {
+    group: 'API endpoints',
+    title: 'Gate',
+    description: 'POST `?id=…` to let the section of `/gated-intent` waiting on that id carry on.',
+  },
   '/api/quick-health': {
     group: 'API endpoints',
     title: 'Health check',

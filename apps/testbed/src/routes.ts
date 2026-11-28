@@ -1,4 +1,4 @@
-import { defineRoutes } from '@rshono/core';
+import { defineRoutes } from '@rsvhono/core';
 
 export const routes = defineRoutes({
   routes: [
@@ -107,6 +107,22 @@ export const routes = defineRoutes({
       component: () => import('./components/mount-navigation'),
     },
     {
+      // Overlapping server functions, and server functions against navigations. See navigation-revalidation.spec.mjs.
+      path: '/action-race',
+      component: () => import('./components/action-race'),
+    },
+    {
+      // A server function declared inside a component, with an encrypted closure. See prod.test.mjs.
+      path: '/inline-action',
+      component: () => import('./components/inline-action'),
+    },
+    {
+      // What a client component's own transitions do while a navigation is pending, and the reverse. Read by
+      // packages/core/test/experiments/transition-probe.mjs — an observation, not a test.
+      path: '/transition-probe',
+      component: () => import('./components/transition-probe'),
+    },
+    {
       path: '/whoami',
       component: () => import('./components/whoami'),
     },
@@ -126,6 +142,48 @@ export const routes = defineRoutes({
       // Deliberately broken, and linked from nowhere: its module throws as it evaluates. See the component.
       path: '/unloadable',
       component: () => import('./components/unloadable'),
+    },
+    {
+      // Reaches server functions through a re-export and two kinds of `import()`. See the route-functions manifest.
+      path: '/reachability',
+      component: () => import('./components/reachability'),
+    },
+    {
+      // An experiment: a fragment rendered to flight once and replayed, server function and all.
+      path: '/flight-replay',
+      component: () => import('./components/flight-replay'),
+    },
+    {
+      // React's own `cache()`, `cacheSignal()` and `browser()` on this renderer.
+      path: '/react-standard',
+      component: () => import('./components/react-standard'),
+    },
+    {
+      // Imports a chunk on a click, long after hydration. See chunk-recovery.spec.mjs.
+      path: '/lazy-late',
+      component: () => import('./components/lazy-late'),
+    },
+    {
+      // Redirects that add, change or drop the fragment. See navigation-redirects.spec.mjs.
+      path: '/fragment-redirect/:step',
+      component: () => import('./components/fragment-redirect'),
+    },
+    {
+      // Redirects to its own path with a different query. See navigation-redirects.spec.mjs.
+      path: '/canonical',
+      component: () => import('./components/canonical'),
+    },
+    {
+      // A late `redirect()` or `notFound()` the test triggers, from a page that may no longer be the one the
+      // visitor is going to. See navigation-intent.spec.mjs.
+      path: '/gated-intent',
+      component: () => import('./components/gated-intent'),
+    },
+    {
+      type: 'endpoint',
+      path: '/api/gate',
+      method: 'post',
+      server: () => import('./gate'),
     },
     {
       type: 'endpoint',

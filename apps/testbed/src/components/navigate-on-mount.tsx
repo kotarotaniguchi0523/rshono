@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import { useNavigation } from '@rshono/core/client';
+import { useNavigation } from '@rsvhono/core/client';
 
 export function NavigateOnMount({ method = 'replace' }: { method?: 'push' | 'replace' }) {
   const { router } = useNavigation();

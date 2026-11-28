@@ -1,4 +1,4 @@
-import type { PageProps } from '@rshono/core';
+import type { PageProps } from '@rsvhono/core';
 import { Layout } from './layout';
 
 /**
@@ -9,7 +9,7 @@ import { Layout } from './layout';
  */
 export default function SlowShell(_props: PageProps) {
   return (
-    <Layout title="Slow shell — rshono">
+    <Layout title="Slow shell — rsvhono">
       <div className="page">
         <p data-slow-shell>slow shell loaded</p>
       </div>

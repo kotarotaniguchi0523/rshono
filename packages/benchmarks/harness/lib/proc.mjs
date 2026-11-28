@@ -55,8 +55,12 @@ export function indent(message) {
  * Boot a server and wait until it answers. Returns a handle whose `stop()` takes the whole process
  * group down — Next and Vite both spawn children, and an orphaned child holds the port.
  */
-export async function startServer(target, { env, readyPath = '/api/health', timeoutMs = 120_000 } = {}) {
-  const [cmd, args] = target.start;
+export async function startServer(target, { env, wrap = [], start, readyPath = '/api/health', timeoutMs = 120_000 } = {}) {
+  // `start` replaces the target's own start command — another runtime running the same script.
+  if (start) target = { ...target, start };
+  // `wrap` is a command put in front of the start command — `taskset -c 0`, for a server held to one core.
+  // The whole process tree inherits it, which is the point: a framework that forks a worker stays pinned too.
+  const [cmd, args] = wrap.length ? [wrap[0], [...wrap.slice(1), target.start[0], ...target.start[1]]] : target.start;
   // Without this an orphan from an earlier run is silently measured instead of the build under test,
   // or — as EADDRINUSE — surfaces as an unexplained "exited 1".
   if (!(await portFree(target.port))) {

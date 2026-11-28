@@ -1,6 +1,5 @@
 node_modules/
 dist/
-.rshono/
 *.tsbuildinfo
 .DS_Store
 

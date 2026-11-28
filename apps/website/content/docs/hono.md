@@ -36,8 +36,8 @@ that calls `next()` is fine; a handler that returns a response is not.
 ## Security middleware
 
 Because the sub-app wraps page requests, this is also where the app's security controls go. The
-framework ships none of its own — Hono's are better tested than anything rshono would write, and a
-config field would only be a worse way to spell the same call. `create-rshono` puts the first two in
+framework ships none of its own — Hono's are better tested than anything rsvhono would write, and a
+config field would only be a worse way to spell the same call. `create-rsvhono` puts the first two in
 every new app.
 
 ### Request-body limit
@@ -66,14 +66,14 @@ server.use('/api/upload', bodyLimit({ maxSize: 50 * 1024 * 1024 }));
 Rejects a cross-origin POST with 403 before it can reach a server action:
 
 ```ts
-import { publicUrl } from '@rshono/core/server';
+import { publicUrl } from '@rsvhono/core/server';
 import { csrf } from 'hono/csrf';
 
 server.use(csrf({ origin: (origin, c) => origin === publicUrl(c).origin }));
 ```
 
 Use `publicUrl(c)` rather than Hono's default same-origin comparison, which reads `c.req.url` — the
-address this server was _reached_ on, which is the internal one behind any proxy, `rshono dev`
+address this server was _reached_ on, which is the internal one behind any proxy, `rsvhono dev`
 included. It honours [`trustProxy`](/docs/configuration#proxy-headers), so it stays `c.req.url` where
 no proxy is declared. To allow more origins:
 
@@ -102,7 +102,7 @@ server.use(secureHeaders());
 ```
 
 Add Hono's `NONCE` placeholder to `scriptSrc` and the CSP becomes per-request: Hono mints the nonce,
-and rshono stamps that value onto the bootstrap scripts and the inlined flight payload.
+and rsvhono stamps that value onto the bootstrap scripts and the inlined flight payload.
 
 ```ts
 import { NONCE, secureHeaders } from 'hono/secure-headers';
@@ -118,8 +118,8 @@ server.use(
 );
 ```
 
-Nothing there mentions `'unsafe-eval'`: React Refresh needs it, so rshono widens `script-src` under
-`rshono dev` and never in a build — one policy serves both. See [CSP](/docs/configuration#csp) for the
+Nothing there mentions `'unsafe-eval'`: React Refresh needs it, so rsvhono widens `script-src` under
+`rsvhono dev` and never in a build — one policy serves both. See [CSP](/docs/configuration#csp) for the
 full policy and what a nonce costs a static route.
 
 [Hono — Secure Headers](https://hono.dev/docs/middleware/builtin/secure-headers)
@@ -175,7 +175,7 @@ The `Env` given to the Hono app is the same one that types `ctx` on a page. Pass
 `ctx.var` is typed key by key instead of being an open record:
 
 ```tsx
-import type { PageProps } from '@rshono/core';
+import type { PageProps } from '@rsvhono/core';
 import type { AppEnv } from '../server';
 
 export default function Home({ ctx }: PageProps<'/', AppEnv>) {
@@ -232,7 +232,7 @@ One handler, registered at the top level of `src/server.ts`, catches every error
 thrown action, a failed render, SSR falling over, anything reaching the top-level handler:
 
 ```ts
-import { onServerError } from '@rshono/core/server';
+import { onServerError } from '@rsvhono/core/server';
 
 onServerError((error, { source, request, hono, waitUntil }) => {
   waitUntil(

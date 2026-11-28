@@ -1,7 +1,7 @@
 /**
  * Throughput and latency per route, plus resident memory under load.
  *
- * Read this as the floor check it is: all three render through the same React, so a large gap would mean
+ * Read this as the floor check it is: all four render through the same React, so a large gap would mean
  * someone's HTTP layer is pathological, not that one framework renders React faster. `/api/health` is the
  * interesting row — it takes React out of the path and leaves the router and response construction.
  */
@@ -19,11 +19,11 @@ const warmupMs = Number(flagValue('warmup', '2')) * 1000;
 const quick = hasFlag('quick');
 
 /**
- * An equal old-space budget for all three, because without one the memory numbers compare nothing.
+ * An equal old-space budget for all four, because without one the memory numbers compare nothing.
  *
  * V8 sizes the old generation against the *allocation rate* and only collects in earnest near the limit, so at
  * the default after-load RSS measures throughput rather than memory: the fastest server churns the most in the
- * fixed eight seconds and grows the largest heap. Measured on rshono, `/api/health` reached 472 MB RSS of which
+ * fixed eight seconds and grows the largest heap. Measured on rsvhono, `/api/health` reached 472 MB RSS of which
  * a forced GC returned 362 MB; capped, the same route holds flat at 120 MB with throughput unchanged.
  *
  * So the cap does not restrain the servers, it stops the metric rewarding slowness. `--heap=0` opts out, and the

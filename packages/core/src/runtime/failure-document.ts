@@ -1,5 +1,5 @@
 // The baked config, not `process.env.NODE_ENV`: a deploy target need not have a `process`.
-const isDev = __RSHONO_CONFIG__.isDev;
+const isDev = __RSVHONO_CONFIG__.isDev;
 
 /** Escapes text going into HTML body content — a stack trace is untrusted input. */
 function escapeHtml(text: string): string {

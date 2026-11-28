@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "rshono-website",
+  "name": "rsvhono-website",
   "main": "dist/server/main.mjs",
   "compatibility_date": "2026-07-30",
   "compatibility_flags": ["nodejs_compat"],

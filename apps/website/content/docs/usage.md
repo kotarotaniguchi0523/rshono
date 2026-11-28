@@ -162,7 +162,7 @@ clicked.) A transition is also the scope [optimistic updates](#optimistic-update
 A server component awaits the database directly. No loader, no `useEffect`, no fetch on mount:
 
 ```tsx title="src/components/notes.tsx"
-import { AsyncBoundary } from '@rshono/core/client';
+import { AsyncBoundary } from '@rsvhono/core/client';
 import { db } from '../db';
 import { Layout } from './layout';
 import { NewNote } from './new-note';
@@ -210,7 +210,7 @@ this — but note what crosses that line. `NoteList` is still a server component
 only the boundary itself does. And `loading` / `error` are being passed **from the server**, so they must
 be nodes. The `(error, reset) => …` form of `error` needs a function, and functions cannot cross the
 server→client boundary — use it from a `'use client'` component when you want a _Try again_ button. See
-[`@rshono/core/client`](/docs/api#rshonocoreclient).
+[`@rsvhono/core/client`](/docs/api#rsvhonocoreclient).
 
 ## Passing actions to client components
 
@@ -282,9 +282,8 @@ export function Board({ notes, onCreate, onToggle }: BoardProps) {
 without knowing that the real ones are server references at all.
 
 > **An inline action cannot close over its component's scope.** `'use server'` in a function body compiles
-> to a module-level function plus _encrypted bound arguments_, and that encryption is not wired up in the
-> Rspack / `react-server-dom-rspack` pair rshono currently pins — capturing anything from the enclosing
-> scope fails the build with `export 'encryptActionBoundArgs' … was not found`. The functions above are
+> to a module-level function plus _encrypted bound arguments_, and rsvhono does not support that yet — do not capture anything from
+> the enclosing scope. The functions above are
 > fine because they close over nothing; `db` is a module import.
 
 To attach per-item data, bind it to a module-scope action explicitly. `bind` is the supported spelling of

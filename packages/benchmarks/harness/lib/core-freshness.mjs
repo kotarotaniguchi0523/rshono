@@ -1,6 +1,6 @@
 /**
- * Proves the rshono app is measuring the `@rshono/core` in this checkout, not an older one. The app installs
- * core from `.pack/rshono-core.tgz` (see install.mjs), and nothing re-packs that except `setup:apps` — so every
+ * Proves the rsvhono app is measuring the `@rsvhono/core` in this checkout, not an older one. The app installs
+ * core from `.pack/rsvhono-core.tgz` (see install.mjs), and nothing re-packs that except `setup:apps` — so every
  * `bench` after a change to packages/core would otherwise measure whatever was packed last.
  *
  * The comparison is over file *contents*, not the version in `package.json`: npm writes that field from the
@@ -39,11 +39,11 @@ function hashTree(dir) {
  */
 export function coreStaleness(benchmarksRoot, appDir) {
   const workspace = path.resolve(benchmarksRoot, '..', 'core', 'dist');
-  const installed = path.join(appDir, 'node_modules', '@rshono', 'core', 'dist');
+  const installed = path.join(appDir, 'node_modules', '@rsvhono', 'core', 'dist');
 
   if (!existsSync(workspace)) return 'packages/core has not been built, so there is nothing to compare against.';
-  if (!existsSync(installed)) return 'the app has no @rshono/core installed.';
-  return hashTree(workspace) === hashTree(installed) ? null : 'the app has an older @rshono/core installed than this checkout builds.';
+  if (!existsSync(installed)) return 'the app has no @rsvhono/core installed.';
+  return hashTree(workspace) === hashTree(installed) ? null : 'the app has an older @rsvhono/core installed than this checkout builds.';
 }
 
 /**
@@ -51,18 +51,18 @@ export function coreStaleness(benchmarksRoot, appDir) {
  * the rest of `resolveTargets`: the whole value is the two lines saying what to run.
  */
 export function assertCoreFresh(benchmarksRoot, targets) {
-  const app = targets.find((t) => t.id === 'rshono');
+  const app = targets.find((t) => t.id === 'rsvhono');
   if (!app) return;
   const stale = coreStaleness(benchmarksRoot, app.dir);
   if (!stale) return;
   console.error(
     [
-      `✗ Refusing to benchmark a stale @rshono/core — ${stale}`,
+      `✗ Refusing to benchmark a stale @rsvhono/core — ${stale}`,
       '  Every number this run produced would describe code that is not in the working tree.',
       '',
-      '  Fix:  pnpm --filter @rshono/benchmarks setup:apps',
-      '        (rebuilds core, re-packs it, reinstalls, and drops the rshono build that linked the old one)',
-      '  Then: pnpm --filter @rshono/benchmarks bench      — or rebuild just the app before a single stage',
+      '  Fix:  pnpm --filter @rsvhono/benchmarks setup:apps',
+      '        (rebuilds core, re-packs it, reinstalls, and drops the rsvhono build that linked the old one)',
+      '  Then: pnpm --filter @rsvhono/benchmarks bench      — or rebuild just the app before a single stage',
       '',
     ].join('\n'),
   );

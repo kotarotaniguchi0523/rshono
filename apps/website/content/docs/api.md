@@ -1,18 +1,18 @@
 ---
 title: API reference
-description: Every export of @rshono/core, @rshono/core/server and @rshono/core/client, in one place.
+description: Every export of @rsvhono/core, @rsvhono/core/server and @rsvhono/core/client, in one place.
 ---
 
 Three entry points, and which one an import comes from tells you where the code runs. That is most of
 what there is to know about the surface.
 
-| Import                | Runs                                 | Holds                                                                      |
-| --------------------- | ------------------------------------ | -------------------------------------------------------------------------- |
-| `@rshono/core`        | build time, server                   | route and config declaration, and the types pages are written against      |
-| `@rshono/core/server` | per request, server only             | the request context, `redirect` / `notFound`, error reporting, `publicUrl` |
-| `@rshono/core/client` | browser, from `'use client'` modules | the navigation hook and the boundaries                                     |
+| Import                 | Runs                                 | Holds                                                                      |
+| ---------------------- | ------------------------------------ | -------------------------------------------------------------------------- |
+| `@rsvhono/core`        | build time, server                   | route and config declaration, and the types pages are written against      |
+| `@rsvhono/core/server` | per request, server only             | the request context, `redirect` / `notFound`, error reporting, `publicUrl` |
+| `@rsvhono/core/client` | browser, from `'use client'` modules | the navigation hook and the boundaries                                     |
 
-`@rshono/core` pulls in no runtime machinery — importing it from server code is free. `@rshono/core/server`
+`@rsvhono/core` pulls in no runtime machinery — importing it from server code is free. `@rsvhono/core/server`
 from a `'use client'` module is a mistake: those run in the browser, where no request is bound. Read what
 you need on the server and pass it down as props.
 
@@ -20,17 +20,17 @@ These three are the whole public surface — the package's `exports` map lists o
 deeper path to import. Everything else is framework plumbing.
 
 All three are **ESM only**: the map declares `import` and `types` conditions and no `require` one, so
-`require('@rshono/core')` is `ERR_PACKAGE_PATH_NOT_EXPORTED`. Use `import`, or `await import()` from
+`require('@rsvhono/core')` is `ERR_PACKAGE_PATH_NOT_EXPORTED`. Use `import`, or `await import()` from
 CommonJS.
 
-## `@rshono/core`
+## `@rsvhono/core`
 
 ### Functions
 
-| Signature                            | What it does                                                                                                                                           |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `defineRoutes(config): RouteConfig`  | Declares the app's route table in `src/routes.ts`. Also accepts a bare `Route[]` as shorthand. Cross-checks every page's props against its own `path`. |
-| `defineConfig(config): RshonoConfig` | Types `rshono.config.ts`. Identity function — it exists for the autocomplete.                                                                          |
+| Signature                             | What it does                                                                                                                                           |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `defineRoutes(config): RouteConfig`   | Declares the app's route table in `src/routes.ts`. Also accepts a bare `Route[]` as shorthand. Cross-checks every page's props against its own `path`. |
+| `defineConfig(config): RsvhonoConfig` | Types `rsvhono.config.ts`. Identity function — it exists for the autocomplete.                                                                         |
 
 See [Routing](/docs/routing) and [Configuration](/docs/configuration).
 
@@ -50,11 +50,10 @@ See [Routing](/docs/routing) and [Configuration](/docs/configuration).
 | `ErrorPageProps<E>`    | `PageProps` plus `error`, for the page declared as `error`.                                                     |
 | `ErrorPageInfo`        | `{ message, stack? }`. Redacted in production: a generic message, and `stack` is `undefined`.                   |
 | `HTTPMethod`           | `'get'` \| `'post'` \| `'put'` \| `'patch'` \| `'delete'` \| `'options'` \| `'all'`. A `HEAD` reaches `'get'`.  |
-| `RshonoConfig`         | Every field of `rshono.config.ts`. All optional.                                                                |
-| `RspackHookContext`    | `{ isServer, isDev }`, handed to the `rspack` config hook.                                                      |
+| `RsvhonoConfig`        | Every field of `rsvhono.config.ts`. All optional.                                                               |
 | `DeployTarget`         | `'node'` \| `'cloudflare'` \| `'vercel'` \| `'aws-lambda'`.                                                     |
 
-## `@rshono/core/server`
+## `@rsvhono/core/server`
 
 Server-only, and request-scoped. See [Pages](/docs/pages) and [Usage](/docs/usage).
 
@@ -66,6 +65,11 @@ Server-only, and request-scoped. See [Pages](/docs/pages) and [Usage](/docs/usag
 | `redirect(location, status?): never`        | Throws a control signal the framework turns into a redirect. `status` defaults to `303`.                                        |
 | `notFound(): never`                         | Aborts the render with a 404 and the app's not-found page.                                                                      |
 | `onServerError(handler): void`              | Registers one handler for every error the framework catches. Call it once, at the top level of `src/server.ts`.                 |
+| `beforeServerFunction(guard): void`         | Registers a check that runs before every server function, however it was called. Throw an `HTTPException` to refuse.            |
+| `trustServerFunctionOrigins(origins): void` | Names other origins that may call server functions. By default only the app's own can.                                          |
+| `setServerFunctionRefresh(mode): void`      | `'auto'` (default) renders the page after every function; `'explicit'` only when the function calls `requestRefresh()`.         |
+| `requestRefresh(): void`                    | Inside a server function: asks for the calling page to be rendered into the reply.                                              |
+| `classifyRequest(request): RequestKind`     | For middleware: `document`, `rsc`, `rsc-action` (with `actionId`) or `form-action` — a form post that _may_ carry a function.   |
 | `publicUrl(c): URL`                         | The browser-facing URL for a Hono `Context` — proxy-corrected under `trustProxy`. For middleware, which has no request context. |
 
 `publicUrl` is the one export here meant for `src/server.ts` rather than a component: middleware is
@@ -80,11 +84,11 @@ Both have to be reached **before the page shell is sent**. A page streams, so th
 soon as the shell is ready and HTTP has no take-backs after that: called from a `<Suspense>` boundary that
 resolves later, neither can still be a 3xx or a 404. The response is committed as `200 text/html`, a browser
 with JavaScript follows the signal through the payload, and a visitor without it stays on the fallback.
-Decide in middleware or in the page component body, above the boundary — `rshono dev` warns when a signal
+Decide in middleware or in the page component body, above the boundary — `rsvhono dev` warns when a signal
 arrives too late.
 
 ```tsx
-import { getRequestContext, redirect } from '@rshono/core/server';
+import { getRequestContext, redirect } from '@rsvhono/core/server';
 
 export default async function Dashboard() {
   const session = getRequestContext().cookies.get('session');
@@ -139,7 +143,7 @@ Set them from a `'use server'` action, which runs before the render:
 
 ```ts
 'use server';
-import { getRequestContext, redirect } from '@rshono/core/server';
+import { getRequestContext, redirect } from '@rsvhono/core/server';
 
 export async function login(form: FormData) {
   const ctx = getRequestContext();
@@ -187,7 +191,7 @@ in production, so a handler is the only place the real error is visible.
 until the report has been sent; see [error reporting](/docs/hono#error-reporting) for what it does per
 target.
 
-## `@rshono/core/client`
+## `@rsvhono/core/client`
 
 Every export is itself a `'use client'` module, so a server component can render `AsyncBoundary` directly.
 The hook needs a client component.
@@ -209,7 +213,7 @@ change before the suspended content commits; newly mounted Suspense boundaries m
 
 ```tsx
 'use client';
-import { useNavigation } from '@rshono/core/client';
+import { useNavigation } from '@rsvhono/core/client';
 
 export function NextPage() {
   const { url, router } = useNavigation();

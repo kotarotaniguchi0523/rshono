@@ -7,7 +7,7 @@ test('navigation retains revealed Suspense content and pending until the destina
   await expect(page.locator('html')).toHaveAttribute('data-navigation-repro-hydrated', 'true');
   await expect(page.getByText('Initial content', { exact: true })).toBeVisible();
   await page.evaluate(() => {
-    window.__rshonoDocumentId = 'navigation-suspense';
+    window.__rsvhonoDocumentId = 'navigation-suspense';
   });
 
   const received = page.waitForResponse(
@@ -28,7 +28,7 @@ test('navigation retains revealed Suspense content and pending until the destina
   await expect(page.getByText('Activity content', { exact: true })).toBeVisible();
   await expect(page.getByText('Loading...', { exact: true })).toBeHidden();
   await expect(page.getByText('pending: false', { exact: true })).toBeVisible();
-  expect(await page.evaluate(() => window.__rshonoDocumentId)).toBe('navigation-suspense');
+  expect(await page.evaluate(() => window.__rsvhonoDocumentId)).toBe('navigation-suspense');
   expect(errors).toEqual([]);
 });
 

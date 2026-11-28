@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import '../styles.css';
 
-export function Layout({ title = 'rshono', description, children }: { title?: string; description?: string; children: ReactNode }) {
+export function Layout({ title = 'rsvhono', description, children }: { title?: string; description?: string; children: ReactNode }) {
   return (
     <html lang="en">
       <head>
@@ -16,7 +16,7 @@ export function Layout({ title = 'rshono', description, children }: { title?: st
 
         <footer>
           <p>
-            rshono — <a href="https://hono.dev">Hono</a> + Rspack + React Server Components.
+            rsvhono — <a href="https://hono.dev">Hono</a> + Vite + React Server Components.
           </p>
           <p className="meta">
             {/* data-native opts this link out of RSC soft navigation — it does a full browser load. */}

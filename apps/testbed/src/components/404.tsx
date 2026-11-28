@@ -1,5 +1,7 @@
-import type { PageProps } from '@rshono/core';
-import { notFound, redirect } from '@rshono/core/server';
+import type { PageProps } from '@rsvhono/core';
+import { notFound, redirect } from '@rsvhono/core/server';
+import { raceLog } from '../race-log';
+import { ActionRaceControls } from './action-race-controls';
 import { Layout } from './layout';
 
 export default function NotFound({ url }: PageProps) {
@@ -12,9 +14,12 @@ export default function NotFound({ url }: PageProps) {
   if (boom === 'redirect') redirect('/users');
 
   return (
-    <Layout title="404 — rshono">
+    <Layout title="404 — rsvhono">
       <div className="page">
+        {/* An action can be called from here too, and has to re-render *this* page: see `window.__race`. */}
+        <ActionRaceControls />
         <h1>404 — nothing here</h1>
+        <p data-not-found-count>{raceLog.length}</p>
         <p className="description">
           No page at <code>{url.pathname}</code>. <a href="/">Back to the start</a>.
         </p>

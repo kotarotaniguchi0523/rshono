@@ -110,7 +110,7 @@ test('forward without an entry resolves as no-op', async ({ page }) => {
   await expect.poll(() => routerResult(page).then((result) => result.kind)).toBe('no-op');
 });
 
-test('Navigation API finished is earlier than a traversal payload commit', async ({ page }) => {
+test('Navigation API finished waits for a traversal payload to commit', async ({ page }) => {
   await page.goto('/profile/1');
   await expect(page.getByRole('heading', { name: /Ada Lovelace/ })).toBeVisible();
   await page.getByRole('button', { name: "push('/users')" }).click();
@@ -126,18 +126,23 @@ test('Navigation API finished is earlier than a traversal payload commit', async
     await route.continue();
   });
   try {
-    const result = await page.evaluate(async () => {
-      const { finished } = navigation.back();
-      await finished;
-      return { pathname: location.pathname, heading: document.querySelector('h1')?.textContent };
+    await page.evaluate(() => {
+      window.__traversal = { finished: false };
+      void navigation.back().finished.then(() => {
+        window.__traversal = { finished: true, heading: document.querySelector('h1')?.textContent };
+      });
     });
     await seen;
-    expect(result.pathname).toBe('/profile/1');
-    expect(result.heading).toContain('Users');
+    // The browser has committed the entry — a traversal has no precommit phase — and the page is still the
+    // old one. `finished` must not claim otherwise.
+    await expect(page).toHaveURL('/profile/1');
+    await expect(page.getByRole('heading', { name: 'Users', exact: true })).toBeVisible();
+    expect(await page.evaluate(() => window.__traversal.finished)).toBe(false);
   } finally {
     release?.();
   }
-  await expect(page.getByRole('heading', { name: /Ada Lovelace/ })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => window.__traversal.finished)).toBe(true);
+  expect(await page.evaluate(() => window.__traversal.heading)).toContain('Ada Lovelace');
 });
 
 test('a digest redirect reports a document handoff before recovering the page', async ({ page }) => {

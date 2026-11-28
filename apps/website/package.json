@@ -7,24 +7,24 @@
     "node": ">=22.1.0"
   },
   "scripts": {
-    "dev": "rshono dev",
-    "build": "pnpm --filter @rshono/core build && rshono build",
+    "dev": "rsvhono dev",
+    "build": "pnpm --filter @rsvhono/core build && rsvhono build",
     "typecheck": "tsc --noEmit",
-    "start": "rshono start",
+    "start": "rsvhono start",
     "deploy": "pnpm run build && wrangler deploy",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix"
   },
   "dependencies": {
-    "@rshono/core": "workspace:*",
+    "@rsvhono/core": "workspace:*",
     "@shikijs/langs": "^4.6.0",
     "@shikijs/themes": "^4.6.0",
     "gray-matter": "^4.0.3",
     "hono": "^4.13.17",
     "markdown-it": "^15.0.3",
     "markdown-it-anchor": "^10.0.0",
-    "react": "19.2.8",
-    "react-dom": "19.2.8",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
     "shiki": "^4.6.0"
   },
   "devDependencies": {
@@ -33,7 +33,6 @@
     "@types/node": "^26.6.6",
     "@types/react": "^19.2.18",
     "postcss": "^8.5.33",
-    "postcss-loader": "^8.2.1",
     "tailwindcss": "^4.3.5",
     "typescript": "^7.0.2",
     "wrangler": "^4.162.0"

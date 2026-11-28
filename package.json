@@ -1,5 +1,5 @@
 {
-  "name": "rshono-monorepo",
+  "name": "rsvhono-monorepo",
   "private": true,
   "packageManager": "pnpm@11.9.0",
   "author": "Lasse <lasse@lassetange.com> (https://www.lassetange.com)",
@@ -18,10 +18,10 @@
     "apps/*"
   ],
   "scripts": {
-    "dev": "pnpm --filter @rshono/core dev",
+    "dev": "pnpm --filter @rsvhono/core dev",
     "build": "pnpm --filter \"./apps/*\" build",
     "testbed:dev": "pnpm --filter testbed dev",
-    "version:set": "pnpm -r --filter \"@rshono/core\" --filter \"@rshono/create\" exec npm version --no-git-tag-version --workspaces-update=false",
+    "version:set": "pnpm -r --filter \"@rsvhono/core\" --filter \"@rsvhono/create\" exec npm version --no-git-tag-version --workspaces-update=false",
     "release": "node scripts/release.mjs",
     "release:dry": "node scripts/release.mjs --dry-run",
     "clean": "rm -rf packages/*/dist packages/*/node_modules apps/*/node_modules node_modules",

@@ -17,7 +17,7 @@ test.beforeEach(async ({ page }) => {
 
 test.afterEach(async ({ page }) => {
   expect(page.__boundaryErrors).toEqual([]);
-  await expect(page.locator('[data-rshono-fatal]')).toHaveCount(0);
+  await expect(page.locator('[data-rsvhono-fatal]')).toHaveCount(0);
 });
 
 async function open(page, path) {

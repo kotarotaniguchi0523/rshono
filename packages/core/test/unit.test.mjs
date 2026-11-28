@@ -4,15 +4,15 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { basename, dirname, join, sep } from 'node:path';
+import { dirname, join } from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { scanPageFiles } from '../dist/builder/page-files.js';
+import { pageSpecifiers } from '../dist/builder/page-files.js';
 import { checkReactVersions } from '../dist/builder/react-versions.js';
-import { createConfigs } from '../dist/builder/rspack-config.js';
+import { publicProcessModule, readsRealProcess, shadowProcessEnv } from '../dist/builder/env-shadow.js';
+import { createViteConfig } from '../dist/builder/vite-config.js';
 import { DEPLOY_TARGETS, deployHintFor, NODE_PRESET, resolveDeployPreset } from '../dist/deploy/presets.js';
 import { publicRouteCollisions } from '../dist/deploy/public-paths.js';
 import { appendVary, etagMatches, varyWith } from '../dist/server/headers.js';
@@ -22,7 +22,14 @@ import { createPageCache, PRERENDER_NONCE_HEADER, setPrerenderFlight, ssgAssetPa
 import { prerenderStaticRoutes, readPrerendered, resolveSiteOrigin } from '../dist/server/ssg.js';
 import { injectFlightPayload } from '../dist/runtime/flight-inject.js';
 import { asksForRsc, createRscRequest, isActionRequest, isBrowserFormPost, parseRenderRequest, wantsRsc } from '../dist/runtime/request.js';
-import { isControlDigest, parseRedirectDigest, RedirectSignal } from '../dist/runtime/control.js';
+import {
+  controlDigestFor,
+  isControlDigest,
+  NotFoundSignal,
+  parseControlIntent,
+  parseRedirectDigest,
+  RedirectSignal,
+} from '../dist/runtime/control.js';
 import {
   beginPageRender,
   getRequestContext,
@@ -32,13 +39,12 @@ import {
   RequestContext,
   runWithContext,
 } from '../dist/runtime/context.js';
-import { walkHotUpdates } from '../dist/runtime/hot-update.js';
 import { assertRouteModules, validateRoutesModule, validateServerApp } from '../dist/runtime/validate-entries.js';
 import { MINIMAL_APP_DIR, TESTBED_DIR } from './helpers.mjs';
 
 const tempDirs = [];
 function tempDir() {
-  const dir = mkdtempSync(join(tmpdir(), 'rshono-unit-'));
+  const dir = mkdtempSync(join(tmpdir(), 'rsvhono-unit-'));
   tempDirs.push(dir);
   return dir;
 }
@@ -440,7 +446,7 @@ describe('runWithContext', () => {
 // HTTP; these are the parts an app only meets when something else has already gone wrong.
 describe('reportServerError', () => {
   const hono = { req: { raw: new Request('http://example.test/boom') } };
-  const report = (error, source = 'request') => reportServerError(error, { source, hono, message: '[rshono] test:' });
+  const report = (error, source = 'request') => reportServerError(error, { source, hono, message: '[rsvhono] test:' });
 
   /** Runs `body` with `console.error` collected rather than printed — every report writes one. */
   function withStderr(body) {
@@ -470,7 +476,7 @@ describe('reportServerError', () => {
     assert.equal(seen[0].request.url, 'http://example.test/boom', 'the request is derived from the context');
     assert.equal(seen[0].hono, hono);
     assert.equal(typeof seen[0].waitUntil, 'function');
-    assert.match(lines.join('\n'), /\[rshono\] test:/, 'a handler must not replace the stderr log');
+    assert.match(lines.join('\n'), /\[rsvhono\] test:/, 'a handler must not replace the stderr log');
   });
 
   test('reports one fault once, however many stages catch it', () => {
@@ -551,11 +557,11 @@ describe('loadConfig', () => {
     assert.deepEqual(await loadConfig(tempDir()), {}, 'no config file is not an error — every field has a default');
   });
 
-  test('finds rshono.config.{ts,js,mjs} at the root, in that order', async () => {
+  test('finds rsvhono.config.{ts,js,mjs} at the root, in that order', async () => {
     for (const [name, marker] of [
-      ['rshono.config.ts', 'ts'],
-      ['rshono.config.js', 'js'],
-      ['rshono.config.mjs', 'mjs'],
+      ['rsvhono.config.ts', 'ts'],
+      ['rsvhono.config.js', 'js'],
+      ['rsvhono.config.mjs', 'mjs'],
     ]) {
       const dir = tempDir();
       writeFileSync(join(dir, name), `export default { siteUrl: 'https://${marker}.example' };\n`);
@@ -564,14 +570,14 @@ describe('loadConfig', () => {
 
     // Precedence, so a leftover file cannot quietly win: .ts first.
     const dir = tempDir();
-    writeFileSync(join(dir, 'rshono.config.mjs'), "export default { siteUrl: 'https://mjs.example' };\n");
-    writeFileSync(join(dir, 'rshono.config.ts'), "export default { siteUrl: 'https://ts.example' };\n");
+    writeFileSync(join(dir, 'rsvhono.config.mjs'), "export default { siteUrl: 'https://mjs.example' };\n");
+    writeFileSync(join(dir, 'rsvhono.config.ts'), "export default { siteUrl: 'https://ts.example' };\n");
     assert.equal((await loadConfig(dir)).siteUrl, 'https://ts.example');
   });
 
   test('names an explicit --config that is not there, rather than failing later', async () => {
     const missing = join(tempDir(), 'nope.config.mjs');
-    await assert.rejects(loadConfig(tempDir(), missing), /\[rshono\] config file not found: /);
+    await assert.rejects(loadConfig(tempDir(), missing), /\[rsvhono\] config file not found: /);
   });
 
   test('resolves a relative --config against the working directory', async () => {
@@ -588,7 +594,7 @@ describe('loadConfig', () => {
 
   test('says a config with no default export is missing one', async () => {
     const dir = tempDir();
-    writeFileSync(join(dir, 'rshono.config.mjs'), "export const config = { siteUrl: 'https://x.example' };\n");
+    writeFileSync(join(dir, 'rsvhono.config.mjs'), "export const config = { siteUrl: 'https://x.example' };\n");
     await assert.rejects(loadConfig(dir), /must `export default` a config object/);
   });
 
@@ -598,7 +604,7 @@ describe('loadConfig', () => {
   test("explains a .ts config importing a sibling by its '.js' specifier", async () => {
     const dir = tempDir();
     writeFileSync(join(dir, 'shared.ts'), 'export const siteUrl = "https://shared.example";\n');
-    writeFileSync(join(dir, 'rshono.config.ts'), "import { siteUrl } from './shared.js';\nexport default { siteUrl };\n");
+    writeFileSync(join(dir, 'rsvhono.config.ts'), "import { siteUrl } from './shared.js';\nexport default { siteUrl };\n");
     await assert.rejects(loadConfig(dir), (error) => {
       assert.match(error.message, /imports a module Node could not resolve/);
       assert.match(error.message, /does not rewrite a \.js specifier/);
@@ -611,13 +617,13 @@ describe('loadConfig', () => {
     // in place would re-throw it.
     const fixed = tempDir();
     writeFileSync(join(fixed, 'shared.ts'), 'export const siteUrl = "https://shared.example";\n');
-    writeFileSync(join(fixed, 'rshono.config.ts'), "import { siteUrl } from './shared.ts';\nexport default { siteUrl };\n");
+    writeFileSync(join(fixed, 'rsvhono.config.ts'), "import { siteUrl } from './shared.ts';\nexport default { siteUrl };\n");
     assert.equal((await loadConfig(fixed)).siteUrl, 'https://shared.example');
   });
 
   test('lets any other import failure through as itself', async () => {
     const dir = tempDir();
-    writeFileSync(join(dir, 'rshono.config.mjs'), 'throw new Error("config blew up");\n');
+    writeFileSync(join(dir, 'rsvhono.config.mjs'), 'throw new Error("config blew up");\n');
     await assert.rejects(loadConfig(dir), /config blew up/, 'a config that throws must not be dressed up as a resolution hint');
   });
 });
@@ -641,11 +647,11 @@ describe('publicUrl', () => {
     // already set. The query string is what makes the import fresh.
     let trusted;
     before(async () => {
-      globalThis.__RSHONO_CONFIG__ = { trustProxy: true, isDev: false };
+      globalThis.__RSVHONO_CONFIG__ = { trustProxy: true, isDev: false };
       trusted = (await import('../dist/runtime/context.js?trustProxy=1')).publicUrl;
     });
     after(() => {
-      delete globalThis.__RSHONO_CONFIG__;
+      delete globalThis.__RSVHONO_CONFIG__;
     });
 
     test('takes the host and scheme the browser used, and drops the internal port', () => {
@@ -1257,7 +1263,7 @@ describe('prerenderStaticRoutes', () => {
         fetch: () => new Response('nope', { status: 500 }),
       }),
       (error) => {
-        assert.match(error.message, /\[rshono\] 1 page failed to render while prerendering/);
+        assert.match(error.message, /\[rsvhono\] 1 page failed to render while prerendering/);
         assert.match(error.message, /"\/boom" rendered 500/);
         assert.doesNotMatch(error.message, /will SSR per request/, 'because it will not — it will 500 per request');
         return true;
@@ -1445,8 +1451,35 @@ describe('control signals', () => {
   });
 
   test('a notFound digest is a control signal but not a redirect', () => {
-    assert.equal(isControlDigest('RSHONO_NOT_FOUND'), true);
-    assert.equal(parseRedirectDigest('RSHONO_NOT_FOUND'), null);
+    assert.equal(isControlDigest('RSVHONO_NOT_FOUND'), true);
+    assert.equal(parseRedirectDigest('RSVHONO_NOT_FOUND'), null);
+  });
+
+  test('a digest tagged with its render parses to the same intent, and gives the token back', () => {
+    // The location has a `#` of its own, which is what the token is split off at: it is percent-encoded
+    // inside the digest, so the split cannot land in it.
+    const redirect = new RedirectSignal('/docs#install', 307);
+    const tagged = controlDigestFor(redirect, 'render-1');
+    assert.equal(isControlDigest(tagged), true);
+    assert.deepEqual(parseRedirectDigest(tagged), { location: '/docs#install', status: 307 });
+    assert.deepEqual(parseControlIntent({ digest: tagged }), {
+      intent: { kind: 'redirect', location: '/docs#install', status: 307 },
+      renderToken: 'render-1',
+    });
+
+    const missing = controlDigestFor(new NotFoundSignal(), 'render-2');
+    assert.equal(isControlDigest(missing), true);
+    assert.deepEqual(parseControlIntent({ digest: missing }), { intent: { kind: 'not-found' }, renderToken: 'render-2' });
+  });
+
+  test('a digest with no token parses with none, and anything else is not an intent', () => {
+    // A prerendered payload's, and what `controlDigestFor` writes when it is given no token.
+    const redirect = new RedirectSignal('/a', 303);
+    assert.equal(controlDigestFor(redirect, undefined), redirect.digest);
+    assert.deepEqual(parseControlIntent(redirect), { intent: { kind: 'redirect', location: '/a', status: 303 }, renderToken: undefined });
+    for (const error of [undefined, null, new Error('boom'), { digest: 'some-react-digest' }, { digest: 'RSVHONO_NOT_FOUND_AT_ALL' }]) {
+      assert.equal(parseControlIntent(error), undefined);
+    }
   });
 
   test('an unrelated digest is left alone', () => {
@@ -1461,7 +1494,7 @@ describe('control signals', () => {
     // callback. `RedirectSignal` percent-encodes every target, so a malformed escape is corruption rather
     // than a target — and the literal text is the better guess, the same fallback `jumpToAnchor` makes. It
     // stays a redirect either way: answering `null` would make it read as a `notFound()`.
-    const corrupt = 'RSHONO_REDIRECT;307;%E0%A4%A';
+    const corrupt = 'RSVHONO_REDIRECT;307;%E0%A4%A';
     assert.equal(isControlDigest(corrupt), true);
     assert.deepEqual(parseRedirectDigest(corrupt), { location: '%E0%A4%A', status: 307 });
   });
@@ -1499,11 +1532,11 @@ describe('RequestContext enumerability', () => {
   // exist to end. Each must throw and name the API that does work.
   test("Hono's response builders throw instead of doing nothing", () => {
     const ctx = new RequestContext(fakeHonoContext);
-    assert.throws(() => ctx.redirect(), /Use `redirect\(\)` from '@rshono\/core\/server'/);
-    assert.throws(() => ctx.notFound(), /Use `notFound\(\)` from '@rshono\/core\/server'/);
+    assert.throws(() => ctx.redirect(), /Use `redirect\(\)` from '@rsvhono\/core\/server'/);
+    assert.throws(() => ctx.notFound(), /Use `notFound\(\)` from '@rsvhono\/core\/server'/);
     assert.throws(() => ctx.header(), /Use `ctx\.setHeader\(name, value\)`/);
     for (const call of ['json', 'text', 'html', 'body', 'status']) {
-      assert.throws(() => ctx[call](), /\[rshono\]/, `ctx.${call}() must throw rather than silently do nothing`);
+      assert.throws(() => ctx[call](), /\[rsvhono\]/, `ctx.${call}() must throw rather than silently do nothing`);
     }
   });
 
@@ -1533,52 +1566,39 @@ describe('RequestContext enumerability', () => {
   });
 });
 
-describe('scanPageFiles', () => {
-  test('resolves inline component thunks, including @/ and index files', () => {
-    const dir = tempDir();
-    const srcDir = join(dir, 'src');
-    mkdirSync(join(srcDir, 'components', 'nested'), { recursive: true });
-    writeFileSync(join(srcDir, 'components', 'home.tsx'), 'export default () => null;');
-    writeFileSync(join(srcDir, 'components', 'about.ts'), 'export default () => null;');
-    writeFileSync(join(srcDir, 'components', 'nested', 'index.tsx'), 'export default () => null;');
-
-    const routesFile = join(srcDir, 'routes.ts');
-    writeFileSync(
-      routesFile,
-      `export const routes = [
+describe('pageSpecifiers', () => {
+  test('finds the specifier of every inline component thunk, as written', () => {
+    const source = `export const routes = [
          { path: '/', component: () => import('./components/home') },
          { path: '/about', component: async () => import("@/components/about") },
-         { path: '/nested', component: () => import('./components/nested') },
-         { path: '/missing', component: () => import('./components/gone') },
-         { path: '/indirect', component: loadSomething },
-       ];`,
-    );
-
-    const found = new Set();
-    scanPageFiles(routesFile, srcDir, found);
-    assert.deepEqual(
-      [...found].sort(),
-      [join(srcDir, 'components', 'about.ts'), join(srcDir, 'components', 'home.tsx'), join(srcDir, 'components', 'nested', 'index.tsx')].sort(),
-      'unresolvable and non-inline thunks are simply not page files',
-    );
+         { path: '/aliased', component: () => import('~pages/aliased') },
+         { path: '/spaced', component:( ) =>  import( './components/spaced' ) },
+         { path: '/pkg', component: () => import('some-package/page') },
+       ];`;
+    // Not resolved here: which file each names is the bundler's to say, alias and extension and all.
+    assert.deepEqual(pageSpecifiers(source), [
+      './components/home',
+      '@/components/about',
+      '~pages/aliased',
+      './components/spaced',
+      'some-package/page',
+    ]);
   });
 
-  test('clears previous results so a removed route stops being a page file', () => {
-    const dir = tempDir();
-    const srcDir = join(dir, 'src');
-    mkdirSync(srcDir, { recursive: true });
-    const routesFile = join(srcDir, 'routes.ts');
-    writeFileSync(routesFile, `export const routes = [];`);
-
-    const found = new Set(['stale-entry']);
-    scanPageFiles(routesFile, srcDir, found);
-    assert.deepEqual([...found], []);
+  test('a thunk that is not inline names nothing', () => {
+    const source = `const load = () => import('./components/manual');
+       export const routes = [
+         { path: '/indirect', component: load },
+         { path: '/wrapped', component: () => lazily(import('./components/wrapped')) },
+         { path: '/computed', component: () => import(\`./components/\${name}\`) },
+         { type: 'endpoint', path: '/api', server: () => import('./api') },
+       ];`;
+    assert.deepEqual(pageSpecifiers(source), [], 'such a page declares "use server-entry" itself');
   });
 
-  test('an unreadable routes file leaves the set empty instead of throwing', () => {
-    const found = new Set();
-    scanPageFiles(join(tempDir(), 'does-not-exist.ts'), tempDir(), found);
-    assert.deepEqual([...found], []);
+  test('no routes, no specifiers', () => {
+    assert.deepEqual(pageSpecifiers('export const routes = [];'), []);
+    assert.deepEqual(pageSpecifiers(''), []);
   });
 });
 
@@ -1586,7 +1606,7 @@ describe('deploy target resolution', () => {
   test('defaults to node, and a blank source is no source at all', () => {
     assert.equal(resolveDeployPreset().name, 'node');
     assert.equal(resolveDeployPreset({}).name, 'node');
-    // An `RSHONO_DEPLOY=` that a CI environment sets but never fills in has to fall through to the
+    // An `RSVHONO_DEPLOY=` that a CI environment sets but never fills in has to fall through to the
     // config file rather than fail the build on the empty string.
     assert.equal(resolveDeployPreset({ env: '' }).name, 'node');
     assert.equal(resolveDeployPreset({ env: '   ' }).name, 'node');
@@ -1613,11 +1633,11 @@ describe('deploy target resolution', () => {
   test('an unknown target fails the build, naming the ones that exist', () => {
     assert.throws(() => resolveDeployPreset({ config: 'fly' }), /unknown deploy target "fly"/);
     assert.throws(() => resolveDeployPreset({ config: 'fly' }), new RegExp(DEPLOY_TARGETS.join(', ')));
-    assert.equal(deployHintFor('fly'), null, 'a dist/ from a newer rshono can carry a name this one lacks');
+    assert.equal(deployHintFor('fly'), null, 'a dist/ from a newer rsvhono can carry a name this one lacks');
   });
 
   // A bare bracket access resolves every `Object.prototype` key to an inherited value, which then passes a
-  // truthiness guard: `RSHONO_DEPLOY=constructor` used to reach the builder and die there on
+  // truthiness guard: `RSVHONO_DEPLOY=constructor` used to reach the builder and die there on
   // `preset.runtimeModule.split('/')` instead of being named as the typo it is.
   test('a prototype key is a typo, not a target', () => {
     for (const key of ['constructor', '__proto__', 'toString', 'valueOf', 'hasOwnProperty']) {
@@ -1636,7 +1656,7 @@ describe('publicRouteCollisions', () => {
 
   /** A `public/` tree on disk, since the check reads one. */
   function publicTree(files) {
-    const dir = mkdtempSync(join(tmpdir(), 'rshono-public-'));
+    const dir = mkdtempSync(join(tmpdir(), 'rsvhono-public-'));
     for (const file of files) {
       mkdirSync(join(dir, dirname(file)), { recursive: true });
       writeFileSync(join(dir, file), 'x');
@@ -1683,32 +1703,53 @@ describe('publicRouteCollisions', () => {
   });
 });
 
-describe('the deploy seam', () => {
-  test('the server bundle resolves @rshono/deploy to the selected platform, and nothing else', () => {
-    const [clientConfig, serverConfig] = createConfigs({ rootDir: MINIMAL_APP_DIR, isDev: false, config: {}, preset: NODE_PRESET });
-    assert.match(serverConfig.resolve.alias['@rshono/deploy$'], /dist[\\/]deploy[\\/]node[\\/]runtime\.js$/);
-    assert.equal('@rshono/deploy$' in clientConfig.resolve.alias, false, 'the browser bundle has no platform to speak of');
+describe('the generated Vite config', () => {
+  const options = { rootDir: MINIMAL_APP_DIR, isDev: false, preset: NODE_PRESET };
+
+  test('lays the three environments out where every platform expects them', () => {
+    const config = createViteConfig({ ...options, config: {} });
+    assert.equal(config.base, '/_static/');
+    assert.match(config.environments.rsc.build.outDir, /^dist[\\/]server$/);
+    assert.match(config.environments.ssr.build.outDir, /^dist[\\/]server[\\/]ssr$/);
+    assert.match(config.environments.client.build.outDir, /^dist[\\/]static$/);
   });
 
-  test('a preset can adjust the server compiler, and the user hook still gets the last word', () => {
-    const preset = {
-      ...NODE_PRESET,
-      configureServer(config) {
-        config.target = 'webworker';
-      },
-    };
-    const [, serverConfig] = createConfigs({
-      rootDir: MINIMAL_APP_DIR,
-      isDev: false,
-      preset,
-      config: {
-        rspack(config, { isServer }) {
-          if (isServer) config.devtool = 'source-map';
-        },
-      },
+  test("the app's vite option is merged over it, and cannot move what the framework owns", () => {
+    const appPlugin = { name: 'app-plugin' };
+    const config = createViteConfig({
+      ...options,
+      config: { vite: { base: '/elsewhere/', root: '/nowhere', define: { __APP__: '1' }, plugins: [appPlugin] } },
     });
-    assert.equal(serverConfig.target, 'webworker', 'the preset reached the generated config');
-    assert.equal(serverConfig.devtool, 'source-map', "the app's own hook ran after it");
+    assert.equal(config.define.__APP__, '1', 'app settings are kept');
+    assert.ok('__RSVHONO_CONFIG__' in config.define, 'next to the generated ones');
+    assert.equal(config.base, '/_static/');
+    assert.equal(config.root, MINIMAL_APP_DIR);
+    const names = config.plugins.flat(Infinity).map((plugin) => plugin?.name);
+    assert.ok(names.indexOf('app-plugin') < names.indexOf('rsvhono:pages'), "the app's plugins run ahead of the framework's");
+  });
+
+  test('a serverless target bundles its dependencies; node leaves them in node_modules', () => {
+    const node = createViteConfig({ ...options, config: {} });
+    assert.deepEqual(node.environments.rsc.resolve.noExternal, ['@rsvhono/core']);
+    const lambda = createViteConfig({ ...options, config: {}, preset: resolveDeployPreset({ flag: 'aws-lambda' }) });
+    assert.equal(lambda.environments.rsc.resolve.noExternal, true);
+    assert.equal(lambda.environments.ssr.resolve.noExternal, true);
+  });
+
+  test('the client environment is compiled against the public environment only', () => {
+    process.env.PUBLIC_UNIT_PROBE = 'visible';
+    process.env.UNIT_PROBE_SECRET = 'hidden';
+    try {
+      const config = createViteConfig({ ...options, config: {} });
+      const env = JSON.parse(config.environments.client.define['process.env']);
+      assert.equal(env.PUBLIC_UNIT_PROBE, 'visible');
+      assert.equal('UNIT_PROBE_SECRET' in env, false);
+      assert.equal(env.NODE_ENV, 'production');
+      assert.equal('process.env' in (config.environments.rsc.define ?? {}), false, 'server code reads the real process.env');
+    } finally {
+      delete process.env.PUBLIC_UNIT_PROBE;
+      delete process.env.UNIT_PROBE_SECRET;
+    }
   });
 });
 
@@ -1776,15 +1817,28 @@ describe('checkReactVersions', () => {
     return dir;
   };
 
-  test('refuses a react/react-dom split, naming both versions', () => {
-    const dir = appWith({ react: '19.2.8', 'react-dom': '19.1.0' });
-    assert.throws(() => checkReactVersions(dir), /react 19\.2\.8 and react-dom 19\.1\.0 resolve to different versions/);
+  /** The RSC runtime the framework itself carries: what an app's React has to match. */
+  const RUNTIME = JSON.parse(
+    readFileSync(join(import.meta.dirname, '..', 'node_modules', 'react-server-dom-webpack', 'package.json'), 'utf8'),
+  ).version;
+
+  test('refuses a react/react-dom split, naming every version', () => {
+    const dir = appWith({ react: RUNTIME, 'react-dom': '19.1.0' });
+    assert.throws(
+      () => checkReactVersions(dir),
+      new RegExp(`react ${RUNTIME}, react-dom 19\\.1\\.0 and react-server-dom-webpack ${RUNTIME} resolve to different versions`),
+    );
     // The advice has to name the escape hatch, since a transitive dependency is the usual cause.
     assert.throws(() => checkReactVersions(dir), /overrides/);
   });
 
-  test('accepts a matching pair', () => {
-    checkReactVersions(appWith({ react: '19.2.8', 'react-dom': '19.2.8' }));
+  test('refuses a matching pair that is not the RSC runtime’s version', () => {
+    // The pair agreeing is not enough: the runtime compiled into the server bundle is a third build.
+    assert.throws(() => checkReactVersions(appWith({ react: '19.2.8', 'react-dom': '19.2.8' })), new RegExp(`exactly ${RUNTIME}`));
+  });
+
+  test('accepts all three at one version', () => {
+    checkReactVersions(appWith({ react: RUNTIME, 'react-dom': RUNTIME }));
   });
 
   test('says nothing when neither is installed — the resolver reports that better', () => {
@@ -1794,103 +1848,6 @@ describe('checkReactVersions', () => {
   test('does not fire on a real app', () => {
     // The check runs on every dev and build, so a false positive here would break every one of them.
     checkReactVersions(MINIMAL_APP_DIR);
-  });
-});
-
-describe('module resolution', () => {
-  /** The `node_modules` a package was resolved out of, symlinks already followed by `require.resolve`. */
-  const installedIn = (name) => {
-    let dir = dirname(createRequire(import.meta.url).resolve(name));
-    while (basename(dir) !== 'node_modules') dir = dirname(dir);
-    return dir;
-  };
-
-  test('app source can resolve the RSC runtime the transform injects into it', () => {
-    // Nothing in an app imports react-server-dom-rspack by hand — the RSC transform rewrites pages,
-    // client components and server actions into imports of it, resolved from the app's own src/. Only
-    // a hoisting package manager puts it within reach from there; pnpm installs the framework's
-    // dependencies beside the framework instead, so the directory it really lives in has to be on the
-    // search path or every pnpm install fails to build.
-    const configs = createConfigs({ rootDir: MINIMAL_APP_DIR, isDev: false, config: {}, preset: NODE_PRESET });
-    for (const config of configs) {
-      const dirs = config.resolve.modules;
-      assert.equal(dirs[0], 'node_modules', "an app's own dependencies still win");
-      assert.ok(
-        dirs.includes(installedIn('react-server-dom-rspack')),
-        `${config.name}: react-server-dom-rspack is not reachable from app source — searched ${dirs.join(', ')}`,
-      );
-    }
-  });
-});
-
-describe('server bundle externals', () => {
-  const [, serverConfig] = createConfigs({ rootDir: MINIMAL_APP_DIR, isDev: false, config: {}, preset: NODE_PRESET });
-
-  /** The hook's verdict for one request: `undefined` means "bundle it", a string means "leave it external". */
-  const verdict = (request, contextInfo) => {
-    let result;
-    serverConfig.externals[0]({ request, contextInfo }, (error, value) => {
-      if (error) throw error;
-      result = value;
-    });
-    return result;
-  };
-
-  test('leaves third-party packages and node builtins to the runtime', () => {
-    assert.equal(verdict('some-npm-package'), 'module-import some-npm-package');
-    assert.equal(verdict('@scope/pkg/sub'), 'module-import @scope/pkg/sub');
-    assert.equal(verdict('node:fs'), 'module-import node:fs');
-  });
-
-  test('bundles a third-party package reached from the SSR layer, whatever the target', () => {
-    // The SSR layer is where `'use client'` components render on the server, and `env-shadow-loader` is what
-    // keeps a secret out of that HTML. A loader cannot run on a module the bundle merely names, so an
-    // externalized third-party client component was loaded raw at request time and read the real
-    // `process.env` — a secret in the SSR stream on the one target that externalizes anything, `node`.
-    //
-    // Nothing is given up by bundling it: the same module is in the browser bundle too, so it was always
-    // required to be bundleable.
-    const ssr = { issuerLayer: 'server-side-rendering' };
-    assert.equal(verdict('some-ui-library', ssr), undefined, 'a client component from node_modules must be compiled');
-    assert.equal(verdict('@scope/ui/button', ssr), undefined);
-    // The RSC layer is server-only code, and keeps the policy — that is what makes `node` builds fast and
-    // lets a server component use a native addon.
-    assert.equal(verdict('some-ui-library', { issuerLayer: 'react-server-components' }), 'module-import some-ui-library');
-
-    // A builtin reached from the SSR layer is *deferred* by this hook rather than externalized by it, and
-    // `target: 'node'` externalizes it through Rspack's `node` externals preset instead — the same division of
-    // labour the serverless presets rely on when they drop this function altogether. `node:` imports surviving
-    // into the emitted bundle is asserted end to end by the deploy-targets suite.
-    assert.equal(verdict('node:fs', ssr), undefined, 'deferred here, and the node preset is what keeps it external');
-    assert.equal(verdict('node:fs', { issuerLayer: 'react-server-components' }), 'module-import node:fs');
-  });
-
-  test('bundles the framework, React and Hono, which the server cannot resolve at runtime', () => {
-    for (const request of [
-      '@rshono/core',
-      'react',
-      'react-dom/server.edge',
-      'hono/cookie',
-      '@rshono/routes',
-      '@/components/home',
-      './entry.ssr.js',
-    ]) {
-      assert.equal(verdict(request), undefined, `${request} must be bundled`);
-    }
-  });
-
-  test('bundles path requests on every platform, Windows drive letters included', () => {
-    // Rspack asks for the RSC client and server-entry proxies by absolute path. Externalizing one
-    // emits an `import()` of a raw filesystem path — harmless-looking on POSIX, where that parses as
-    // a URL path, and fatal on Windows, where `D:\…` is read as an unsupported `d:` URL scheme.
-    assert.equal(verdict('/app/src/components/home.tsx?rsc-server-entry-proxy=true'), undefined);
-    assert.equal(
-      verdict('D:\\app\\src\\components\\home.tsx?rsc-server-entry-proxy=true'),
-      undefined,
-      'a Windows path must never become import("D:\\…")',
-    );
-    assert.equal(verdict('D:/app/src/components/home.tsx'), undefined, 'forward-slash drive paths too');
-    assert.equal(verdict('\\\\server\\share\\home.tsx'), undefined, 'and UNC paths');
   });
 });
 
@@ -2021,12 +1978,12 @@ describe('the security-middleware build warning', () => {
   /**
    * The minimal app somewhere disposable, plus whatever `src/server.ts` the case wants.
    *
-   * No `node_modules`: `createConfigs` builds config objects and scans `src/`, and resolves packages from
+   * No `node_modules`: `createViteConfig` builds config objects and scans `src/`, and resolves packages from
    * the *framework's* tree rather than the app's, so nothing here reads one. It used to borrow the
    * fixture's through a junction, which was both unnecessary and a Windows reparse point for no reason.
    */
   function appWithServer(serverSource) {
-    const dir = mkdtempSync(join(tmpdir(), 'rshono-warn-'));
+    const dir = mkdtempSync(join(tmpdir(), 'rsvhono-warn-'));
     cpSync(join(MINIMAL_APP_DIR, 'package.json'), join(dir, 'package.json'));
     cpSync(join(MINIMAL_APP_DIR, 'src'), join(dir, 'src'), { recursive: true });
     if (serverSource !== null) writeFileSync(join(dir, 'src', 'server.ts'), serverSource);
@@ -2034,13 +1991,13 @@ describe('the security-middleware build warning', () => {
     return dir;
   }
 
-  /** What `createConfigs` warns about for `rootDir`, as one string. Builds only — `dev` says nothing. */
+  /** What `createViteConfig` warns about for `rootDir`, as one string. Builds only — `dev` says nothing. */
   function warningsFor(rootDir, { isDev = false } = {}) {
     const warn = console.warn;
     const lines = [];
     console.warn = (...args) => lines.push(args.join(' '));
     try {
-      createConfigs({ rootDir, isDev, config: {}, preset: NODE_PRESET });
+      createViteConfig({ rootDir, isDev, config: {}, preset: NODE_PRESET });
     } finally {
       console.warn = warn;
     }
@@ -2079,382 +2036,6 @@ describe('the security-middleware build warning', () => {
   });
 });
 
-describe('the env-shadow prelude', () => {
-  /** The loader options the builder actually generates, read off the rule that carries them. */
-  function generatedOptions({ isDev = false } = {}) {
-    const [, serverConfig] = createConfigs({ rootDir: MINIMAL_APP_DIR, isDev, config: {}, preset: NODE_PRESET });
-    const rule = serverConfig.module.rules.find((entry) => entry.use?.[0]?.loader?.includes('env-shadow-loader'));
-    assert.ok(rule, 'the SSR env-shadow rule has to be in the server config');
-    return rule.use[0].options;
-  }
-
-  const generatedPrelude = () => generatedOptions().prelude;
-
-  test('tells the loader the mode it is building for, so the prelude does not cost dead-code elimination', () => {
-    // Without this the SSR layer bundles React's development builds beside the production ones — the prelude
-    // shadows `process`, and DefinePlugin will not substitute through a local binding. The two have to agree:
-    // the value the loader writes is the value the prelude's own `env` carries.
-    assert.equal(generatedOptions({ isDev: false }).nodeEnv, 'production');
-    assert.equal(generatedOptions({ isDev: true }).nodeEnv, 'development');
-    assert.match(generatedOptions({ isDev: false }).prelude, /"NODE_ENV":"production"/);
-  });
-
-  test('shadows env while leaving the rest of process reachable', () => {
-    // The prelude replaces the whole `process` binding for the module it rewrites, and `react-dom/server` is in
-    // that same layer — so anything reading `process.nextTick`, `process.version` or `process.platform` has to
-    // still find it. That is why it is `Object.assign(Object.create(real process), { env })` and not a bare
-    // `{ env }`. Evaluated rather than pattern-matched, because the property under test is what the code *does*.
-    const read = new Function(
-      'globalThis',
-      `${generatedPrelude()} return { env: process.env, platform: process.platform, hasNextTick: typeof process.nextTick };`,
-    );
-    const result = read(globalThis);
-
-    assert.equal(result.env.DATABASE_URL, undefined, 'a secret must not be readable through the shadowed env');
-    assert.equal(result.env.NODE_ENV, 'production');
-    assert.equal(result.platform, process.platform, 'every other member still resolves through the prototype chain');
-    assert.equal(result.hasNextTick, 'function');
-  });
-
-  test('does not fall over where there is no process to inherit from', () => {
-    // A deploy target need not have one — the same server config is what `workerd` compiles from.
-    const read = new Function('globalThis', `${generatedPrelude()} return process.env.NODE_ENV;`);
-    assert.equal(read({}), 'production');
-  });
-});
-
-describe('page-entry-loader', () => {
-  const pageEntryLoader = createRequire(import.meta.url)('../dist/builder/page-entry-loader.cjs');
-  const BODY = '\nexport default function Page() {\n  return null;\n}\n';
-  /** Whether the loader left the module alone, which it must whenever the module declares a directive itself. */
-  const untouched = (head) => pageEntryLoader(head + BODY) === head + BODY;
-
-  test('leaves a module that already declares one of the three directives alone, wherever in the prologue it is', () => {
-    // The whole prologue, not only its first entry. A page opening `'use strict';` above its `'use client';`
-    // used to get `'use server-entry';` prepended — and the injected directive is the one the compiler acts
-    // on, so the page built clean and shipped instead of being refused by `assertPageModule`.
-    for (const head of [
-      "'use client';",
-      "'use server-entry';",
-      '"use server"',
-      "'use strict';\n'use client';",
-      '"use strict";\n"use client";',
-      "'use strict'\n'use client'",
-      "// banner\n/* block */\n'use strict';\n// why\n'use client';",
-      // Not one of the three, and not a list this has to be taught: `'use cache'` is React's, and the check
-      // is written as "any directive that is not those three".
-      "'use cache';\n'use server-entry';",
-      // A trailing comment used to end the match, because the old pattern required `;`, a newline or the end
-      // of the source right after the closing quote.
-      "'use client' // still a client page",
-    ]) {
-      assert.equal(untouched(head), true, `${JSON.stringify(head)} declares its own directive`);
-    }
-  });
-
-  test('prepends the directive to a page that declares none', () => {
-    for (const head of ['', "'use strict';", '// a plain page']) {
-      assert.equal(pageEntryLoader(head + BODY), `'use server-entry';${head}${BODY}`, `${JSON.stringify(head)} needs the directive`);
-    }
-  });
-
-  test('reads directives structurally, so a comment that mentions one is not one', () => {
-    // The regression the wider match must not buy: a page that says in a comment what it used to be, or a
-    // module-level string, would otherwise be left without the directive it needs — and fail the build.
-    for (const head of [
-      "// this page used to be 'use client';",
-      "/* 'use client' lived here */",
-      "const label = 'use client';",
-      "'use clientish';",
-    ]) {
-      assert.equal(untouched(head), false, `${JSON.stringify(head)} is not a directive`);
-    }
-  });
-});
-
-describe('env-shadow-loader', () => {
-  const envShadowLoader = createRequire(import.meta.url)('../dist/builder/env-shadow-loader.cjs');
-  const PRELUDE = 'const process = { env: {} }; ';
-  const APP_SRC = join(tmpdir(), 'rshono-app', 'src');
-
-  /**
-   * The slice of Rspack's loader context this loader reads. `layer` is the layer the *module* is in, and
-   * `resourcePath` decides whether a module counts as the app's own source for the warning below.
-   */
-  const run = (source, { layer = 'ssr', resourcePath = join(APP_SRC, 'component.tsx'), warnings, nodeEnv } = {}) =>
-    envShadowLoader.call(
-      {
-        getOptions: () => ({ prelude: PRELUDE, layer: 'ssr', appSrcPrefix: APP_SRC + sep, nodeEnv }),
-        _module: { layer },
-        resourcePath,
-        emitWarning: (warning) => warnings?.push(warning.message),
-      },
-      source,
-    );
-
-  test('shadows env only in the layer it was configured for', () => {
-    const source = 'export const x = process.env.SECRET;';
-    assert.equal(run(source, { layer: 'ssr' }), `${PRELUDE}${source}`, 'the SSR layer is the one that must be shadowed');
-    assert.equal(run(source, { layer: 'rsc' }), source, 'a server component reads the real env');
-    assert.equal(run(source, { layer: null }), source);
-  });
-
-  test('leaves a module that never mentions process untouched', () => {
-    // The fast path: every module in the bundle now reaches this loader, so the common case has to be one
-    // string scan and out.
-    assert.equal(run('export const x = 1;'), 'export const x = 1;');
-    // And a word that merely contains it is not a mention. Being wrong here only costs bytes, but
-    // `child_process` and `preprocess` are common enough to be worth not paying for.
-    for (const source of ['export const x = preprocess(1);', 'export const x = processEnv;', "import cp from 'node:child_process';"]) {
-      assert.equal(run(source), source, `"${source}" must not drag the prelude in`);
-    }
-  });
-
-  test('shadows every shape that reads the env through the process binding, not just the literal process.env', () => {
-    // A gate on the substring `process.env` saw one shape out of six. The prelude replaces the whole
-    // binding, so all of them are covered once it is emitted — `process?.env` above all, which is how env
-    // access is written in code meant to run in a browser *and* on a server, i.e. in a `'use client'`
-    // component. Every miss rendered the real value into the SSR'd HTML while the browser bundle saw the
-    // `PUBLIC_`-only view: a leaked secret, and a hydration mismatch besides.
-    for (const source of [
-      'export const x = process.env.DATABASE_URL;',
-      'const { DATABASE_URL } = process.env;',
-      'export const x = process?.env.DATABASE_URL;',
-      "export const x = process['env'].DATABASE_URL;",
-      'const { env } = process;',
-      'const p = process; export const x = p.env.DATABASE_URL;',
-      "export const x = typeof process !== 'undefined' ? process.env.DATABASE_URL : '';",
-    ]) {
-      assert.equal(run(source), PRELUDE + source, `"${source}" must be shadowed`);
-    }
-  });
-
-  test('warns when the app reads process through the global object, which no binding can shadow', () => {
-    // `globalThis.process` is the real `process` however the module names it, so the prelude cannot reach
-    // it — the read has to be found by a person. Only the app's own source is worth saying it about: a
-    // library feature-detecting `globalThis.process?.env?.NODE_ENV` is doing nothing wrong and has no app
-    // secret to read.
-    for (const source of [
-      'export const x = globalThis.process.env.DATABASE_URL;',
-      'export const x = globalThis?.process?.env?.DATABASE_URL;',
-      "export const x = global['process'].env.DATABASE_URL;",
-      "export const x = globalThis?.['process']?.env?.DATABASE_URL;",
-      'export const x = self.process.env.DATABASE_URL;',
-    ]) {
-      const warnings = [];
-      assert.equal(run(source, { warnings }), PRELUDE + source, 'the prelude is still emitted');
-      assert.equal(warnings.length, 1, `"${source}" must be reported`);
-      assert.match(warnings[0], /reads `process` through the global object/);
-    }
-
-    const fromLibrary = [];
-    run('export const x = globalThis.process.env.NODE_ENV;', {
-      resourcePath: join(tmpdir(), 'rshono-app', 'node_modules', 'ui', 'index.js'),
-      warnings: fromLibrary,
-    });
-    assert.deepEqual(fromLibrary, [], 'a dependency is not the app author to tell');
-
-    const rsc = [];
-    run('export const x = globalThis.process.env.DATABASE_URL;', { layer: 'rsc', warnings: rsc });
-    assert.deepEqual(rsc, [], 'a server component is meant to read the real env');
-
-    const shadowed = [];
-    run('export const x = process.env.DATABASE_URL;', { warnings: shadowed });
-    assert.deepEqual(shadowed, [], 'the shape the shadow does cover says nothing');
-  });
-
-  test('inserts the prelude after the whole directive prologue, not after the first directive', () => {
-    // Two directives is ordinary output from a published component library, and this loader now sees
-    // `node_modules`. Splitting the pair would leave the second one preceded by a statement — an ordinary
-    // expression rather than a directive — silently dropping either strict mode or `'use client'`.
-    for (const [first, second] of [
-      ["'use client';", "'use strict';"],
-      ['"use strict";', '"use client";'],
-    ]) {
-      const source = `${first}\n${second}\nexport const x = process.env.SECRET;`;
-      assert.equal(run(source), `${first}\n${second}\n${PRELUDE}export const x = process.env.SECRET;`, `${first} ${second} must stay adjacent`);
-    }
-  });
-
-  test('carries comments, blank lines, semicolon-less directives and a three-directive run', () => {
-    const prologue = "// banner\n/* block */\n'use strict'\n'use client'\n'use server'\n";
-    const body = 'export const x = process.env.SECRET;';
-    assert.equal(run(prologue + body), prologue + PRELUDE + body);
-  });
-
-  test('prepends to a module with no prologue at all', () => {
-    const source = 'export const x = process.env.SECRET;';
-    assert.equal(run(source), PRELUDE + source);
-  });
-
-  test('substitutes NODE_ENV before the prelude hides it from DefinePlugin', () => {
-    // The prelude declares a module-scope `process`, and DefinePlugin respects lexical scope — so every
-    // `if (process.env.NODE_ENV === 'production')` in this layer stayed a runtime branch and React's
-    // development builds were bundled beside the production ones. Substituting first hands the optimiser the
-    // one expression it needs back. Not a behaviour change: `NODE_ENV` is the build's mode, so the literal
-    // written here is the value the shadow would have returned anyway.
-    assert.equal(
-      run("if (process.env.NODE_ENV === 'production') { a(); } else { b(); }", { nodeEnv: 'production' }),
-      `${PRELUDE}if ("production" === 'production') { a(); } else { b(); }`,
-    );
-    assert.equal(run('export const x = process.env.NODE_ENV;', { nodeEnv: 'development' }), `${PRELUDE}export const x = "development";`);
-  });
-
-  test('substitutes code, and leaves the same text alone in a comment, a string or a template', () => {
-    // The substitution is textual where DefinePlugin's is not: DefinePlugin works on the parsed module and so
-    // cannot reach inside a string, and without a scan that walks the same tokens an SSR-layer module saying
-    // `throw new Error('set process.env.NODE_ENV')` would ship with its message rewritten.
-    const cases = [
-      ["throw new Error('set process.env.NODE_ENV first');", "throw new Error('set process.env.NODE_ENV first');"],
-      ['const s = "process.env.NODE_ENV";', 'const s = "process.env.NODE_ENV";'],
-      ['const t = `read process.env.NODE_ENV`;', 'const t = `read process.env.NODE_ENV`;'],
-      ['const x = 1; // process.env.NODE_ENV', 'const x = 1; // process.env.NODE_ENV'],
-      ['const x = 1; /* process.env.NODE_ENV */', 'const x = 1; /* process.env.NODE_ENV */'],
-      // An apostrophe in a comment must not open a string that swallows the code after it — the trap this
-      // kind of scan falls into, and why comments are matched ahead of strings.
-      ["const a = 1; // don't\nconst x = process.env.NODE_ENV;", 'const a = 1; // don\'t\nconst x = "production";'],
-      // …and an escaped quote must not close a string early, for the same reason.
-      ["const s = 'a\\'b'; const x = process.env.NODE_ENV;", "const s = 'a\\'b'; const x = \"production\";"],
-    ];
-    for (const [source, expected] of cases) {
-      assert.equal(run(source, { nodeEnv: 'production' }), PRELUDE + expected, source);
-    }
-  });
-
-  test('substitutes NODE_ENV only in the layer it shadows, and only when asked', () => {
-    const source = 'export const x = process.env.NODE_ENV;';
-    // The RSC layer gets no prelude, so DefinePlugin still reaches it there and this loader must not touch it.
-    assert.equal(run(source, { layer: 'rsc', nodeEnv: 'production' }), source);
-    // And with no `nodeEnv` configured the loader is the shadow and nothing more.
-    assert.equal(run(source), PRELUDE + source);
-  });
-
-  test('leaves NODE_ENV read off something other than the free process binding alone', () => {
-    // The same shapes DefinePlugin itself declines. Substituting a member read off another object would be
-    // rewriting an unrelated expression, and the shadow still answers all of these correctly at runtime.
-    // Asserted on the value not appearing rather than on the exact output, because `myprocess` never gets a
-    // prelude either — `\bprocess\b` turns it away one gate earlier.
-    for (const source of [
-      'export const x = this.process.env.NODE_ENV;',
-      'export const x = config.process.env.NODE_ENV;',
-      'export const x = myprocess.env.NODE_ENV;',
-      'export const x = process.env.NODE_ENVIRONMENT;',
-    ]) {
-      assert.ok(run(source, { nodeEnv: 'production' }).includes(source), `"${source}" must survive unrewritten`);
-    }
-  });
-
-  test('fails the build rather than shipping unshadowed when it cannot read the layer', () => {
-    // `_module` is a private Rspack field. A silent no-op if it were ever renamed would drop the guarantee
-    // that keeps server secrets out of SSR-rendered client components, with nothing to notice.
-    assert.throws(
-      () => envShadowLoader.call({ getOptions: () => ({ prelude: PRELUDE, layer: 'ssr' }) }, 'process.env.SECRET'),
-      /could not read the module's layer/,
-    );
-  });
-});
-
-describe('walkHotUpdates', () => {
-  // A fake of the bundler's hot runtime. `chain` maps the hash the page is on to the hash the next
-  // `*.hot-update.json` moves it to — exactly the file-per-build chain the real one walks; a hash
-  // missing from it is a 404, which the real runtime reports as "no update", not as an error.
-  function fakeHot({ from, chain, status = () => 'idle' }) {
-    const state = { hash: from, checks: 0 };
-    return [
-      state,
-      {
-        status,
-        async check() {
-          state.checks++;
-          const next = chain.get(state.hash);
-          if (next === undefined) return null;
-          if (next instanceof Error) throw next;
-          state.hash = next;
-          return ['some/module.js'];
-        },
-      },
-    ];
-  }
-
-  const walk = (state, hot, target) =>
-    walkHotUpdates(
-      hot,
-      () => state.hash,
-      () => target,
-    );
-
-  test('walks one build at a time until the page is on the target', async () => {
-    const [state, hot] = fakeHot({
-      from: 'a',
-      chain: new Map([
-        ['a', 'b'],
-        ['b', 'c'],
-      ]),
-    });
-    assert.equal(await walk(state, hot, 'c'), null);
-    assert.equal(state.hash, 'c');
-    assert.equal(state.checks, 2, 'each round should advance exactly one build');
-  });
-
-  test('does nothing when the page is already on the target', async () => {
-    const [state, hot] = fakeHot({ from: 'a', chain: new Map() });
-    assert.equal(await walk(state, hot, 'a'), null);
-    assert.equal(state.checks, 0);
-  });
-
-  test('gives up instead of spinning when the update chain is broken', async () => {
-    // The regression this exists for. A missing manifest 404s, and the runtime resolves `check` with
-    // null rather than rejecting — so a walk that only stops on "reached the target" or "threw" keeps
-    // re-requesting that same 404 forever, and the page never picks up another change. Restarting the
-    // dev server puts every open tab in exactly this state: starting up wipes `dist`.
-    const [state, hot] = fakeHot({ from: 'gone', chain: new Map() });
-    const giveUp = await walk(state, hot, 'latest');
-    assert.match(giveUp?.reason ?? '', /cannot be applied/);
-    assert.equal(state.checks, 1, 'the unreachable target must be given up on after a single round');
-  });
-
-  test('gives up when an update applies without moving the page forward', async () => {
-    const [state, hot] = fakeHot({ from: 'a', chain: new Map([['a', 'a']]) });
-    const giveUp = await walk(state, hot, 'z');
-    assert.match(giveUp?.reason ?? '', /cannot be applied/);
-    assert.equal(state.checks, 1);
-  });
-
-  test('gives up, carrying the error, when an update cannot be applied', async () => {
-    const failure = new Error('module declined the update');
-    const [state, hot] = fakeHot({ from: 'a', chain: new Map([['a', failure]]) });
-    const giveUp = await walk(state, hot, 'b');
-    assert.equal(giveUp?.error, failure);
-  });
-
-  test('gives up when another update is already in flight', async () => {
-    const [state, hot] = fakeHot({ from: 'a', chain: new Map([['a', 'b']]), status: () => 'apply' });
-    assert.match((await walk(state, hot, 'b'))?.reason ?? '', /already in flight/);
-    assert.equal(state.checks, 0, 'check() may only be called from idle');
-  });
-
-  test('absorbs builds that land mid-walk rather than finishing against a stale target', async () => {
-    // Both hashes are read fresh each round precisely so a save during a walk extends it: the page
-    // ends up on the newest build instead of stopping at the one the walk started for.
-    const [state, hot] = fakeHot({
-      from: 'a',
-      chain: new Map([
-        ['a', 'b'],
-        ['b', 'c'],
-      ]),
-    });
-    let target = 'b';
-    const done = walkHotUpdates(
-      hot,
-      () => state.hash,
-      () => target,
-    );
-    target = 'c';
-    assert.equal(await done, null);
-    assert.equal(state.hash, 'c');
-  });
-});
-
 describe('validateRoutesModule', () => {
   // The app's own `src/routes.ts`, checked before anything is built on it. Everything below either
   // crashed somewhere unrelated (`nN is not iterable`, from a minified bundle) or did nothing at all.
@@ -2470,7 +2051,7 @@ describe('validateRoutesModule', () => {
 
   test('names src/routes.ts when the export is not a route table at all', () => {
     for (const exported of [undefined, null, 42, {}, { routes: 'nope' }]) {
-      rejects(exported, /\[rshono\] src\/routes\.ts must export `routes`/);
+      rejects(exported, /\[rsvhono\] src\/routes\.ts must export `routes`/);
     }
   });
 
@@ -2631,7 +2212,7 @@ describe('validateRoutesModule', () => {
     rejects([at('/_static/thing')], /would never run/, 'and anything below it');
     rejects([{ ...endpoint, path: '/_static/api' }], /would never run/, 'an endpoint is mounted no earlier than a page');
     rejects([at('/_static/*')], /would never run/, 'a wildcard under the prefix is dead the same way');
-    rejects([at('/_static')], /reserved on every deploy target and under `rshono dev`/, 'and says where it is reserved');
+    rejects([at('/_static')], /reserved on every deploy target and under `rsvhono dev`/, 'and says where it is reserved');
 
     // The boundary is the `/`, and only a *literal* path is refused: a parameterised route that happens to
     // match under the prefix loses those requests and answers everything else, which is the router's
@@ -2659,51 +2240,61 @@ describe('validateServerApp', () => {
 
   test('names src/server.ts rather than letting Hono throw from inside app.route()', () => {
     for (const value of [{ notAHono: true }, 'nope', 42, { fetch: () => null }]) {
-      assert.throws(() => validateServerApp({ default: value }), /\[rshono\] src\/server\.ts must `export default` a Hono app/);
+      assert.throws(() => validateServerApp({ default: value }), /\[rsvhono\] src\/server\.ts must `export default` a Hono app/);
     }
   });
 });
 /*
- * The checks a route's *own* module gets. `rshono build` runs these against every route once the bundle
+ * The checks a route's *own* module gets. `rsvhono build` runs these against every route once the bundle
  * exists; before that they only ran on first request, so a page module that could never render — a
  * `'use client'` page, a missing default export — shipped behind a green build and answered 500 for the life
  * of the deployment. The endpoint half had no check at all: it destructured `handler` and called it, which
  * turns a method-named export into `TypeError: r is not a function` from a minified frame.
  */
 describe('assertRouteModules', () => {
-  /** What a `'use server-entry'` page module's default export looks like: the client-asset list is on it. */
-  const serverPage = Object.assign(() => null, { entryJsFiles: ['/_static/chunks/main.js'] });
-  /** And what a `'use client'` one looks like — a reference with no assets recorded against it. */
-  const clientPage = () => null;
+  const serverPage = () => null;
+  /** What the build adds to a page module: its key, beside a default export it leaves alone. */
+  const built = { $$rsvhonoPage: 'pages/x.tsx' };
+  /** And what a `'use client'` one looks like — a client reference. */
+  const clientPage = Object.assign(() => null, { $$typeof: Symbol.for('react.client.reference') });
 
   const page = (path, mod) => ({ path, component: () => Promise.resolve(mod) });
   const endpoint = (path, mod) => ({ path, type: 'endpoint', server: () => Promise.resolve(mod) });
 
   test('accepts a table whose every module is what it claims to be', async () => {
     await assertRouteModules({
-      routes: [page('/', { default: serverPage }), endpoint('/api/health', { handler: () => null })],
-      notFound: { component: () => Promise.resolve({ default: serverPage }) },
-      error: { component: () => Promise.resolve({ default: serverPage }) },
+      routes: [page('/', { default: serverPage, ...built }), endpoint('/api/health', { handler: () => null })],
+      notFound: { component: () => Promise.resolve({ default: serverPage, ...built }) },
+      error: { component: () => Promise.resolve({ default: serverPage, ...built }) },
     });
+  });
+
+  test('refuses a page the build did not wrap, since it would render without ctx', async () => {
+    // A server component that reaches the route table some way the build does not recognise — not an inline
+    // thunk, no `'use server-entry'`. Unwrapped, the RSC plugin's stylesheet wrapper could drop its `ctx`.
+    await assert.rejects(
+      assertRouteModules({ routes: [page('/unmarked', { default: () => null })] }),
+      /\[rsvhono\] The page component for "\/unmarked" was not built as a page \('use server-entry'\)/,
+    );
   });
 
   test('refuses a page module with no default export', async () => {
     await assert.rejects(
-      assertRouteModules({ routes: [page('/noexport', { Page: serverPage })] }),
-      /\[rshono\] The page module for "\/noexport" must default-export a server component\./,
+      assertRouteModules({ routes: [page('/noexport', { Page: serverPage, ...built })] }),
+      /\[rsvhono\] The page module for "\/noexport" must default-export a server component\./,
     );
   });
 
-  test("refuses a 'use client' page, which has no client assets recorded against it", async () => {
+  test("refuses a 'use client' page", async () => {
     await assert.rejects(
       assertRouteModules({ routes: [page('/clientpage', { default: clientPage })] }),
-      /\[rshono\] The page component for "\/clientpage" is missing its client-asset info/,
+      /\[rsvhono\] The page component for "\/clientpage" is a client component/,
     );
   });
 
   test('refuses an endpoint module that exports anything but `handler`', async () => {
     await assert.rejects(assertRouteModules({ routes: [endpoint('/api/bad', { GET: () => null })] }), (error) => {
-      assert.match(error.message, /\[rshono\] The endpoint module for "\/api\/bad" must export `handler`/);
+      assert.match(error.message, /\[rsvhono\] The endpoint module for "\/api\/bad" must export `handler`/);
       assert.match(error.message, /a method-named export \(`GET`, `POST`\) is never read/, 'the mistake people actually make');
       return true;
     });
@@ -2712,7 +2303,7 @@ describe('assertRouteModules', () => {
   test('checks the notFound and error pages too, which the request path only reaches once something failed', async () => {
     await assert.rejects(
       assertRouteModules({ routes: [], notFound: { component: () => Promise.resolve({ default: clientPage }) } }),
-      /The page component for the notFound page is missing/,
+      /The page component for the notFound page is a client component/,
     );
     await assert.rejects(
       assertRouteModules({ routes: [], error: { component: () => Promise.resolve({}) } }),
@@ -2723,10 +2314,10 @@ describe('assertRouteModules', () => {
   test('names every broken route at once, so fixing four of them costs one build', async () => {
     await assert.rejects(
       assertRouteModules({
-        routes: [page('/ok', { default: serverPage }), page('/clientpage', { default: clientPage }), page('/noexport', {})],
+        routes: [page('/ok', { default: serverPage, ...built }), page('/clientpage', { default: clientPage }), page('/noexport', {})],
       }),
       (error) => {
-        assert.match(error.message, /\[rshono\] 2 route modules cannot serve a request:/);
+        assert.match(error.message, /\[rsvhono\] 2 route modules cannot serve a request:/);
         assert.match(error.message, /• The page component for "\/clientpage"/);
         assert.match(error.message, /• The page module for "\/noexport"/);
         assert.doesNotMatch(error.message, /"\/ok"/, 'a route that is fine must not be listed');
@@ -2747,14 +2338,14 @@ describe('assertRouteModules', () => {
       await assertRouteModules({
         routes: [
           { path: '/side-effect', component: () => Promise.reject(new Error('DATABASE_URL is not set')) },
-          page('/ok', { default: serverPage }),
+          page('/ok', { default: serverPage, ...built }),
         ],
       });
       await assert.rejects(
         assertRouteModules({
           routes: [{ path: '/side-effect', component: () => Promise.reject(new Error('nope')) }, page('/clientpage', { default: clientPage })],
         }),
-        /The page component for "\/clientpage" is missing/,
+        /The page component for "\/clientpage" is a client component/,
         'a route it could not load must not stop it checking the rest',
       );
     } finally {
@@ -2765,8 +2356,8 @@ describe('assertRouteModules', () => {
 });
 
 // The CLI's failure paths print the report that says what went wrong and then exit. `process.exit` does not
-// drain a pipe — every CI job, and any `rshono build | tee` — so everything past the 64 KiB pipe buffer used
-// to be discarded, cutting a large Rspack error dump mid-error.
+// drain a pipe — every CI job, and any `rsvhono build | tee` — so everything past the 64 KiB pipe buffer used
+// to be discarded, cutting a large build error dump mid-error.
 describe('exit', () => {
   const EXIT_MODULE = new URL('../dist/cli/exit.js', import.meta.url).href;
   const spawnWriting = (bytes, exiting) =>
@@ -2807,5 +2398,1265 @@ describe('exit', () => {
       .filter((name) => name.endsWith('.js') && name !== 'exit.js')
       .filter((name) => /\bprocess\.exit\s*\(/.test(readFileSync(join(cliDir, name), 'utf8')));
     assert.deepEqual(offenders, [], 'these must `return exit(code)` instead — a piped stderr drops what a bare exit leaves behind');
+  });
+});
+
+describe('shadowProcessEnv', () => {
+  const env = { NODE_ENV: 'production', PUBLIC_URL: 'https://example.test' };
+  const IMPORT = 'import { process } from "virtual:rsvhono/public-process";';
+  const run = async (source) => (await shadowProcessEnv(source, '/app/src/widget.js', 'production'))?.code ?? null;
+
+  test('leaves a module that never reads the global process untouched', async () => {
+    for (const source of [
+      'export const x = 1;',
+      'export const x = preprocess(1);',
+      'export const x = processEnv;',
+      "import cp from 'node:child_process';",
+    ]) {
+      assert.equal(await run(source), null, `"${source}" must not be rebound`);
+    }
+  });
+
+  test('rebinds every shape that reads the env through the free identifier, not just the literal process.env', async () => {
+    for (const source of [
+      'export const x = process.env.DATABASE_URL;',
+      'export const { DATABASE_URL } = process.env;',
+      'export const x = process?.env.DATABASE_URL;',
+      "export const x = process['env'].DATABASE_URL;",
+      'const { env } = process; export const x = env.DATABASE_URL;',
+      'const p = process; export const x = p.env.DATABASE_URL;',
+      "export const x = typeof process !== 'undefined' ? process.env.DATABASE_URL : '';",
+    ]) {
+      assert.ok((await run(source)).includes(IMPORT), `"${source}" must read the public process`);
+    }
+  });
+
+  test('a binding of the module’s own named process is its own, wherever it is declared', async () => {
+    // What a text transform cannot tell from the global: here `process` is a parameter, a local, an import.
+    for (const source of [
+      'export function f(process) { return process.env.SECRET; }',
+      'export function f() { const process = { env: {} }; return process.env.SECRET; }',
+      "import process from 'node:process'; export const x = process.env.SECRET;",
+    ]) {
+      assert.doesNotMatch((await run(source)) ?? source, /public-process/, source);
+    }
+  });
+
+  test('prose that says process is prose: a regex, a string, the text of a template', async () => {
+    assert.equal(await run('export const r = /process.env/; export const s = "process.env.X";'), null);
+    const template = await run('export const t = `${process.env.A} process.env.B`;');
+    assert.ok(template.includes(IMPORT));
+    assert.ok(template.includes('process.env.B`'), 'the text of the template is not code');
+  });
+
+  test('the import goes after the whole directive prologue, so no directive stops being one', async () => {
+    const out = await run("'use client';\n'use strict';\nexport const x = process.env.A;");
+    assert.match(out, /^"use client";\n"use strict";\nimport \{ process \}/);
+  });
+
+  test('hands process.env.NODE_ENV back as a literal, and does not rebind for it alone', async () => {
+    const out = await run("export const mode = process.env.NODE_ENV === 'production' ? 'a' : 'b';");
+    assert.match(out, /"production" === ["']production["']/);
+    assert.doesNotMatch(out, /public-process/, 'nothing else read process, so there is nothing to import');
+  });
+
+  test('keeps a source map', async () => {
+    const result = await shadowProcessEnv('export const x = process.env.A;', '/app/src/widget.js', 'production');
+    assert.ok(result.map?.mappings, 'a stack trace through a shadowed module still points at its lines');
+  });
+
+  test('the public process hides a secret and keeps the rest of process', async () => {
+    process.env.SHADOW_UNIT_SECRET = 'hunter2';
+    try {
+      const source = publicProcessModule(env).replace('export const process =', 'return');
+      const shadow = new Function(source)();
+      assert.deepEqual([shadow.env.SHADOW_UNIT_SECRET, shadow.env.PUBLIC_URL, typeof shadow.version], [undefined, 'https://example.test', 'string']);
+    } finally {
+      delete process.env.SHADOW_UNIT_SECRET;
+    }
+  });
+
+  test('a read that goes round the binding is recognised for what it is', () => {
+    for (const source of ['globalThis.process.env.X', 'globalThis?.process', "global['process'].env", 'self.process']) {
+      assert.equal(readsRealProcess(source), 'global', source);
+    }
+    for (const source of ["import process from 'node:process';", "import { env } from 'process';", "const p = require('node:process');"]) {
+      assert.equal(readsRealProcess(source), 'import', source);
+    }
+    assert.equal(readsRealProcess('process.env.X'), null);
+  });
+});
+
+test('config.react reaches the one React plugin the framework registers, instead of adding a second', () => {
+  const names = (config) =>
+    config.plugins
+      .flat(Infinity)
+      .filter(Boolean)
+      .map((plugin) => plugin.name);
+  const options = { rootDir: MINIMAL_APP_DIR, isDev: false, preset: NODE_PRESET };
+  const plain = names(createViteConfig({ ...options, config: {} }));
+  const compiled = names(createViteConfig({ ...options, config: { react: { compiler: { compilationMode: 'annotation' } } } }));
+  const reactPlugins = (list) => list.filter((name) => name.startsWith('vite:react')).length;
+  assert.ok(reactPlugins(plain) > 0);
+  // The compiler may bring a plugin of its own along; nothing that was there before is there twice.
+  const count = (list, name) => list.filter((each) => each === name).length;
+  for (const name of new Set(plain))
+    assert.equal(count(compiled, name), count(plain, name), `${name} is registered as many times as without the option`);
+});
+
+describe('route-functions: reading the manifest', async () => {
+  const { createReferenceValidation, joinRouteFunctions, reachableFunctions, UnreachableServerReferenceError } =
+    await import('../dist/runtime/route-functions.js');
+
+  const manifest = joinRouteFunctions(
+    { 'pages/a.tsx': ['m1#save'], 'pages/b.tsx': ['m2#remove', 'm2#rename'], 'pages/plain.tsx': [] },
+    { '/a': 'pages/a.tsx', '/b/:id': 'pages/b.tsx', '/plain': 'pages/plain.tsx', '/no-key': undefined, '/not-walked': 'pages/gone.tsx' },
+    ['m1#save', 'm2#remove', 'm2#rename', 'm3#orphan'],
+  );
+
+  test('a route is joined to its page’s functions, and a function no route reaches is named', () => {
+    assert.deepEqual(manifest.routes, { '/a': ['m1#save'], '/b/:id': ['m2#remove', 'm2#rename'], '/plain': [] });
+    assert.deepEqual(manifest.unreachable, ['m3#orphan']);
+  });
+
+  test('a route that could not be traced is unresolved, never empty and never everything', () => {
+    // No key on the page module, and a key the graph walk never recorded.
+    assert.deepEqual(manifest.unresolved, ['/no-key', '/not-walked']);
+    assert.equal(reachableFunctions(manifest, '/no-key'), undefined);
+    assert.equal(reachableFunctions(manifest, '/never-heard-of'), undefined);
+    // As distinct from a page that was traced and reaches nothing.
+    assert.deepEqual([...reachableFunctions(manifest, '/plain')], []);
+    assert.equal(reachableFunctions(manifest, '__proto__'), undefined);
+  });
+
+  test('a function another route reaches is refused as the call and as a reference inside it', () => {
+    const fromA = createReferenceValidation(reachableFunctions(manifest, '/a'));
+    fromA.assertReachable('m1#save');
+    fromA.onServerReference({ id: 'm1', name: 'save' });
+    // The function the request names…
+    assert.throws(() => fromA.assertReachable('m2#remove'), UnreachableServerReferenceError);
+    // …and one that only turns up while decoding: an argument, or something bound to the action.
+    assert.throws(() => fromA.onServerReference({ id: 'm2', name: 'remove' }), /m2#remove is not reachable/);
+  });
+
+  test('not knowing what a route reaches refuses every reference', () => {
+    const unknown = createReferenceValidation(reachableFunctions(manifest, '/no-key'));
+    assert.throws(() => unknown.assertReachable('m1#save'), UnreachableServerReferenceError);
+    assert.throws(() => unknown.onServerReference({ id: 'm1', name: 'save' }), UnreachableServerReferenceError);
+  });
+});
+
+// ── The pieces the browser and e2e suites reach only through a whole app ───────────────────────────────
+
+describe('build id', () => {
+  // The id is a build-time define, read once when the module loads — and this process loaded it long ago,
+  // without one. So each case with an id runs in a process of its own, where the global is set first.
+  const inBuild = (id, body) => {
+    const run = spawnSync(
+      process.execPath,
+      [
+        '--input-type=module',
+        '-e',
+        `globalThis.__RSVHONO_BUILD_ID__ = ${JSON.stringify(id)};
+         globalThis.location = { origin: 'http://example.test' };
+         const build = await import(${JSON.stringify(new URL('../dist/runtime/build-id.js', import.meta.url).href)});
+         const request = await import(${JSON.stringify(new URL('../dist/runtime/request.js', import.meta.url).href)});
+         console.log(JSON.stringify(await (${body})(build, request)));`,
+      ],
+      { encoding: 'utf8' },
+    );
+    assert.equal(run.status, 0, run.stderr);
+    return JSON.parse(run.stdout);
+  };
+
+  test('another build is one that names itself and is not this one', () => {
+    const result = inBuild('build-a', (build) => ({
+      id: build.BUILD_ID,
+      other: build.isOtherBuild('build-b'),
+      same: build.isOtherBuild('build-a'),
+    }));
+    assert.deepEqual(result, { id: 'build-a', other: true, same: false });
+  });
+
+  test('a request that claims no build is not a mismatch', () => {
+    assert.deepEqual(
+      inBuild('build-a', (build) => [null, undefined, ''].map((absent) => build.isOtherBuild(absent))),
+      [false, false, false],
+    );
+  });
+
+  test('under dev there is no id, and nothing is ever another build', async () => {
+    // This process is that case: nothing defined the id.
+    const shared = await import('../dist/runtime/build-id.js');
+    assert.equal(shared.BUILD_ID, undefined);
+    assert.equal(shared.isOtherBuild('anything'), false);
+    assert.equal(shared.buildIdPreamble(), '', 'and the document is handed nothing');
+  });
+
+  test('a define that is not a string is no id', () => {
+    assert.deepEqual(
+      inBuild(42, (build) => ({ undefinedId: build.BUILD_ID === undefined, other: build.isOtherBuild('x') })),
+      { undefinedId: true, other: false },
+    );
+  });
+
+  test('the mismatch error is recognisable by code and carries the server’s build', async () => {
+    const { BuildMismatchError, BUILD_HEADER } = await import('../dist/runtime/build-id.js');
+    const error = new BuildMismatchError('build-b');
+    assert.equal(error.code, 'RSVHONO_BUILD_MISMATCH');
+    assert.equal(error.name, 'BuildMismatchError');
+    assert.equal(error.serverBuild, 'build-b');
+    assert.equal(error.refused, false, 'unless told otherwise, nothing says the call did not run');
+    assert.equal(new BuildMismatchError('build-b', true).refused, true);
+    assert.ok(error instanceof Error);
+    assert.equal(BUILD_HEADER, 'x-rsvhono-build');
+  });
+
+  test('the preamble hands the id to the page', () => {
+    assert.equal(
+      inBuild('build-a', (build) => build.buildIdPreamble()),
+      'self.__rsvhonoBuild="build-a";',
+    );
+    // An id is hex in practice; the escape is for the day it is not.
+    assert.doesNotMatch(
+      inBuild('</script>', (build) => build.buildIdPreamble()),
+      /</,
+    );
+  });
+
+  test('a server function call carries the build, and a page fetch does not', () => {
+    const result = inBuild('build-a', (_build, request) => ({
+      call: request.createRscRequest('/p', { id: 'm#f', body: 'x' }).headers.get('x-rsvhono-build'),
+      // A GET says nothing about its build: the reply's header is what gets compared.
+      page: request.createRscRequest('/p').headers.get('x-rsvhono-build'),
+    }));
+    assert.deepEqual(result, { call: 'build-a', page: null });
+  });
+});
+
+describe('chunk recovery preamble', async () => {
+  const { runInNewContext } = await import('node:vm');
+  const { CHUNK_RELOAD_KEY, CHUNK_RELOAD_WINDOW_MS, RUNTIME_UP, chunkRecoveryPreamble } = await import('../dist/runtime/chunk-recovery.js');
+  const ENTRY = '/_static/assets/entry-abc123.js';
+  const T0 = 1_800_000_000_000;
+
+  /** A window just large enough for the preamble: listeners, a session store, a ready state, a reload count. */
+  function page({ readyState = 'complete', storage = 'works', entry = ENTRY } = {}) {
+    const listeners = new Map();
+    const store = new Map();
+    const state = { reloads: 0, now: T0 };
+    const sessionStorage =
+      storage === 'throws'
+        ? {
+            getItem() {
+              throw new Error('storage is blocked');
+            },
+            setItem() {
+              throw new Error('storage is blocked');
+            },
+          }
+        : { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => void store.set(k, String(v)) };
+    const sandbox = {
+      addEventListener: (type, fn, capture) => void listeners.set(type, [...(listeners.get(type) ?? []), { fn, capture }]),
+      sessionStorage,
+      document: { readyState },
+      location: { reload: () => void state.reloads++ },
+      Date: { now: () => state.now },
+    };
+    sandbox.self = sandbox;
+    runInNewContext(chunkRecoveryPreamble(entry), sandbox);
+    const fire = (type, event = {}) => (listeners.get(type) ?? []).map(({ fn }) => fn(event));
+    return { fire, state, store, listeners, sandbox };
+  }
+
+  test('a failed preload reloads the page once, and records when', () => {
+    const p = page();
+    p.fire('vite:preloadError');
+    assert.equal(p.state.reloads, 1);
+    assert.equal(p.store.get(CHUNK_RELOAD_KEY), String(T0));
+  });
+
+  test('a second failure inside the window does not reload again', () => {
+    const p = page();
+    p.fire('vite:preloadError');
+    p.state.now = T0 + 1000;
+    p.fire('vite:preloadError');
+    p.fire('error', { target: { tagName: 'SCRIPT', src: `http://example.test${ENTRY}` } });
+    p.state.now = T0 + CHUNK_RELOAD_WINDOW_MS - 1;
+    p.fire('vite:preloadError');
+    assert.equal(p.state.reloads, 1, 'what a reload did not fix, another will not');
+    assert.equal(p.store.get(CHUNK_RELOAD_KEY), String(T0), 'and a refused reload does not push the window out');
+  });
+
+  test('a failure after the window is a new incident, with a reload of its own', () => {
+    const p = page();
+    p.fire('vite:preloadError');
+    p.state.now = T0 + CHUNK_RELOAD_WINDOW_MS;
+    p.fire('vite:preloadError');
+    assert.equal(p.state.reloads, 2);
+    assert.equal(p.store.get(CHUNK_RELOAD_KEY), String(T0 + CHUNK_RELOAD_WINDOW_MS));
+  });
+
+  test('the count survives the reload: the document that comes back reads the same store', () => {
+    const first = page();
+    first.fire('vite:preloadError');
+    // The reloaded document: a new script, the same session storage, a moment later.
+    const second = page();
+    second.store.set(CHUNK_RELOAD_KEY, first.store.get(CHUNK_RELOAD_KEY));
+    second.state.now = T0 + 800;
+    second.fire('error', { target: { tagName: 'SCRIPT', src: `http://example.test${ENTRY}` } });
+    assert.equal(second.state.reloads, 0, 'this is the loop the count exists to stop');
+  });
+
+  test('a value that is not a time counts as no reload on record', () => {
+    for (const junk of ['1', 'true', '', 'NaN']) {
+      const p = page();
+      p.store.set(CHUNK_RELOAD_KEY, junk);
+      p.fire('vite:preloadError');
+      assert.equal(p.state.reloads, 1, `${JSON.stringify(junk)} does not hold the reload back`);
+    }
+  });
+
+  test('once the runtime says it is up, the preamble reloads for nothing', () => {
+    const p = page();
+    p.sandbox[RUNTIME_UP] = true;
+    p.fire('vite:preloadError');
+    p.fire('error', { target: { tagName: 'SCRIPT', src: `http://example.test${ENTRY}` } });
+    assert.equal(p.state.reloads, 0, 'a failed import now has an owner, and only the runtime can tell which');
+    assert.equal(p.store.size, 0);
+  });
+
+  test('the entry script failing to load is the same failure', () => {
+    const p = page();
+    p.fire('error', { target: { tagName: 'SCRIPT', src: `http://example.test${ENTRY}` } });
+    assert.equal(p.state.reloads, 1);
+    assert.equal(p.listeners.get('error')[0].capture, true, 'a script’s error does not bubble, so the listener has to capture');
+  });
+
+  test('an error from anything else is not', () => {
+    const p = page();
+    p.fire('error', { target: { tagName: 'IMG', src: `http://example.test${ENTRY}` } });
+    p.fire('error', { target: { tagName: 'SCRIPT', src: 'http://example.test/analytics.js' } });
+    p.fire('error', { target: { tagName: 'SCRIPT', src: '' } });
+    p.fire('error', { target: null });
+    p.fire('error', {});
+    assert.equal(p.state.reloads, 0);
+    assert.equal(p.store.size, 0, 'and nothing was spent on them');
+  });
+
+  test('a page being left fails its imports as a matter of course', () => {
+    const p = page();
+    p.fire('pagehide');
+    p.fire('vite:preloadError');
+    assert.equal(p.state.reloads, 0);
+    assert.equal(p.store.size, 0);
+    // Restored from the back/forward cache, it is a live page again.
+    p.fire('pageshow');
+    p.fire('vite:preloadError');
+    assert.equal(p.state.reloads, 1);
+  });
+
+  test('mid-parse, the reload waits for the document', () => {
+    const p = page({ readyState: 'loading' });
+    p.fire('vite:preloadError');
+    assert.equal(p.state.reloads, 0, 'what has streamed so far is still a readable page');
+    assert.equal(p.store.get(CHUNK_RELOAD_KEY), String(T0), 'the reload is already spent, so a second failure cannot queue another');
+    p.fire('DOMContentLoaded');
+    assert.equal(p.state.reloads, 1);
+  });
+
+  test('without session storage there is no count, so there is no reload', () => {
+    const p = page({ storage: 'throws' });
+    p.fire('vite:preloadError');
+    assert.equal(p.state.reloads, 0, 'an uncounted reload is a loop');
+  });
+
+  test('the preload error is left uncancelled', () => {
+    const p = page();
+    let prevented = false;
+    p.fire('vite:preloadError', { preventDefault: () => void (prevented = true) });
+    assert.equal(prevented, false, 'cancelling resolves the import with nothing, and the caller fails on that instead');
+  });
+
+  test('an entry url cannot close the script it is written into', () => {
+    const hostile = '/_static/</script><script>globalThis.pwned=1</script>.js';
+    const source = chunkRecoveryPreamble(hostile);
+    assert.doesNotMatch(source, /<\/script/i);
+    assert.doesNotMatch(source, /</, 'every `<` is escaped, which is what keeps it inside one inline script');
+    // And it is still the url the listener compares against.
+    const p = page({ entry: hostile });
+    p.fire('error', { target: { tagName: 'SCRIPT', src: `http://example.test${hostile}` } });
+    assert.equal(p.state.reloads, 1);
+    assert.equal(p.sandbox.pwned, undefined);
+  });
+});
+
+describe('browser document helpers', async () => {
+  const { CHUNK_RELOAD_KEY, CHUNK_RELOAD_WINDOW_MS, RUNTIME_UP } = await import('../dist/runtime/chunk-recovery.js');
+  const doc = await import('../dist/runtime/browser/document.js');
+
+  /** The three globals these helpers read, for one test. */
+  function withBrowser({ storage = new Map(), throws = false, reloadThrows = false } = {}, fn) {
+    const calls = [];
+    const saved = { sessionStorage: globalThis.sessionStorage, navigation: globalThis.navigation, window: globalThis.window };
+    const define = (name, value) => Object.defineProperty(globalThis, name, { value, configurable: true, writable: true });
+    define(
+      'sessionStorage',
+      throws
+        ? {
+            getItem() {
+              throw new Error('blocked');
+            },
+            setItem() {
+              throw new Error('blocked');
+            },
+          }
+        : { getItem: (k) => (storage.has(k) ? storage.get(k) : null), setItem: (k, v) => void storage.set(k, v) },
+    );
+    const done = { committed: Promise.resolve(), finished: Promise.resolve() };
+    define('navigation', {
+      reload(options) {
+        if (reloadThrows) throw new Error('document is not fully active');
+        calls.push(['navigation.reload', options.info]);
+        return done;
+      },
+      navigate(href, options) {
+        if (reloadThrows) throw new Error('document is not fully active');
+        calls.push(['navigation.navigate', href, options.history, options.info]);
+        return done;
+      },
+    });
+    define('window', {
+      location: {
+        reload: () => void calls.push(['location.reload']),
+        replace: (href) => void calls.push(['location.replace', href]),
+        assign: (href) => void calls.push(['location.assign', href]),
+      },
+    });
+    try {
+      fn({ calls, storage });
+    } finally {
+      for (const [name, value] of Object.entries(saved)) {
+        if (value === undefined) delete globalThis[name];
+        else define(name, value);
+      }
+    }
+  }
+
+  test('spendOnce is true exactly once per key', () => {
+    withBrowser({}, () => {
+      assert.equal(doc.spendOnce('k'), true);
+      assert.equal(doc.spendOnce('k'), false);
+      assert.equal(doc.spendOnce('other'), true);
+    });
+  });
+
+  test('spendOnce is false when it cannot keep count', () => {
+    withBrowser({ throws: true }, () => assert.equal(doc.spendOnce('k'), false));
+  });
+
+  test('a build mismatch reloads by the load it is given, counted the same way', () => {
+    withBrowser({}, ({ calls }) => {
+      const went = [];
+      doc.reloadForBuild('build-q', () => went.push('elsewhere'));
+      doc.reloadForBuild('build-q', () => went.push('again'));
+      assert.deepEqual(went, ['elsewhere'], 'once per build, whoever does the loading');
+      assert.deepEqual(calls, [], 'and not also by the default');
+    });
+  });
+
+  test('a build mismatch reloads once per server build', () => {
+    withBrowser({}, ({ calls }) => {
+      doc.reloadForBuild('build-b');
+      doc.reloadForBuild('build-b');
+      assert.equal(calls.filter(([name]) => name === 'navigation.reload').length, 1, 'the same new build twice is one reload');
+      doc.reloadForBuild('build-c');
+      assert.equal(calls.filter(([name]) => name === 'navigation.reload').length, 2, 'a build after that is a new reason');
+      assert.equal(calls[0][1], doc.documentNavigation, 'marked as the framework’s own, so the router lets it through');
+    });
+  });
+
+  test('a reload is a reload, whatever the chunk count says', () => {
+    // The count bounds reloads made *for a missing chunk*. A build mismatch, or the button on the failure
+    // panel, has its own reason and must not be held back by it.
+    withBrowser({ storage: new Map([[CHUNK_RELOAD_KEY, String(Date.now())]]) }, ({ calls }) => {
+      doc.loadDocument();
+      doc.reloadForBuild('build-z');
+      assert.equal(calls.filter(([name]) => name === 'navigation.reload').length, 2);
+    });
+  });
+
+  test('a chunk reload is taken once per window', () => {
+    withBrowser({}, ({ storage }) => {
+      assert.equal(doc.spendChunkReload(), true);
+      const taken = Number(storage.get(CHUNK_RELOAD_KEY));
+      assert.ok(Date.now() - taken < 1000, 'recorded with its time');
+      assert.equal(doc.spendChunkReload(), false);
+      // Half a minute and more ago: a different incident.
+      storage.set(CHUNK_RELOAD_KEY, String(Date.now() - CHUNK_RELOAD_WINDOW_MS - 1));
+      assert.equal(doc.spendChunkReload(), true);
+    });
+  });
+
+  test('a reload somebody else is making for the same chunk is recorded without asking', () => {
+    withBrowser({ storage: new Map([[CHUNK_RELOAD_KEY, String(Date.now() - 5000)]]) }, ({ storage }) => {
+      assert.equal(doc.spendChunkReload(), false, 'inside the window');
+      assert.equal(doc.spendChunkReload({ force: true }), true);
+      assert.ok(Date.now() - Number(storage.get(CHUNK_RELOAD_KEY)) < 1000, 'the window now starts at that reload');
+    });
+  });
+
+  test('with no storage to count in, no chunk reload is ever taken', () => {
+    withBrowser({ throws: true }, () => {
+      assert.equal(doc.spendChunkReload(), false);
+      assert.equal(doc.spendChunkReload({ force: true }), false);
+    });
+  });
+
+  test('the runtime announces itself, and from then on remembers which errors were chunks', () => {
+    const listeners = [];
+    const saved = { addEventListener: globalThis.addEventListener, up: globalThis[RUNTIME_UP] };
+    globalThis.addEventListener = (type, listener) => void listeners.push([type, listener]);
+    try {
+      doc.watchChunkFailures();
+      assert.equal(globalThis[RUNTIME_UP], true, 'which is what stands the preamble down');
+      assert.deepEqual(
+        listeners.map(([type]) => type),
+        ['vite:preloadError'],
+      );
+      const failed = new TypeError('Failed to fetch dynamically imported module');
+      const other = new TypeError('Failed to fetch dynamically imported module');
+      assert.equal(doc.isChunkFailure(failed), false, 'not until Vite says so');
+      listeners[0][1]({ payload: failed });
+      assert.equal(doc.isChunkFailure(failed), true);
+      assert.equal(doc.isChunkFailure(other), false, 'by identity: the same message from elsewhere is not it');
+      // Whatever else arrives on the event is ignored rather than thrown on.
+      for (const payload of [undefined, null, 'a string', 7]) listeners[0][1]({ payload });
+      for (const value of [undefined, null, 'a string', 7]) assert.equal(doc.isChunkFailure(value), false);
+    } finally {
+      globalThis.addEventListener = saved.addEventListener;
+      if (saved.up === undefined) delete globalThis[RUNTIME_UP];
+      else globalThis[RUNTIME_UP] = saved.up;
+    }
+  });
+
+  test('loadDocument navigates with the history mode it was asked for', () => {
+    withBrowser({}, ({ calls }) => {
+      doc.loadDocument('/a');
+      doc.loadDocument('/b', { replace: true });
+      assert.deepEqual(
+        calls.map(([, href, history]) => [href, history]),
+        [
+          ['/a', 'auto'],
+          ['/b', 'replace'],
+        ],
+      );
+    });
+  });
+
+  test('when the Navigation API refuses, location does the same load', () => {
+    withBrowser({ reloadThrows: true }, ({ calls }) => {
+      doc.loadDocument();
+      doc.loadDocument('/a');
+      doc.loadDocument('/b', { replace: true });
+      assert.deepEqual(calls, [['location.reload'], ['location.assign', '/a'], ['location.replace', '/b']]);
+    });
+  });
+});
+
+describe('the browser failure overlay', async () => {
+  const doc = await import('../dist/runtime/browser/document.js');
+
+  /** As much of a DOM as the overlay touches: a tree of elements with attributes, text, style and listeners. */
+  class FakeElement {
+    constructor(tag) {
+      this.tagName = tag.toUpperCase();
+      this.children = [];
+      this.attributes = new Map();
+      this.listeners = new Map();
+      this.style = { cssText: '' };
+      this.textContent = '';
+      this.parent = null;
+    }
+    appendChild(child) {
+      child.parent = this;
+      this.children.push(child);
+      return child;
+    }
+    remove() {
+      if (this.parent) this.parent.children = this.parent.children.filter((child) => child !== this);
+    }
+    setAttribute(name, value) {
+      this.attributes.set(name, value);
+    }
+    addEventListener(type, listener) {
+      this.listeners.set(type, listener);
+    }
+    /** Only the one selector shape the overlay uses: `[attribute]`. */
+    querySelector(selector) {
+      const name = /^\[([\w-]+)\]$/.exec(selector)[1];
+      for (const child of this.children) {
+        if (child.attributes.has(name)) return child;
+        const found = child.querySelector(selector);
+        if (found) return found;
+      }
+      return null;
+    }
+    get text() {
+      return [this.textContent, ...this.children.map((child) => child.text)].join(' ');
+    }
+  }
+
+  /** Installs a document, a location, a session store and a navigation for one test, and runs its timers. */
+  async function inPage({ empty = false } = {}, fn) {
+    const reloads = [];
+    const storage = new Map();
+    const root = new FakeElement('#document');
+    const fakeDocument = {
+      documentElement: null,
+      body: null,
+      createElement: (tag) => new FakeElement(tag),
+      appendChild(element) {
+        root.appendChild(element);
+        if (element.tagName === 'HTML') {
+          fakeDocument.documentElement = element;
+          const append = element.appendChild.bind(element);
+          element.appendChild = (child) => {
+            if (child.tagName === 'BODY') fakeDocument.body = child;
+            return append(child);
+          };
+        }
+        return element;
+      },
+      querySelector: (selector) => root.querySelector(selector),
+    };
+    if (!empty) fakeDocument.appendChild(new FakeElement('html')).appendChild(new FakeElement('body'));
+    const globals = {
+      document: fakeDocument,
+      location: { pathname: '/late', search: '?x=1' },
+      sessionStorage: { getItem: (k) => (storage.has(k) ? storage.get(k) : null), setItem: (k, v) => void storage.set(k, v) },
+      navigation: {
+        reload: () => {
+          reloads.push('reload');
+          return {};
+        },
+      },
+    };
+    const saved = Object.fromEntries(Object.keys(globals).map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)]));
+    for (const [name, value] of Object.entries(globals)) Object.defineProperty(globalThis, name, { value, configurable: true, writable: true });
+    // The overlay paints on a zero timer; the late-notFound path also arms a long one, which would outlive
+    // this page. Long timers are held for the test to fire by hand instead.
+    const realSetTimeout = globalThis.setTimeout;
+    const held = [];
+    globalThis.setTimeout = (fn, delay, ...rest) => (delay >= 1000 ? held.push(fn) : realSetTimeout(fn, delay, ...rest));
+    const overlay = () => fakeDocument.querySelector('[data-rsvhono-fatal]');
+    /** The overlay paints on a zero timer, so that it lands after whatever React is unmounting. */
+    const painted = () => new Promise((resolve) => realSetTimeout(resolve, 5));
+    try {
+      await fn({ overlay, painted, reloads, storage, held, document: fakeDocument });
+    } finally {
+      globalThis.setTimeout = realSetTimeout;
+      for (const [name, descriptor] of Object.entries(saved)) {
+        if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+        else delete globalThis[name];
+      }
+    }
+  }
+
+  test('outside dev, a fatal error is announced without its message or stack', async () => {
+    await inPage({}, async ({ overlay, painted }) => {
+      doc.showFatal(new Error('SELECT * FROM users failed at db.internal:5432'), '\n    at Secret');
+      await painted();
+      const box = overlay();
+      assert.ok(box, 'the overlay is in the document');
+      assert.equal(box.attributes.get('role'), 'alert');
+      assert.match(box.text, /Something went wrong/);
+      assert.doesNotMatch(box.text, /SELECT|db\.internal|Secret/, 'what failed is the server log’s business, not the visitor’s');
+    });
+  });
+
+  test('its button reloads the document', async () => {
+    await inPage({}, async ({ overlay, painted, reloads }) => {
+      doc.showFatal(new Error('x'));
+      await painted();
+      const button = overlay().children.find((child) => child.tagName === 'BUTTON');
+      assert.equal(button.textContent, 'Reload page');
+      button.listeners.get('click')();
+      assert.deepEqual(reloads, ['reload']);
+    });
+  });
+
+  test('a second failure replaces the first overlay instead of stacking on it', async () => {
+    await inPage({}, async ({ painted, document }) => {
+      doc.showFatal(new Error('one'));
+      await painted();
+      doc.showFatal(new Error('two'));
+      await painted();
+      assert.equal(document.body.children.filter((child) => child.attributes.has('data-rsvhono-fatal')).length, 1);
+    });
+  });
+
+  test('it can paint into a document that has lost its html and body', async () => {
+    // React removes the whole document when the root it owns fails to render.
+    await inPage({ empty: true }, async ({ overlay, painted, document }) => {
+      doc.showFatal(new Error('x'));
+      await painted();
+      assert.ok(document.documentElement && document.body, 'both were put back');
+      assert.equal(overlay().parent, document.body);
+    });
+  });
+
+  test('a late notFound reloads once for this URL, and says so the second time', async () => {
+    await inPage({}, async ({ overlay, painted, reloads, storage, held }) => {
+      assert.equal(doc.lateNotFoundKey(), 'rsvhono:late-not-found:/late?x=1', 'counted per URL, query included');
+      doc.reloadOnceForLateNotFound();
+      assert.deepEqual(reloads, ['reload'], 'first: ask the server again, which can now answer 404 in time');
+      assert.equal(storage.get(doc.lateNotFoundKey()), '1');
+      assert.equal(overlay(), null);
+      assert.equal(held.length, 1, 'and a grace timer is armed, in case that reload never happens');
+
+      // The reload rendered the same page and it raised the same signal.
+      doc.reloadOnceForLateNotFound();
+      await painted();
+      assert.deepEqual(reloads, ['reload'], 'second: no further reload — that is the loop');
+      assert.match(overlay().text, /Page not found/);
+      assert.match(overlay().text, /This page is not available\./);
+    });
+  });
+
+  test('if the reload it asked for never comes, the grace timer says the page is not found', async () => {
+    await inPage({}, async ({ overlay, painted, held }) => {
+      doc.reloadOnceForLateNotFound();
+      held[0]();
+      await painted();
+      assert.match(overlay().text, /Page not found/);
+    });
+  });
+
+  test('and stays out of the way of an overlay that is already up', async () => {
+    await inPage({}, async ({ overlay, painted, held }) => {
+      doc.reloadOnceForLateNotFound();
+      doc.showFatal(new Error('x'));
+      await painted();
+      held[0]();
+      await painted();
+      assert.match(overlay().text, /Something went wrong/, 'the fatal overlay was not replaced');
+    });
+  });
+
+  test('settle swallows the rejections of a navigation nobody awaits', async () => {
+    const rejected = () => Promise.reject(new Error('aborted'));
+    const unhandled = [];
+    const onUnhandled = (reason) => unhandled.push(reason);
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      doc.settle({ committed: rejected(), finished: rejected() });
+      doc.settle({});
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      assert.deepEqual(unhandled, []);
+    } finally {
+      process.removeListener('unhandledRejection', onUnhandled);
+    }
+  });
+});
+
+describe('dev timing track', async () => {
+  // Node has `performance`, and the suite does not run as production, so this is the dev behaviour.
+  const { measure, started } = await import('../dist/runtime/browser/timing.js');
+
+  test('a measure lands on the rsvhono devtools track', () => {
+    const start = started();
+    assert.ok(start > 0);
+    measure('rsvhono unit probe', start);
+    const [entry] = performance.getEntriesByName('rsvhono unit probe');
+    assert.ok(entry, 'the measure was recorded');
+    assert.equal(entry.detail.devtools.track, 'rsvhono');
+    assert.ok(entry.duration >= 0);
+    performance.clearMeasures('rsvhono unit probe');
+  });
+
+  test('a start the browser rejects is swallowed', () => {
+    assert.doesNotThrow(() => measure('rsvhono bad probe', -1), 'timing is never worth an error');
+  });
+
+  test('in a production bundle it measures nothing', () => {
+    const run = spawnSync(
+      process.execPath,
+      [
+        '--input-type=module',
+        '-e',
+        `const t = await import(${JSON.stringify(new URL('../dist/runtime/browser/timing.js', import.meta.url).href)});
+         const s = t.started(); t.measure('prod probe', s);
+         console.log(JSON.stringify({ s, entries: performance.getEntriesByName('prod probe').length }));`,
+      ],
+      { env: { ...process.env, NODE_ENV: 'production' }, encoding: 'utf8' },
+    );
+    assert.deepEqual(JSON.parse(run.stdout), { s: 0, entries: 0 });
+  });
+});
+
+describe('server function policy', async () => {
+  const ctx = await import('../dist/runtime/context.js');
+  const hono = (path = '/p') => ({
+    req: { url: `http://example.test${path}`, raw: new Request(`http://example.test${path}`, { method: 'POST' }), param: () => ({}) },
+    env: {},
+  });
+
+  after(() => {
+    // Module-level settings: put the defaults back for whatever runs after this file's suites.
+    ctx.beforeServerFunction(() => {});
+    ctx.trustServerFunctionOrigins([]);
+    ctx.setServerFunctionRefresh('auto');
+  });
+
+  test('the guard sees the call before it runs, and its throw is the refusal', async () => {
+    const seen = [];
+    ctx.beforeServerFunction((call) => {
+      seen.push([call.kind, call.id, call.request.method, call.hono === c]);
+      if (call.id === 'm#forbidden') throw new Error('not for you');
+    });
+    const c = hono();
+    await ctx.authorizeServerFunction(c, 'rsc-action', 'm#allowed');
+    await assert.rejects(ctx.authorizeServerFunction(c, 'rsc-action', 'm#forbidden'), /not for you/);
+    // A form posted without JavaScript is named by the function React decoded from it.
+    await ctx.authorizeServerFunction(c, 'form-action', 'm#posted');
+    assert.deepEqual(seen, [
+      ['rsc-action', 'm#allowed', 'POST', true],
+      ['rsc-action', 'm#forbidden', 'POST', true],
+      ['form-action', 'm#posted', 'POST', true],
+    ]);
+  });
+
+  test('whether a guard is installed can be asked, since an unnameable form must not run under one', async () => {
+    // A fresh process: this file's suites install guards, and there is no way to take one out again.
+    const run = spawnSync(
+      process.execPath,
+      [
+        '--input-type=module',
+        '-e',
+        `const ctx = await import(${JSON.stringify(new URL('../dist/runtime/context.js', import.meta.url).href)});
+         const before = ctx.hasServerFunctionGuard();
+         ctx.beforeServerFunction(() => {});
+         console.log(JSON.stringify([before, ctx.hasServerFunctionGuard()]));`,
+      ],
+      { encoding: 'utf8' },
+    );
+    assert.deepEqual(JSON.parse(run.stdout), [false, true]);
+  });
+
+  test('an async guard is awaited', async () => {
+    let finished = false;
+    ctx.beforeServerFunction(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      finished = true;
+    });
+    await ctx.authorizeServerFunction(hono(), 'rsc-action', 'm#f');
+    assert.equal(finished, true);
+    ctx.beforeServerFunction(async () => {
+      await Promise.resolve();
+      throw new Error('late no');
+    });
+    await assert.rejects(ctx.authorizeServerFunction(hono(), 'rsc-action', 'm#f'), /late no/);
+  });
+
+  test('the last guard registered is the guard', async () => {
+    const order = [];
+    ctx.beforeServerFunction(() => void order.push('first'));
+    ctx.beforeServerFunction(() => void order.push('second'));
+    await ctx.authorizeServerFunction(hono(), 'rsc-action', 'm#f');
+    assert.deepEqual(order, ['second']);
+  });
+
+  test('a listed origin is trusted exactly, and nothing near it is', () => {
+    ctx.trustServerFunctionOrigins(['https://admin.example.com']);
+    const c = hono();
+    assert.equal(ctx.isTrustedOrigin('https://admin.example.com', c), true);
+    for (const near of [
+      'https://admin.example.com.evil.test',
+      'http://admin.example.com',
+      'https://admin.example.com:8443',
+      'https://ADMIN.example.com',
+      'null',
+      '',
+    ])
+      assert.equal(ctx.isTrustedOrigin(near, c), false, `${near || '(empty)'} is a different origin`);
+  });
+
+  test('an empty list trusts no one', () => {
+    ctx.trustServerFunctionOrigins([]);
+    assert.equal(ctx.isTrustedOrigin('https://admin.example.com', hono()), false);
+  });
+
+  test('a predicate decides per request', () => {
+    const asked = [];
+    ctx.trustServerFunctionOrigins((origin, c) => {
+      asked.push([origin, new URL(c.req.url).pathname]);
+      return origin.endsWith('.preview.example.com');
+    });
+    assert.equal(ctx.isTrustedOrigin('https://pr-12.preview.example.com', hono('/a')), true);
+    assert.equal(ctx.isTrustedOrigin('https://example.org', hono('/b')), false);
+    assert.deepEqual(asked, [
+      ['https://pr-12.preview.example.com', '/a'],
+      ['https://example.org', '/b'],
+    ]);
+  });
+
+  test('in auto mode every function reply renders the page', () => {
+    ctx.setServerFunctionRefresh('auto');
+    const c = hono();
+    ctx.beginServerFunction(c);
+    assert.equal(ctx.wantsRefresh(c), true);
+    assert.equal(ctx.wantsRefresh(hono()), true, 'even for a request that never began a function');
+  });
+
+  test('in explicit mode the page is rendered only for the request that asked', () => {
+    ctx.setServerFunctionRefresh('explicit');
+    const asked = hono('/asked');
+    const silent = hono('/silent');
+    ctx.beginServerFunction(asked);
+    ctx.beginServerFunction(silent);
+    assert.equal(ctx.wantsRefresh(asked), false);
+    ctx.runWithContext(asked, () => ctx.requestRefresh());
+    assert.equal(ctx.wantsRefresh(asked), true);
+    assert.equal(ctx.wantsRefresh(silent), false, 'one request asking does not answer for another');
+    // A new function run on the same request starts from not having asked.
+    ctx.beginServerFunction(asked);
+    assert.equal(ctx.wantsRefresh(asked), false);
+  });
+
+  test('requestRefresh outside a server function says so', () => {
+    assert.throws(() => ctx.requestRefresh(), /outside a server function/, 'no request at all');
+    // Inside a request, but a page render rather than a function.
+    assert.throws(() => ctx.runWithContext(hono(), () => ctx.requestRefresh()), /outside a server function/);
+  });
+
+  test('redirect and notFound throw the signals the renderer reads', () => {
+    assert.throws(
+      () => ctx.redirect('/login'),
+      (error) => error instanceof RedirectSignal && error.status === 303 && error.location === '/login',
+    );
+    assert.throws(
+      () => ctx.redirect('/moved', 308),
+      (error) => error instanceof RedirectSignal && error.status === 308,
+    );
+    assert.throws(() => ctx.notFound(), NotFoundSignal);
+  });
+});
+
+describe('request and control helpers', async () => {
+  const request = await import('../dist/runtime/request.js');
+  const control = await import('../dist/runtime/control.js');
+
+  test('classifyRequest is the parser the renderer uses', () => {
+    const page = new Request('http://example.test/p');
+    const flight = new Request('http://example.test/p', { headers: { RSC: '1' } });
+    assert.deepEqual(request.classifyRequest(page), parseRenderRequest(page));
+    assert.deepEqual(request.classifyRequest(flight), parseRenderRequest(flight));
+    assert.notEqual(request.classifyRequest(page).kind, request.classifyRequest(flight).kind);
+  });
+
+  test('requestWantsRsc answers from the request alone', () => {
+    assert.equal(request.requestWantsRsc(new Request('http://example.test/p')), false);
+    assert.equal(request.requestWantsRsc(new Request('http://example.test/p', { headers: { RSC: '1' } })), true);
+    assert.equal(
+      request.requestWantsRsc(new Request('http://example.test/p', { method: 'POST', headers: { RSC: '1', 'x-rsc-action': 'm#f' }, body: 'x' })),
+      true,
+    );
+  });
+
+  test('a control signal is one of the two, and nothing that merely looks like one', () => {
+    assert.equal(control.isControlSignal(new RedirectSignal('/a', 303)), true);
+    assert.equal(control.isControlSignal(new NotFoundSignal()), true);
+    assert.equal(control.isControlSignal(new Error('[rsvhono] notFound')), false);
+    assert.equal(control.isControlSignal({ name: 'NotFoundSignal' }), false);
+    assert.equal(control.isControlSignal(null), false);
+  });
+
+  test('an error with a digest came out of a payload', () => {
+    assert.equal(control.cameFromPayload(Object.assign(new Error('x'), { digest: 'abc' })), true);
+    assert.equal(control.cameFromPayload(new Error('x')), false);
+    assert.equal(control.cameFromPayload(Object.assign(new Error('x'), { digest: 7 })), false);
+    assert.equal(control.cameFromPayload(null), false);
+    assert.equal(control.cameFromPayload(undefined), false);
+  });
+});
+
+describe('defineRoutes and shutdown', async () => {
+  const { defineRoutes, isPageRoute } = await import('../dist/router.js');
+  const { onShutdown } = await import('../dist/server/shutdown.js');
+
+  test('a bare array is the routes of a config with no fallback pages', () => {
+    const routes = [{ path: '/', component: async () => ({ default: () => null }) }];
+    assert.deepEqual(defineRoutes(routes), { routes });
+    const config = { routes, notFound: { component: async () => ({ default: () => null }) } };
+    assert.equal(defineRoutes(config), config, 'the object form is returned as it was given');
+  });
+
+  test('a route is a page unless it says it is an endpoint', () => {
+    assert.equal(isPageRoute({ path: '/' }), true);
+    assert.equal(isPageRoute({ type: 'page', path: '/' }), true);
+    assert.equal(isPageRoute({ type: 'endpoint', path: '/api' }), false);
+  });
+
+  test('onShutdown hears both signals a process manager sends', () => {
+    const before = { SIGINT: process.listeners('SIGINT'), SIGTERM: process.listeners('SIGTERM') };
+    const heard = [];
+    onShutdown((signal) => heard.push(signal));
+    try {
+      for (const signal of ['SIGINT', 'SIGTERM']) {
+        const added = process.listeners(signal).filter((listener) => !before[signal].includes(listener));
+        assert.equal(added.length, 1, `one handler for ${signal}`);
+        added[0]();
+      }
+      assert.deepEqual(heard, ['SIGINT', 'SIGTERM']);
+    } finally {
+      for (const signal of ['SIGINT', 'SIGTERM'])
+        for (const listener of process.listeners(signal)) if (!before[signal].includes(listener)) process.removeListener(signal, listener);
+    }
+  });
+});
+
+describe('how long a render holds its request', async () => {
+  const { releaseWhenDone, renderSignal } = await import('../dist/runtime/stream-lifetime.js');
+  const encoder = new TextEncoder();
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 5));
+
+  /** A source the test feeds by hand, and a count of how many times `done` ran. */
+  function wired() {
+    let controller;
+    const state = { done: 0, cancelled: undefined, pulls: 0 };
+    const source = new ReadableStream({
+      start: (c) => void (controller = c),
+      pull: () => void state.pulls++,
+      cancel: (reason) => void (state.cancelled = reason ?? 'no reason'),
+    });
+    const out = releaseWhenDone(source, () => void state.done++);
+    return { controller, state, reader: out.getReader() };
+  }
+
+  test('the bytes pass through unchanged, and done runs once when the source closes', async () => {
+    const { controller, state, reader } = wired();
+    controller.enqueue(encoder.encode('one'));
+    controller.enqueue(encoder.encode('two'));
+    controller.close();
+    const seen = [];
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      seen.push(new TextDecoder().decode(value));
+    }
+    await tick();
+    assert.deepEqual(seen, ['one', 'two']);
+    assert.equal(state.done, 1);
+  });
+
+  test('done runs once when the source errors, and the reader is told why', async () => {
+    // The path a transformer's flush and cancel never saw: a render that dies mid-stream.
+    const { controller, state, reader } = wired();
+    controller.enqueue(encoder.encode('partial'));
+    await reader.read();
+    controller.error(new Error('render died'));
+    await assert.rejects(reader.read(), /render died/);
+    await tick();
+    assert.equal(state.done, 1);
+  });
+
+  test('done runs once when the reader cancels, and the cancel reaches the source', async () => {
+    const { controller, state, reader } = wired();
+    controller.enqueue(encoder.encode('partial'));
+    await reader.read();
+    await reader.cancel(new Error('client went away'));
+    await tick();
+    assert.equal(state.done, 1);
+    assert.match(String(state.cancelled), /client went away/, 'so the render behind it is stopped rather than left running');
+  });
+
+  test('a reader that cancels before reading anything still releases', async () => {
+    const { state, reader } = wired();
+    await reader.cancel();
+    await tick();
+    assert.equal(state.done, 1);
+    assert.notEqual(state.cancelled, undefined);
+  });
+
+  test('nothing after the end calls done again', async () => {
+    const { controller, state, reader } = wired();
+    controller.close();
+    await reader.read();
+    await reader.cancel().catch(() => {});
+    await tick();
+    assert.equal(state.done, 1);
+  });
+
+  test('a reader that is not reading holds the source back', async () => {
+    const { controller, state } = wired();
+    for (let n = 0; n < 50; n++) controller.enqueue(new Uint8Array(1024));
+    await tick();
+    const stalled = state.pulls;
+    await tick();
+    assert.equal(state.pulls, stalled, 'the source is not asked for more while nobody takes what is there');
+    assert.ok(controller.desiredSize <= 0, 'and can see that it is ahead of its reader');
+    assert.equal(state.done, 0);
+  });
+
+  test('the render signal follows the request’s, and release detaches it', () => {
+    const request = new AbortController();
+    const { renderAbort } = renderSignal(request.signal);
+    assert.equal(renderAbort.signal.aborted, false);
+    request.abort(new Error('client went away'));
+    assert.equal(renderAbort.signal.aborted, true);
+    assert.match(String(renderAbort.signal.reason), /client went away/);
+
+    const second = new AbortController();
+    const held = renderSignal(second.signal);
+    held.release();
+    second.abort();
+    assert.equal(held.renderAbort.signal.aborted, false, 'a render that has finished is no longer the request’s to abort');
+  });
+
+  test('a request already aborted aborts the render at once, and leaves no listener behind', () => {
+    const request = new AbortController();
+    request.abort(new Error('gone before it began'));
+    let added = 0;
+    const signal = request.signal;
+    const original = signal.addEventListener.bind(signal);
+    signal.addEventListener = (...args) => (added++, original(...args));
+    const { renderAbort, release } = renderSignal(signal);
+    assert.equal(renderAbort.signal.aborted, true);
+    assert.equal(added, 0);
+    assert.doesNotThrow(release);
+  });
+
+  test('the render can be aborted on its own account without touching the request', () => {
+    const request = new AbortController();
+    const { renderAbort } = renderSignal(request.signal);
+    renderAbort.abort(new Error('a redirect ended this render'));
+    assert.equal(request.signal.aborted, false);
+  });
+});
+
+describe('walking a build’s module graph', async () => {
+  const { walkModuleGraph } = await import('../dist/builder/module-graph.js');
+
+  /** A graph written as `id → { imports, dynamic, external }`; anything not listed has no record. */
+  const graphOf = (modules) => ({
+    getModuleInfo: (id) =>
+      Object.hasOwn(modules, id)
+        ? { importedIds: modules[id].imports ?? [], dynamicallyImportedIds: modules[id].dynamic ?? [], isExternal: modules[id].external ?? false }
+        : null,
+  });
+  const lookupOf = ({ client = {}, server = {} } = {}) => ({
+    clientReference: (id) => client[id],
+    serverFunctions: (id) => server[id] ?? [],
+  });
+  const walk = (modules, roots, lookup) => {
+    const { clientReferences, functions, complete } = walkModuleGraph(graphOf(modules), roots, lookupOf(lookup));
+    return { clientReferences: [...clientReferences].sort(), functions: [...functions].sort(), complete };
+  };
+
+  test('static and dynamic imports are both edges', () => {
+    const result = walk(
+      { page: { imports: ['a'], dynamic: ['lazy'] }, a: { imports: ['actions'] }, lazy: { imports: ['more'] }, actions: {}, more: {} },
+      ['page'],
+      { server: { actions: ['m1#save'], more: ['m2#remove'] } },
+    );
+    assert.deepEqual(result, { clientReferences: [], functions: ['m1#save', 'm2#remove'], complete: true });
+  });
+
+  test('a page that reaches nothing is complete and empty — which is an answer', () => {
+    assert.deepEqual(walk({ page: { imports: ['util'] }, util: {} }, ['page']), { clientReferences: [], functions: [], complete: true });
+  });
+
+  test('a root the bundler has no record of is not a page that reaches nothing', () => {
+    const result = walk({}, ['page']);
+    assert.equal(result.complete, false, 'unknown, and said so');
+    assert.deepEqual(result.functions, []);
+  });
+
+  test('a module with no record anywhere on the way makes the whole walk incomplete', () => {
+    const result = walk({ page: { imports: ['a', 'gone'] }, a: { imports: ['actions'] }, actions: {} }, ['page'], {
+      server: { actions: ['m1#save'] },
+    });
+    assert.equal(result.complete, false);
+    assert.deepEqual(result.functions, ['m1#save'], 'what was found before the trail went cold is a lower bound, kept for the diagnostic');
+  });
+
+  test('an external dependency is a leaf that is known, not one that is missing', () => {
+    const result = walk({ page: { imports: ['react', 'a'] }, react: { external: true, imports: ['never-followed'] }, a: {} }, ['page']);
+    assert.equal(result.complete, true, 'an external cannot hold an app’s server function');
+  });
+
+  test('client components are collected, by the id the browser build knows them by', () => {
+    const result = walk({ page: { imports: ['card'] }, card: { imports: ['button'] }, button: {} }, ['page'], {
+      client: { card: 'client:card', button: 'client:button' },
+    });
+    assert.deepEqual(result.clientReferences, ['client:button', 'client:card']);
+  });
+
+  test('a cycle ends, and each module is asked about once', () => {
+    let asked = 0;
+    const modules = { a: { imports: ['b'] }, b: { imports: ['c'] }, c: { imports: ['a'], dynamic: ['b'] } };
+    const graph = {
+      getModuleInfo: (id) => {
+        asked++;
+        return { importedIds: modules[id].imports ?? [], dynamicallyImportedIds: modules[id].dynamic ?? [] };
+      },
+    };
+    const result = walkModuleGraph(graph, ['a'], lookupOf());
+    assert.equal(result.complete, true);
+    assert.equal(asked, 3);
+  });
+
+  test('several roots are one walk: shared modules are not counted twice', () => {
+    const result = walk({ one: { imports: ['shared'] }, two: { imports: ['shared'] }, shared: {} }, ['one', 'two'], { server: { shared: ['m#f'] } });
+    assert.deepEqual(result.functions, ['m#f']);
+  });
+
+  test('a tree-shaken module is still in the graph, so what it imports is still counted', () => {
+    // The bundler keeps a record of a module it later drops. Listing a function that is imported and never
+    // called over-counts, which is the safe direction for "what may this page call".
+    const result = walk({ page: { imports: ['unused'] }, unused: { imports: ['actions'] }, actions: {} }, ['page'], {
+      server: { actions: ['m#orphan'] },
+    });
+    assert.deepEqual(result, { clientReferences: [], functions: ['m#orphan'], complete: true });
+  });
+});
+
+describe('which build warnings are by design', async () => {
+  const { isExpectedWarning } = await import('../dist/builder/vite-config.js');
+
+  test('a broken source map from the RSC plugin’s own plugins is expected', () => {
+    for (const plugin of ['rsc:virtual:vite-rsc/assets-manifest', 'rsc:inject-async-local-storage', 'rsc:encryption-key'])
+      assert.equal(isExpectedWarning({ code: 'SOURCEMAP_BROKEN', plugin }), true, plugin);
+  });
+
+  test('a broken source map from anywhere else is the author’s to know about', () => {
+    for (const plugin of ['my-app-plugin', 'rsvhono:pages', 'rsvhono:env-shadow', 'vite:react-compiler', undefined])
+      assert.equal(isExpectedWarning({ code: 'SOURCEMAP_BROKEN', plugin }), false, String(plugin));
+  });
+
+  test('the two RSC directives being dropped by the bundler is the point', () => {
+    for (const directive of ['"use client"', "'use server'", '`use client`'])
+      assert.equal(
+        isExpectedWarning({
+          code: 'MODULE_LEVEL_DIRECTIVE',
+          message: `Module level directives cause errors when bundled, ${directive} in "x.tsx" was ignored.`,
+        }),
+        true,
+      );
+  });
+
+  test('any other directive that is dropped is still reported', () => {
+    for (const message of [
+      'Module level directives cause errors when bundled, "use asm" in "x.js" was ignored.',
+      '"use strict" was ignored',
+      undefined,
+    ])
+      assert.equal(isExpectedWarning({ code: 'MODULE_LEVEL_DIRECTIVE', message }), false);
+  });
+
+  test('nothing else is hidden', () => {
+    for (const code of ['CIRCULAR_DEPENDENCY', 'UNRESOLVED_IMPORT', 'EVAL', undefined])
+      assert.equal(isExpectedWarning({ code, plugin: 'rsc:x', message: '"use client"' }), false);
   });
 });

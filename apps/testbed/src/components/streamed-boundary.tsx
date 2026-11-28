@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
-import { AsyncBoundary } from '@rshono/core/client';
-import type { PageProps } from '@rshono/core';
+import { AsyncBoundary } from '@rsvhono/core/client';
+import type { PageProps } from '@rsvhono/core';
 import { HydrationProbe } from './hydration-probe';
 import { Layout } from './layout';
 

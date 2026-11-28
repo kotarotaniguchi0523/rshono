@@ -1,14 +1,14 @@
 // The security middleware an app registers in `src/server.ts` — Hono's `csrf()`, `bodyLimit()` and
 // `secureHeaders()` — plus the one security setting that is still build-time config, `trustProxy`.
 //
-// Only `trustProxy` needs a build of its own: it is resolved before Rspack compiles anything and
+// Only `trustProxy` needs a build of its own: it is resolved before Vite compiles anything and
 // baked into the server bundle. The rest is middleware, so the testbed reads its profile from the
 // environment and one build serves every permutation — which is the point of having moved them.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, before, describe, test } from 'node:test';
-import { buildTestbed, FIXTURES_DIR, startTestbed, stopServer, TESTBED_DIST } from './helpers.mjs';
+import { buildTestbed, FIXTURES_DIR, hiddenFields, serverActionId, startTestbed, stopServer, TESTBED_DIST } from './helpers.mjs';
 
 // One build for the whole file, with the only config setting under test here baked in. The suites
 // below differ by environment alone. Serialised with the rest of the suite by
@@ -32,6 +32,7 @@ function serve(env) {
     const server = await startTestbed('start', { env });
     app.base = server.base;
     app.child = server.child;
+    app.getOutput = server.getOutput;
   });
   after(() => app.child && stopServer(app.child));
   return app;
@@ -52,6 +53,11 @@ describe('a hardened server.ts', () => {
     assert.doesNotMatch(header, /unsafe-eval/, 'prod CSP must not allow eval');
     assert.ok((await res.text()).includes(`nonce="${nonce}"`), 'the nonce Hono minted was not stamped on the scripts');
 
+    // The chunk-recovery preamble is an inline script like any other the document carries: without the nonce
+    // the policy above would refuse it, and a page whose entry chunk is gone would just sit there.
+    const html = await (await fetch(`${app.base}/`)).text();
+    assert.match(html, /<script[^>]*nonce="[^"]+"[^>]*>self\.__rsvhonoBuild="[0-9a-f]{16}";\(function\(\)\{var k="rsvhono:chunk-reload"/);
+
     // A prerendered file is fixed bytes and cannot carry a fresh nonce, so the document falls back to
     // rendering per request while a nonce is in play.
     const ssg = await fetch(`${app.base}/docs/getting-started`);
@@ -59,7 +65,7 @@ describe('a hardened server.ts', () => {
     assert.match(await ssg.text(), /nonce="/);
     // The header the prerender pass reads that fact off (`PRERENDER_NONCE_HEADER`) belongs to the build
     // process alone — a served response must never carry it.
-    assert.equal(ssg.headers.get('x-rshono-prerender-nonce'), null, 'a build-time marker leaked onto a served response');
+    assert.equal(ssg.headers.get('x-rsvhono-prerender-nonce'), null, 'a build-time marker leaked onto a served response');
   });
 
   test('two requests get two nonces — the value is per request, not per build', async () => {
@@ -85,7 +91,7 @@ describe('a hardened server.ts', () => {
     // downgrade lands. CSP and COOP are moot for a .js file, but their absence is not what an operator
     // reading their own `secureHeaders()` call expects.
     const html = await (await fetch(`${app.base}/`)).text();
-    const asset = html.match(/src="(\/_static\/chunks\/main\.[0-9a-f]+\.js)"/)[1];
+    const asset = html.match(/src="(\/_static\/assets\/index-[\w-]+\.js)"/)[1];
     const res = await fetch(app.base + asset);
     await res.text();
     assert.equal(res.status, 200);
@@ -237,19 +243,30 @@ describe('a hardened server.ts', () => {
 describe('a server.ts with no csrf()', () => {
   const app = serve({ TESTBED_CSRF: 'off' });
 
-  test('nothing rejects a cross-origin action, for a gateway that enforces it instead', async () => {
-    const res = await fetch(`${app.base}/users`, {
-      method: 'POST',
-      headers: {
-        Origin: 'https://evil.example',
-        'sec-fetch-site': 'cross-site',
-        'x-rsc-action': 'whatever',
-        'content-type': 'text/plain',
-      },
-      body: '[]',
-    });
-    await res.text();
-    assert.notEqual(res.status, 403, 'with no csrf() middleware, a cross-origin action must not be rejected');
+  test('a call from another origin is refused by the framework itself, with no csrf() to do it', async () => {
+    // This used to be let through: without `csrf()` nothing checked a call from client code, on the grounds
+    // that another origin cannot send `x-rsc-action` without a preflight nobody answers. The framework now
+    // holds that call to the same origin rule as a form post, so it does not depend on what else is mounted.
+    const call = (headers) =>
+      fetch(`${app.base}/users`, { method: 'POST', headers: { 'x-rsc-action': 'whatever', 'content-type': 'text/plain', ...headers }, body: '[]' });
+
+    for (const headers of [
+      { Origin: 'https://evil.example', 'sec-fetch-site': 'cross-site' },
+      { Origin: 'https://evil.example' },
+      { Origin: 'null' },
+      { 'sec-fetch-site': 'cross-site' },
+    ]) {
+      const res = await call(headers);
+      assert.equal(res.status, 403, `${JSON.stringify(headers)} must be refused`);
+      assert.match(await res.text(), /server function was called from another origin/);
+    }
+
+    // The app's own origin and a client that is not a browser both get as far as the id check.
+    for (const headers of [{ Origin: app.base }, { Origin: app.base, 'sec-fetch-site': 'same-origin' }, {}]) {
+      const res = await call(headers);
+      assert.equal(res.status, 400, `${JSON.stringify(headers)} must reach the function lookup`);
+      await res.text();
+    }
   });
 
   test('a page route refuses every cross-site form post; an endpoint route is how you take one', async () => {
@@ -329,7 +346,7 @@ describe('a server.ts with no csrf()', () => {
 });
 
 // `SSG_CACHE_CONTROL` is `public, max-age=300` and has no config field, deliberately — it is a
-// per-response header and `rshono.config.ts` is compiled into the bundle. Middleware is the interface,
+// per-response header and `rsvhono.config.ts` is compiled into the bundle. Middleware is the interface,
 // and the one thing a reader has to be told is *where* in the middleware it goes.
 describe('a server.ts that overrides the prerendered cache policy', () => {
   const app = serve({ TESTBED_SSG_CACHE: '1' });
@@ -356,5 +373,333 @@ describe('a server.ts that overrides the prerendered cache policy', () => {
     const res = await fetch(`${app.base}/`);
     await res.text();
     assert.equal(res.headers.get('cache-control'), 'private, no-cache', 'the default must not be widened for everything');
+  });
+});
+
+// ── Server functions: one guard, one origin rule, and a reply that need not carry a page ─────────────────
+
+/** The id of an export of the testbed's `actions.ts`, from the one a client chunk is known to call. */
+const actionId = (name) => {
+  const sibling = serverActionId('Add user');
+  return `${sibling.slice(0, sibling.lastIndexOf('#'))}#${name}`;
+};
+
+/** A server function called the way client code calls it. */
+const callFunction = (base, path, name, args, headers = {}, signal = undefined) =>
+  fetch(`${base}${path}`, {
+    method: 'POST',
+    headers: { Origin: base, rsc: '1', 'x-rsc-action': actionId(name), 'content-type': 'text/plain;charset=UTF-8', ...headers },
+    body: JSON.stringify(args),
+    signal,
+  });
+
+/** The `raiseSignal` form on `/action-race`, posted the way a browser without JavaScript posts it. */
+const postSignalForm = async (base, to, headers = {}) => {
+  const html = await (await fetch(`${base}/action-race`)).text();
+  const form = /<form[^>]*data-raise-signal[^>]*>(.*?)<\/form>/s.exec(html)?.[1] ?? '';
+  const body = new FormData();
+  for (const [name, value] of Object.entries(hiddenFields(form))) body.set(name, value);
+  body.set('to', to);
+  return fetch(`${base}/action-race`, { method: 'POST', headers: { Origin: base, ...headers }, body, redirect: 'manual' });
+};
+
+const applied = async (base, label) => (await (await fetch(`${base}/action-race`)).text()).includes(label);
+
+describe('beforeServerFunction: one check in front of every server function', () => {
+  const app = serve({ TESTBED_ACTION_GUARD: '1' });
+  const unique = (name) => `${name}-${crypto.randomUUID()}`;
+
+  test('a call from client code is refused with the guard’s own status, and does not run', async () => {
+    const label = unique('unsigned');
+    const res = await callFunction(app.base, '/action-race', 'recordRace', [label, 0]);
+    // Not the 400 a malformed call gets and not the error page's 500: the guard said 401, so that is the answer.
+    assert.equal(res.status, 401);
+    assert.match(await res.text(), /Sign in to call a server function/);
+    assert.equal(await applied(app.base, label), false);
+  });
+
+  test('a signed-in call runs, and the guard was told which function', async () => {
+    const label = unique('signed');
+    const before = app.getOutput().length;
+    const res = await callFunction(app.base, '/action-race', 'recordRace', [label, 0], { cookie: 'guard=user' });
+    assert.equal(res.status, 200);
+    await res.text();
+    assert.equal(await applied(app.base, label), true);
+    assert.match(app.getOutput().slice(before), new RegExp(`\\[guard\\] rsc-action ${actionId('recordRace').replace('#', '#')}`));
+  });
+
+  test('a form posted without JavaScript goes through the same guard, named by the function it decoded', async () => {
+    const before = app.getOutput().length;
+    const unsigned = await postSignalForm(app.base, '/users');
+    assert.equal(unsigned.status, 401, 'the form is not a way round the guard');
+    await unsigned.text();
+    // The id is the reference's own — `decodeAction` resolved the function and the function says what it is.
+    assert.match(app.getOutput().slice(before), /\[guard\] form-action [0-9a-f]+#raiseSignal/);
+
+    // The guard can tell functions apart on the form path too: this one is for admins.
+    const user = await postSignalForm(app.base, '/users', { cookie: 'guard=user' });
+    assert.equal(user.status, 403);
+    await user.text();
+
+    const admin = await postSignalForm(app.base, '/users', { cookie: 'guard=admin' });
+    assert.equal(admin.status, 303);
+    assert.equal(admin.headers.get('location'), '/users');
+    await admin.body?.cancel();
+  });
+
+  /*
+   * Every shape a form action is posted in without JavaScript. The guard is told which function by the
+   * function React decoded — so each shape has to come out of the decode still knowing its own name.
+   */
+  /** Posts the first form on `path` matching `selector`, as a browser with JavaScript off would. */
+  const postForm = async (path, selector, fields = {}, headers = {}) => {
+    const html = await (await fetch(`${app.base}${path}`)).text();
+    const form = new RegExp(`<form[^>]*${selector}[^>]*>(.*?)</form>`, 's').exec(html)?.[1];
+    assert.ok(form !== undefined, `${path} has a form matching ${selector}`);
+    const body = new FormData();
+    for (const [name, value] of Object.entries({ ...hiddenFields(form), ...fields })) body.set(name, value);
+    return fetch(`${app.base}${path}`, { method: 'POST', headers: { Origin: app.base, ...headers }, body, redirect: 'manual' });
+  };
+  const guardLines = (from) =>
+    app
+      .getOutput()
+      .slice(from)
+      .split('\n')
+      .filter((line) => line.startsWith('[guard]'));
+
+  for (const [shape, path, selector, fields, named] of [
+    ['a plain form action', '/action-race', 'data-raise-signal', { to: '/users' }, /^\[guard\] form-action [0-9a-f]+#raiseSignal$/],
+    [
+      'a function with an argument bound on the server',
+      '/action-race',
+      'data-bound-form',
+      { suffix: 'x' },
+      /^\[guard\] form-action [0-9a-f]+#recordBound$/,
+    ],
+    ['a useActionState action', '/signup', 'class="form"', { name: 'Ada', email: 'ada@example.com' }, /^\[guard\] form-action [0-9a-f]+#\w+$/],
+    ['a function declared inline in a server component', '/inline-action', 'class="form"', {}, /^\[guard\] form-action [0-9a-f]+#[\w$]+$/],
+  ]) {
+    test(`${shape} is named to the guard, and refused without a pass`, async () => {
+      const before = app.getOutput().length;
+      const res = await postForm(path, selector, fields);
+      await res.body?.cancel();
+      assert.equal(res.status, 401);
+      const lines = guardLines(before);
+      assert.equal(lines.length, 1, 'asked once');
+      assert.match(lines[0], named);
+      assert.doesNotMatch(lines[0], /unnamed/);
+    });
+  }
+
+  test('the bound argument and the form both reach the function once the guard lets it through', async () => {
+    const suffix = unique('sfx');
+    const res = await postForm('/action-race', 'data-bound-form', { suffix }, { cookie: 'guard=user' });
+    assert.ok(res.status < 400, `ran (${res.status})`);
+    await res.body?.cancel();
+    assert.equal(await applied(app.base, `bound:${suffix}`), true);
+  });
+
+  test('a form whose function cannot be named is not run while a guard is installed', async () => {
+    // A body that decodes to nothing React calls a server reference. There is no such form to write by hand
+    // on this React, so this pins the other half of the promise: with a pass, an unnameable post still does
+    // not reach a function — it is answered as the malformed request it is.
+    const body = new FormData();
+    body.set('$ACTION_ID_not-a-reference', '');
+    const before = app.getOutput().length;
+    const res = await fetch(`${app.base}/action-race`, { method: 'POST', headers: { Origin: app.base, cookie: 'guard=admin' }, body });
+    await res.body?.cancel();
+    assert.ok(res.status >= 400, `refused (${res.status})`);
+    assert.deepEqual(guardLines(before), [], 'and the guard was never asked to approve something with no name');
+  });
+
+  test('a function called from the notFound page is guarded like any other', async () => {
+    const label = unique('from-404');
+    const unsigned = await callFunction(app.base, '/no-such-page', 'recordRace', [label, 0]);
+    assert.equal(unsigned.status, 401);
+    await unsigned.text();
+    assert.equal(await applied(app.base, label), false);
+
+    const signed = await callFunction(app.base, '/no-such-page', 'recordRace', [label, 0], { cookie: 'guard=user' });
+    assert.equal(signed.status, 404, 'the page that answered is still the 404');
+    await signed.text();
+    assert.equal(await applied(app.base, label), true);
+  });
+
+  test('a page fetch is not a function call, and is not asked about', async () => {
+    const before = app.getOutput().length;
+    assert.equal((await fetch(`${app.base}/action-race`, { headers: { rsc: '1' } })).status, 200);
+    assert.doesNotMatch(app.getOutput().slice(before), /\[guard\]/);
+  });
+});
+
+describe('the origin rule with a permissive cors() mounted and no csrf()', () => {
+  const app = serve({ TESTBED_CORS: '1', TESTBED_CSRF: 'off', TESTBED_ALLOWED_ORIGINS: 'https://admin.example' });
+
+  test('cors() answers the preflight the framework never would — and the call is refused all the same', async () => {
+    const preflight = await fetch(`${app.base}/action-race`, {
+      method: 'OPTIONS',
+      headers: {
+        Origin: 'https://evil.example',
+        'access-control-request-method': 'POST',
+        'access-control-request-headers': 'x-rsc-action,rsc,content-type',
+      },
+    });
+    // This is the hole: with it answered, a browser on that origin *will* send the call.
+    assert.equal(preflight.headers.get('access-control-allow-origin'), 'https://evil.example');
+    assert.match(preflight.headers.get('access-control-allow-headers') ?? '', /x-rsc-action/);
+
+    const label = `cors-${crypto.randomUUID()}`;
+    const res = await callFunction(app.base, '/action-race', 'recordRace', [label, 0], {
+      Origin: 'https://evil.example',
+      'sec-fetch-site': 'cross-site',
+      cookie: 'session=the-victims',
+    });
+    assert.equal(res.status, 403);
+    await res.text();
+    assert.equal(await applied(app.base, label), false, 'and the function did not run');
+  });
+
+  test('an origin the app named with trustServerFunctionOrigins may call', async () => {
+    const label = `trusted-${crypto.randomUUID()}`;
+    const res = await callFunction(app.base, '/action-race', 'recordRace', [label, 0], {
+      Origin: 'https://admin.example',
+      'sec-fetch-site': 'cross-site',
+    });
+    assert.equal(res.status, 200);
+    await res.text();
+    assert.equal(await applied(app.base, label), true);
+  });
+});
+
+describe("setServerFunctionRefresh('explicit'): the reply is the result unless the function asks for the page", () => {
+  const app = serve({ TESTBED_ACTION_REFRESH: 'explicit' });
+  const renders = async () => Number(/data-race-renders="">(\d+)</.exec(await (await fetch(`${app.base}/action-race`)).text())?.[1]);
+
+  test('a function that does not ask is answered with its result alone, and the page is not evaluated', async () => {
+    const before = await renders();
+    const label = `result-only-${crypto.randomUUID()}`;
+    const res = await callFunction(app.base, '/action-race', 'recordRace', [label, 0]);
+    const payload = await res.text();
+    assert.equal(res.status, 200);
+    assert.match(payload, /"resultOnly":true/);
+    assert.match(payload, new RegExp(`"returnValue":\\{"ok":true,"value":"${label}"\\}`));
+    assert.doesNotMatch(payload, /Action race/, 'no page in the reply');
+    // One render between the two readings: the second reading's own. The call added none.
+    assert.equal(await renders(), before + 1);
+    assert.equal(await applied(app.base, label), true, 'the function itself ran');
+  });
+
+  test('requestRefresh() puts the page in the reply — once, however many times it is called', async () => {
+    const before = await renders();
+    const label = `refreshed-${crypto.randomUUID()}`;
+    const res = await callFunction(app.base, '/action-race', 'recordRaceAndRefresh', [label]);
+    const payload = await res.text();
+    assert.doesNotMatch(payload, /"resultOnly"/);
+    assert.match(payload, /Action race/);
+    assert.match(payload, new RegExp(label), 'rendered after the write');
+    // The call's one render, then this reading's.
+    assert.equal(await renders(), before + 2);
+  });
+
+  test('a function that throws is still answered with its error and no page', async () => {
+    const res = await callFunction(app.base, '/users', 'createUser', ['', '']);
+    const payload = await res.text();
+    assert.equal(res.status, 500);
+    assert.match(payload, /"resultOnly":true/);
+    assert.match(payload, /"returnValue":\{"ok":false/);
+  });
+
+  test('a form posted without JavaScript is answered with the page, as a document has to be', async () => {
+    const res = await postSignalForm(app.base, '/users');
+    assert.equal(res.status, 303);
+    await res.body?.cancel();
+
+    const html = await (await fetch(`${app.base}/action-race`)).text();
+    const body = new FormData();
+    for (const [name, value] of Object.entries(hiddenFields(/<form[^>]*data-raise-signal[^>]*>(.*?)<\/form>/s.exec(html)?.[1] ?? '')))
+      body.set(name, value);
+    const missing = await fetch(`${app.base}/action-race`, { method: 'POST', headers: { Origin: app.base }, body });
+    assert.equal(missing.status, 404);
+    assert.match(await missing.text(), /<!DOCTYPE html>/i);
+  });
+  /*
+   * A reply with no page is still a flight render, and what a function returns can keep that render going
+   * long after the first byte: a promise, an async iterable. It ends, fails and is abandoned like any other.
+   */
+  const tickCount = async (label) => {
+    const payload = await (await callFunction(app.base, '/action-race', 'tickCount', [label])).text();
+    return Number(/"value":(-?\d+)/.exec(payload)?.[1]);
+  };
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  /** Starts `ticking`, reads until the reply has begun, and hangs up. */
+  const abandonTicking = async (label) => {
+    const abort = new AbortController();
+    // A hundred values, one every 30ms: three seconds if nobody stops it.
+    const res = await callFunction(app.base, '/action-race', 'ticking', [label, 100, 30], {}, abort.signal);
+    const reader = res.body.getReader();
+    await reader.read();
+    await sleep(100);
+    abort.abort();
+    await reader.read().catch(() => {});
+  };
+
+  test('a nested promise is resolved all the way down, in the one reply', async () => {
+    const res = await callFunction(app.base, '/action-race', 'nested', ['n']);
+    const payload = await res.text();
+    assert.match(payload, /"resultOnly":true/);
+    assert.match(payload, /"c":"n-deep"/, 'the innermost value arrived before the stream closed');
+  });
+
+  test('an async iterable is sent value by value, and the reply ends when it does', async () => {
+    const label = `ticks-${crypto.randomUUID()}`;
+    const res = await callFunction(app.base, '/action-race', 'ticking', [label, 4, 30]);
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    const arrivals = [];
+    let text = '';
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      text += decoder.decode(value, { stream: true });
+      arrivals.push(performance.now());
+    }
+    assert.ok(arrivals.length >= 3, `the values came in ${arrivals.length} reads rather than one at the end`);
+    assert.ok(arrivals.at(-1) - arrivals[0] >= 60, 'spread over the time the function took to make them');
+    assert.equal(await tickCount(label), 4);
+    assert.match(text, /"resultOnly":true/);
+  });
+
+  test('a client that goes away stops the function’s iterable, instead of leaving it to run to the end', async () => {
+    const label = `abandoned-${crypto.randomUUID()}`;
+    await abandonTicking(label);
+
+    await sleep(300);
+    const soonAfter = await tickCount(label);
+    await sleep(400);
+    const later = await tickCount(label);
+    assert.ok(soonAfter > 0 && soonAfter < 100, `it had started (${soonAfter})`);
+    assert.equal(later, soonAfter, 'and made nothing more once there was nobody to send it to');
+  });
+
+  test('a value that fails after the reply has started is reported to onServerError, once', async () => {
+    const label = `late-${crypto.randomUUID()}`;
+    const res = await callFunction(app.base, '/action-race', 'failsLate', [label]);
+    const payload = await res.text();
+    assert.equal(res.status, 200, 'the head was sent before the failure existed');
+    assert.match(payload, new RegExp(`"now":"${label}"`), 'the half that was ready arrived');
+    await sleep(100);
+    const reports = app
+      .getOutput()
+      .split('\n')
+      .filter((line) => line.includes('[error-reporter]') && line.includes(`late failure ${label}`));
+    assert.equal(reports.length, 1, 'the app’s reporter heard about it');
+    assert.match(reports[0], /\[error-reporter\] action \/action-race/);
+  });
+
+  test('a client that left is not reported as a failure of the function', async () => {
+    const before = app.getOutput().length;
+    await abandonTicking(`left-${crypto.randomUUID()}`);
+    await sleep(400);
+    assert.doesNotMatch(app.getOutput().slice(before), /\[error-reporter\]/);
   });
 });

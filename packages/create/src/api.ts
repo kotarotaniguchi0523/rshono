@@ -4,7 +4,7 @@
  * what another tool would call to scaffold an app itself:
  *
  * ```ts
- * import { packageManager, plan, writePlan } from '@rshono/create';
+ * import { packageManager, plan, writePlan } from '@rsvhono/create';
  *
  * const answers = { packageName: 'my-app', deploy: 'node', styling: 'css', formatter: 'prettier', linter: 'oxlint' };
  * writePlan(plan(answers, packageManager('npm')), './my-app');
@@ -35,5 +35,5 @@ export {
 } from './options.js';
 export { plan, type Plan } from './plan.js';
 export { detectPackageManager, packageManager, type PackageManager } from './pm.js';
-export { ESLINT_TYPESCRIPT, FRAMEWORK_DEPS, RSHONO_RANGE, TOOL_VERSIONS } from './versions.js';
+export { ESLINT_TYPESCRIPT, FRAMEWORK_DEPS, RSVHONO_RANGE, TOOL_VERSIONS } from './versions.js';
 export { conflictingEntries, writePlan } from './write.js';

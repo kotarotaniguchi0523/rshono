@@ -1,4 +1,4 @@
-import type { ErrorPageProps } from '@rshono/core';
+import type { ErrorPageProps } from '@rsvhono/core';
 import { Layout } from './layout';
 
 export default function ServerError({ error }: ErrorPageProps) {

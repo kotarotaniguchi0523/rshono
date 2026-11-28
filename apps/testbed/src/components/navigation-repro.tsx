@@ -1,7 +1,7 @@
 'use client';
 
 import { Suspense, use, useEffect } from 'react';
-import { AsyncBoundary, useNavigation } from '@rshono/core/client';
+import { AsyncBoundary, useNavigation } from '@rsvhono/core/client';
 
 let resource: Promise<void> | undefined;
 let resolveResource: (() => void) | undefined;

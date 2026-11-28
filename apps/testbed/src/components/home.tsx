@@ -4,7 +4,7 @@ import { RouteIndex } from './route-index';
 
 export default function Home() {
   return (
-    <Layout title="rshono — testbed">
+    <Layout title="rsvhono — testbed">
       <RouteIndex />
       <Counter />
     </Layout>

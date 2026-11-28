@@ -1,12 +1,12 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useNavigation } from '@rshono/core/client';
+import { useNavigation } from '@rsvhono/core/client';
 
 /**
  * A top progress bar for soft navigations, so a slow page still feels answered.
  *
- * This used to be a `@rshono/core/client` export. It reads nothing but `router.pending`, so it was app
+ * This used to be a `@rsvhono/core/client` export. It reads nothing but `router.pending`, so it was app
  * code with styling opinions that happened to ship inside the framework — it lives here now, where its
  * colour and height are this site's business rather than a framework option.
  */
@@ -33,7 +33,7 @@ export function NavigationProgress() {
 
   return (
     <div
-      data-rshono-progress=""
+      data-rsvhono-progress=""
       aria-hidden="true"
       style={{
         position: 'fixed',

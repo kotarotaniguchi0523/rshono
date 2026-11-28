@@ -4,11 +4,11 @@
  * are a file each and this is what they have in common.
  */
 
-import { publicUrl } from '@rshono/core/server';
+import { publicUrl } from '@rsvhono/core/server';
 import type { Context } from 'hono';
 
 export const SUMMARY =
-  'rshono is a minimalist web framework built on Hono, Rspack and React Server Components. ' +
+  'rsvhono is a minimalist web framework built on Hono, Vite and React Server Components. ' +
   'One required file (src/routes.ts), one optional file (src/server.ts), and you get a dev server with HMR, ' +
   'streaming SSR with RSC hydration, server actions with progressive enhancement, soft navigation, ' +
   'build-time prerendering, and hard env/secret safety.';
@@ -17,11 +17,11 @@ export const SUMMARY =
  * The origin to build absolute links against.
  *
  * Read off the request rather than from `siteUrl`, because these are dynamic endpoints and there is a
- * real request to read — which also means the file is correct under `rshono dev`, where a baked-in
+ * real request to read — which also means the file is correct under `rsvhono dev`, where a baked-in
  * `siteUrl` would send a reader to production.
  *
  * `publicUrl(c)` rather than `c.req.url`, which is the address this server was *reached* on. Under
- * `rshono dev` that is the app worker's random `127.0.0.1` port — the front-end proxies to it, and
+ * `rsvhono dev` that is the app worker's random `127.0.0.1` port — the front-end proxies to it, and
  * `fetch` sets `Host` from the address it dials, so every link came out pointing at a port only the
  * dev server knows about. `publicUrl` reads `X-Forwarded-Host` / `-Proto` instead, which that proxy
  * sets and `trustProxy` — forced on under `dev` — makes trustworthy.
@@ -31,22 +31,22 @@ export function origin(c: Context): string {
 }
 
 /**
- * The projects an rshono app is written *against*, each of which publishes an `llms.txt` of its own.
+ * The projects an rsvhono app is written *against*, each of which publishes an `llms.txt` of its own.
  *
- * rshono's documentation stops at its seams: `src/server.ts` is a Hono app, a page is a React server
- * component, and the build is Rspack's. A reader that needs the far side of one of those seams is better
+ * rsvhono's documentation stops at its seams: `src/server.ts` is a Hono app, a page is a React server
+ * component, and the build is Vite's. A reader that needs the far side of one of those seams is better
  * served by the upstream file than by anything this site could restate about it.
  */
 const UPSTREAM = [
   {
     title: 'Hono',
     url: 'https://hono.dev/llms.txt',
-    description: 'The server rshono runs on — `src/server.ts` is a Hono app, and an endpoint handler is a Hono handler.',
+    description: 'The server rsvhono runs on — `src/server.ts` is a Hono app, and an endpoint handler is a Hono handler.',
   },
   {
-    title: 'Rspack',
-    url: 'https://rspack.rs/llms.txt',
-    description: 'The bundler behind `rshono dev` and `rshono build`. rshono writes the config; the `rspack` hook extends it.',
+    title: 'Vite',
+    url: 'https://vite.dev/llms.txt',
+    description: 'The bundler behind `rsvhono dev` and `rsvhono build`. rsvhono writes the config; the `vite` option extends it.',
   },
   {
     title: 'React',

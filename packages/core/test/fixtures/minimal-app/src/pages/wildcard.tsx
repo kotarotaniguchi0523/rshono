@@ -1,4 +1,4 @@
-import type { PageProps } from '@rshono/core';
+import type { PageProps } from '@rsvhono/core';
 
 export default function Wildcard({ url }: PageProps) {
   return (

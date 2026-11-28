@@ -12,10 +12,10 @@
  * overload-resolution report against the argument — which is why every call below is kept on one line, where
  * a directive above it covers wherever inside it the error lands.
  *
- * Outside `src/`, so nothing bundles it: `tsconfig.json` includes this directory and `rshono build` does
+ * Outside `src/`, so nothing bundles it: `tsconfig.json` includes this directory and `rsvhono build` does
  * not.
  */
-import { defineRoutes, type PageProps } from '@rshono/core';
+import { defineRoutes, type PageProps } from '@rsvhono/core';
 
 const anyPage = () => Promise.resolve({ default: (_props: PageProps) => null });
 const idPage = () => Promise.resolve({ default: (_props: PageProps<'/u/:id'>) => null });

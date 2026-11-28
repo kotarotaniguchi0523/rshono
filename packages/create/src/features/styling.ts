@@ -3,12 +3,12 @@ import { TOOL_VERSIONS } from '../versions.js';
 import type { Feature } from './types.js';
 
 /**
- * Tailwind is a PostCSS plugin and nothing more, which is the whole of this feature: four packages, plus an
- * overlay carrying `postcss.config.mjs`, an `rshono.config.ts` whose `rspack` hook puts postcss-loader in front
- * of the CSS parser, a Tailwind entry stylesheet, and the two views rewritten in utilities.
+ * Tailwind is a PostCSS plugin and nothing more, which is the whole of this feature: three packages, plus an
+ * overlay carrying `postcss.config.mjs`, a Tailwind entry stylesheet, and the two views rewritten in
+ * utilities. No build config: Vite runs PostCSS itself whenever a `postcss.config.mjs` is there.
  *
- * `postcss` is the app's dependency rather than the framework's: rshono compiles CSS natively, so an app that
- * wants no plugin chain installs none.
+ * `postcss` is the app's dependency rather than the framework's, so an app that wants no plugin chain
+ * installs none.
  */
 const TAILWIND: Feature = {
   id: 'tailwind',
@@ -17,7 +17,6 @@ const TAILWIND: Feature = {
     tailwindcss: TOOL_VERSIONS.tailwindcss,
     '@tailwindcss/postcss': TOOL_VERSIONS['@tailwindcss/postcss'],
     postcss: TOOL_VERSIONS.postcss,
-    'postcss-loader': TOOL_VERSIONS['postcss-loader'],
   },
 };
 

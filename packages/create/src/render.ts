@@ -33,7 +33,7 @@ export function tokensFor(answers: Answers, features: Feature[], pm: PackageMana
 export function render(contents: string, tokens: Tokens, source: string): string {
   return contents.replace(TOKEN_PATTERN, (token) => {
     const value = tokens[token];
-    if (value === undefined) throw new Error(`[create-rshono] ${source} uses unknown template token ${token}`);
+    if (value === undefined) throw new Error(`[create-rsvhono] ${source} uses unknown template token ${token}`);
     return value;
   });
 }

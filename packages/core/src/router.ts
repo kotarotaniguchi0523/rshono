@@ -1,7 +1,7 @@
 import type { Env, Handler } from 'hono';
 import type { ParamKeys, ParamKeyToRecord } from 'hono/types';
 import type { ReactNode } from 'react';
-// Type-only, so importing `@rshono/core` pulls in none of `context.ts`'s runtime machinery.
+// Type-only, so importing `@rsvhono/core` pulls in none of `context.ts`'s runtime machinery.
 import type { RequestContext } from './runtime/context.js';
 
 type Simplify<T> = { [K in keyof T]: T[K] } & {};
@@ -41,7 +41,7 @@ export type PathParams<P extends string> =
  *
  * @example
  * ```tsx
- * import type { PageProps } from '@rshono/core';
+ * import type { PageProps } from '@rsvhono/core';
  *
  * export default async function Profile({ params, url }: PageProps<'/profile/:id'>) {
  *   const user = await db.getUser(params.id); // params.id is string
@@ -303,7 +303,7 @@ export interface ErrorPageInfo {
  *
  * @example
  * ```tsx
- * import type { ErrorPageProps } from '@rshono/core';
+ * import type { ErrorPageProps } from '@rsvhono/core';
  *
  * export default function ServerError({ error }: ErrorPageProps) {
  *   return (
@@ -407,7 +407,7 @@ type RoutesOf<T> = T extends readonly Route[] ? T : T extends { routes: infer R 
 
 /**
  * Declares the app's route table. Export the result as `routes` from `src/routes.ts` — the one file
- * rshono requires. It only ever runs on the server, so importing server-only modules from it (inside
+ * rsvhono requires. It only ever runs on the server, so importing server-only modules from it (inside
  * `staticPaths`, say) is safe.
  *
  * Takes a {@link RouteConfig} — the `routes` array plus the optional `notFound` and `error` pages — or a
@@ -428,7 +428,7 @@ type RoutesOf<T> = T extends readonly Route[] ? T : T extends { routes: infer R 
  * @example
  * ```ts
  * // src/routes.ts
- * import { defineRoutes } from '@rshono/core';
+ * import { defineRoutes } from '@rsvhono/core';
  *
  * export const routes = defineRoutes({
  *   routes: [
